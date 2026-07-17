@@ -38,8 +38,8 @@ out_of_scope:
 
 - **类型定义**（第 76-221 行）：`InitSetupResult`、`InitSetupProps`、`PromptStep`、`ModelSelectionOption`、`OnboardingMode` 等
 - **流程辅助函数**（第 371-535 行）：`needsCredentialSetup()`、`needsCredentialStep()`、`hasValidStoredToken()`、`getInitialStep()` 等
-- **`InitSetup` 组件**（第 537-1205 行）：核心 state machine，`useInput` 处理键盘交互，`useEffect` 驱动 OAuth 和初始化
-- **Prompt 组件**（第 2605-3217 行）：根据当前 `step` 渲染对应的交互界面（provider 选择列表、API key 输入框、模型列表等）
+- **`InitSetup` 组件**（第 537-2548 行）：核心 state machine，`useInput` 处理键盘交互，`useEffect` 驱动 OAuth 和初始化
+- **Prompt 组件**（第 2550-3217 行）：根据当前 `step` 渲染对应的交互界面（provider 选择列表、API key 输入框、模型列表等）
 - **SetupStep / SetupPanel 辅助组件**（第 3219-3555 行）：步骤状态指示器和面板装饰
 - **`getInitialStep` 和导航逻辑**（第 3557-3916 行）：步骤跳转链
 - **数据源配置辅助**（第 4195-4333 行）：connector 配置、路径处理等
@@ -124,7 +124,7 @@ run-mode (仅 allowModeSelection=true)
 
 ## 3. Ink 组件树 (Ink Component Tree)
 
-`InitSetup`（`src/credentials.tsx:537-1205`）内部的组件层级：
+`InitSetup`（`src/credentials.tsx:537-2548`）内部的组件层级：
 
 ```
 InitSetup (root state machine)
@@ -211,7 +211,7 @@ saveCredentialUpdates(options)
 
 ### 管理的环境变量
 
-`MANAGED_ENV_KEYS`（`src/env.ts:81-132`）列出了 OpenWiki 读取或持久化的所有环境变量（51 个），涵盖：
+`MANAGED_ENV_KEYS`（`src/env.ts:81-132`）列出了 OpenWiki 读取或持久化的所有环境变量（50 个），涵盖：
 
 - 每个 Provider 的 API key（`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY` 等）
 - 每个 Provider 的配置变量（`ANTHROPIC_BASE_URL`、`BEDROCK_AWS_REGION`、`GOOGLE_CLOUD_PROJECT` 等）
@@ -283,8 +283,8 @@ OAuth 登录步骤（`oauth-login`）有特殊处理：
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
 | `src/credentials.tsx:103-129` | `PromptStep` | 26 个步骤的联合类型 |
-| `src/credentials.tsx:537-1205` | `InitSetup` | 核心 state machine 组件 |
-| `src/credentials.tsx:2605-3217` | `Prompt` | 根据 step 渲染对应 UI 的组件 |
+| `src/credentials.tsx:537-2548` | `InitSetup` | 核心 state machine 组件 |
+| `src/credentials.tsx:2550-3217` | `Prompt` | 根据 step 渲染对应 UI 的组件 |
 | `src/credentials.tsx:3557-3624` | `getInitialStep` | 确定初始步骤 |
 | `src/credentials.tsx:3626-3790` | `getNextStepAfter*` | 步骤跳转链 |
 | `src/credentials.tsx:1874-1906` | `completeSetup` | 完成引导，组装结果并回调 |

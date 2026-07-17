@@ -23,7 +23,7 @@ out_of_scope:
 
 ## 1. 概述（Overview）
 
-OpenWiki 的 agent 不是一个通用聊天机器人（general chatbot）。`src/agent/prompt.ts` 文件（473 行）是整个产品规则的编码层（product rule encoding layer）——每一条 system prompt 指令都直接约束 agent 朝着"产出结构化、可导航、可信赖的文档"的目标前进。提示词系统由三个核心函数组装：
+OpenWiki 的 agent 不是一个通用聊天机器人（general chatbot）。`src/agent/prompt.ts` 文件（473 行）是整个产品规则的编码层（product rule encoding layer）——每一条 system prompt 指令都直接约束 agent 朝着"产出结构化、可导航、可信赖的文档"的目标前进。提示词系统由四个核心函数组装：
 
 | 函数 | 职责 | 源码位置 |
 |------|------|----------|
@@ -419,7 +419,7 @@ Code mode 和 Personal mode 的提示词差异通过 `getOutputPromptConfig()` �
 | `src/agent/prompt.ts:262-310` | `createUserPrompt` | 用户 prompt 组装函数 |
 | `src/agent/prompt.ts:8-14` | `formatLastUpdate` | 元数据 JSON 格式化 |
 | `src/agent/prompt.ts:312-314` | `formatWikiGoal` | Wiki goal 格式化 |
-| `src/agent/prompt.ts:336-460` | `getOutputPromptConfig` | 输出模式配置表（39 个字段的两个分支） |
+| `src/agent/prompt.ts:336-460` | `getOutputPromptConfig` | 输出模式配置表（17 个字段的两个分支） |
 | `src/agent/prompt.ts:462-473` | `appendUserMessage` | 将用户附加消息追加到 prompt 末尾 |
 | `src/agent/prompt.ts:316-334` | `OutputPromptConfig` | 输出提示词配置的 TypeScript 接口类型 |
 | `src/agent/types.ts:1` | `OpenWikiCommand` | 命令辨别联合类型 `"chat" \| "init" \| "update"` |

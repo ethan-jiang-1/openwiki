@@ -4,9 +4,9 @@ doc_type: "reference-data"
 status: "active"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
+updated: "2026-07-18"
 sync_event: "2026-07-17"
-last_updated: "2026-07-17"
+last_updated: "2026-07-18"
 baseline_ref: "origin/main"
 baseline_commit: "d4e94ab"
 purpose: "回答「哪段源码由哪篇 _digested doc 覆盖」——给 upstream delta triage 和覆盖审计做索引"
@@ -71,10 +71,10 @@ out_of_scope:
 
 | Source area | 覆盖文档 | 覆盖度 |
 |-------------|---------|--------|
-| `src/connectors/registry.ts` — 连接器注册 | `06-connectors-and-data-sources/01-connector-registry.md` | gap |
-| `src/connectors/types.ts` — 连接器类型 | `06-connectors-and-data-sources/02-connector-lifecycle.md` | gap |
+| `src/connectors/registry.ts` — 连接器注册 | `06-connectors-and-data-sources/01-connector-registry.md` | full |
+| `src/connectors/types.ts` — 连接器类型 | `06-connectors-and-data-sources/01-connector-registry.md`（细节待 `02-connector-lifecycle.md`，计划中） | partial |
 | `src/connectors/io.ts` — 连接器 I/O | `06-connectors-and-data-sources/02-connector-lifecycle.md` | gap |
-| `src/connectors/tools.ts` — agent 工具暴露（479 行） | `06-connectors-and-data-sources/03-connector-tools.md` | gap |
+| `src/connectors/tools.ts` — agent 工具暴露（479 行） | `06-connectors-and-data-sources/01-connector-registry.md`（细节待 `03-connector-tools.md`，计划中） | partial |
 | `src/connectors/mcp-client.ts` — MCP 客户端（867 行） | `06-connectors-and-data-sources/11-mcp-subsystem.md` | gap |
 | `src/connectors/mcp-runtime.ts` — MCP 运行时 | `06-connectors-and-data-sources/11-mcp-subsystem.md` | gap |
 | `src/connectors/sources/git-repo.ts` | `06-connectors-and-data-sources/04-git-repo-connector.md` | gap |
@@ -89,8 +89,8 @@ out_of_scope:
 
 | Source area | 覆盖文档 | 覆盖度 |
 |-------------|---------|--------|
-| `src/auth/oauth.ts` — OAuth 2.0 PKCE 流程（637 行） | `07-authentication-and-oauth/01-oauth-pkce-flow.md` | gap |
-| `src/auth/providers.ts` — 提供商定义 | `07-authentication-and-oauth/02-auth-providers.md` | gap |
+| `src/auth/oauth.ts` — OAuth 2.0 PKCE 流程（637 行） | `07-authentication-and-oauth/01-oauth-pkce-flow.md` | full |
+| `src/auth/providers.ts` — 提供商定义 | `07-authentication-and-oauth/01-oauth-pkce-flow.md`（细节待 `02-auth-providers.md`，计划中） | partial |
 | `src/auth/tokens.ts` — token 存储刷新过期 | `07-authentication-and-oauth/03-token-management.md` | gap |
 | `src/auth/configure.ts` — 认证配置生成 | `07-authentication-and-oauth/04-auth-configuration.md` | gap |
 | `src/auth/ngrok.ts` — HTTPS 隧道 | `07-authentication-and-oauth/05-ngrok-tunnel.md` | gap |
@@ -100,14 +100,14 @@ out_of_scope:
 
 | Source area | 覆盖文档 | 覆盖度 |
 |-------------|---------|--------|
-| `src/ingestion.ts` — 摄取编排（421 行） | `08-ingestion-and-personal-mode/01-ingestion-pipeline.md` | gap |
+| `src/ingestion.ts` — 摄取编排（421 行） | `08-ingestion-and-personal-mode/01-ingestion-pipeline.md` | full |
 | `src/onboarding.ts` — 首次配置（478 行） | `08-ingestion-and-personal-mode/02-onboarding.md` | gap |
 
 ## G. 调度与 CI（Scheduling and CI）
 
 | Source area | 覆盖文档 | 覆盖度 |
 |-------------|---------|--------|
-| `src/schedules.ts` — LaunchAgent 管理（918 行） | `09-scheduling-and-ci/01-macos-launchagents.md` | gap |
+| `src/schedules.ts` — LaunchAgent 管理（918 行） | `09-scheduling-and-ci/01-macos-launchagents.md` | full |
 | `.github/workflows/checks.yml` — CI 流水线 | `09-scheduling-and-ci/02-ci-workflows.md` | gap |
 | `.github/workflows/openwiki-update.yml` — 定时更新 | `09-scheduling-and-ci/03-scheduled-openwiki-updates.md` | gap |
 
@@ -115,11 +115,11 @@ out_of_scope:
 
 | Source area | 覆盖文档 | 覆盖度 |
 |-------------|---------|--------|
-| `src/credentials.tsx` — 交互式凭据向导（4337 行） | `10-configuration-and-telemetry/01-credential-onboarding.md` | gap |
-| `src/env.ts` — .env 管理 | `10-configuration-and-telemetry/02-environment-and-config.md` | gap |
-| `src/constants.ts` — 常量与配置（609 行） | `10-configuration-and-telemetry/02-environment-and-config.md` | gap |
-| `src/openwiki-home.ts` — 家目录 | `10-configuration-and-telemetry/02-environment-and-config.md` | gap |
-| `src/fs-errors.ts` — 文件系统错误 | `10-configuration-and-telemetry/02-environment-and-config.md` | gap |
+| `src/credentials.tsx` — 交互式凭据向导（4337 行） | `10-configuration-and-telemetry/01-credential-onboarding.md` | full |
+| `src/env.ts` — .env 管理 | `10-configuration-and-telemetry/02-environment-and-config.md` | full |
+| `src/constants.ts` — 常量与配置（609 行） | `10-configuration-and-telemetry/02-environment-and-config.md` | full |
+| `src/openwiki-home.ts` — 家目录 | `10-configuration-and-telemetry/02-environment-and-config.md` | full |
+| `src/fs-errors.ts` — 文件系统错误 | `10-configuration-and-telemetry/02-environment-and-config.md` | full |
 | `src/telemetry/client.ts` — PostHog 客户端 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
 | `src/telemetry/config.ts` — 遥测配置 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
 | `src/telemetry/errors.ts` — 错误报告 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
@@ -130,7 +130,7 @@ out_of_scope:
 | `src/telemetry/senders.ts` — 事件发送 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
 | `src/telemetry/types.ts` — 遥测类型 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
 | `src/diagnostics.ts` — 诊断 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
-| `src/utils.ts` — 通用工具 | `10-configuration-and-telemetry/02-environment-and-config.md` | gap |
+| `src/utils.ts` — 通用工具 | `10-configuration-and-telemetry/02-environment-and-config.md`（该文档已存在但未覆盖 utils.ts） | gap |
 
 ## I. 测试（Testing）
 
@@ -142,9 +142,22 @@ out_of_scope:
 
 ## 统计
 
+> 按**唯一源文件**计数（`src/agent/index.ts`、`src/env.ts`、`src/constants.ts` 在多个分区出现，各只计一次，取最高覆盖度）。
+
 - **总源文件数**：52（src/ 下 52 个 .ts/.tsx 文件）
 - **已映射到文档的源文件**：52（100%）
-- **覆盖度 full**：9
-- **覆盖度 partial**：0
-- **覆盖度 gap**：42
-- **覆盖度 gap\***（有意不覆盖）：1（test/ 目录）
+- **覆盖度 full**：16
+  - A: 2（cli.tsx、commands.ts）
+  - B: 5（agent/index.ts、prompt.ts、agent/utils.ts、docs-only-backend.ts、agent/types.ts）
+  - C: 2（constants.ts、env.ts）
+  - D: 1（connectors/registry.ts）
+  - E: 1（auth/oauth.ts）
+  - F: 1（ingestion.ts）
+  - G: 1（schedules.ts）
+  - H: 3（credentials.tsx、openwiki-home.ts、fs-errors.ts）
+  - 合计 2+5+2+1+1+1+1+3 = 16
+- **覆盖度 partial**：3（connectors/types.ts、connectors/tools.ts、auth/providers.ts）
+- **覆盖度 gap**：33（52 − 16 full − 3 partial = 33）
+  - A: 2，B: 3，C: 2，D: 10，E: 4，F: 1，G: 0，H: 11（含 9 个 telemetry 文件、diagnostics.ts、utils.ts）
+- **覆盖度 gap\***（有意不覆盖）：1（test/ 目录，不计入 52 个 src 文件）
+- 注：G 分区的 `.github/workflows/*.yml` 两行不属于 src/ 源文件，不计入以上统计。

@@ -86,7 +86,7 @@ export async function createRunContext(
 | `outputMode === "local-wiki"` | 固定字符串，说明连接器原始数据路径优先 | `utils.ts:62-65` |
 | `command !== "chat"` 且 `outputMode === "repository"` | 调用 `createGitSummary()`，动态组装 Git 证据 | `utils.ts:70` |
 
-三种情况都会调用 `readLastUpdate()` 获取上一轮更新的元数据，以及 `readRunWikiGoal()` 获取 wiki 目标描述（来自 `openwiki/quickstart.md` 中的指令或 onboarding 配置）。
+三种情况都会调用 `readLastUpdate()` 获取上一轮更新的元数据，以及 `readRunWikiGoal()` 获取 wiki 目标描述（来自 `openwiki/INSTRUCTIONS.md` 中的指令或 onboarding 配置）。
 
 **关键设计决策**：chat 模式和 local-wiki 模式明确跳过 Git 证据收集。Chat 不需要；local-wiki 模式的数据来源是连接器（connector）的原始数据路径和 OpenWiki connector 工具，而非 Git 仓库的 diff。
 
@@ -258,7 +258,7 @@ export type UpdateMetadata = {
   updatedAt: string;       // ISO 8601 时间戳，new Date().toISOString()
   command: OpenWikiCommand; // "init" | "update"（"chat" 不写入）
   gitHead?: string;        // Git HEAD commit hash，local-wiki 模式下为 undefined
-  model: string;           // 使用的 AI 模型 ID，如 "claude-sonnet-4-5"
+  model: string;           // 使用的 AI 模型 ID，如 "claude-haiku-4-5"
 };
 ```
 
@@ -512,7 +512,7 @@ Git status 短格式中，前三个字符是状态码（如 ` M`、`??`、`R `�
 
 | 函数 | 源码行 | 职责 |
 |------|--------|------|
-| `readRunWikiGoal()` | `utils.ts:75-84` | 读取 wiki 目标：repository 模式读取 `openwiki/quickstart.md` 中的指令，local-wiki 模式读取 onboarding 配置 |
+| `readRunWikiGoal()` | `utils.ts:75-84` | 读取 wiki 目标：repository 模式通过 `readRepositoryWikiInstructions()` 读取 `openwiki/INSTRUCTIONS.md`，local-wiki 模式读取 onboarding 配置 |
 | `getWikiContentRoot()` | `utils.ts:303-308` | 确定 wiki 内容根目录：repository → `<cwd>/openwiki`，local-wiki → `<cwd>` |
 | `getMetadataFilePath()` | `utils.ts:310-317` | 确定元数据文件路径：repository → `<cwd>/openwiki/.last-update.json`，local-wiki → `<cwd>/.last-update.json` |
 | `readSnapshotFile()` | `utils.ts:322-332` | 读取文件用于快照，容忍竞态错误（`EISDIR`/`ENOENT`/`ENOTDIR`）时返回 `null` |
@@ -527,9 +527,9 @@ Git status 短格式中，前三个字符是状态码（如 ` M`、`??`、`R `�
 
 ## 8. 关键设计决策
 
-### 8.1 为什么快照排除了 `.last-update.json` 但不排除整个 `openwiki/`
+### 8.1 为什么快照排除了 `.last-update.json`
 
-因为如果排除 `.last-update.json`，元数据自身的写入不会触发快照变化——这正是期望的行为。否则每次更新后写入元数据都会导致快照变化，下次运行又检测到变化，形成无限循环。
+因为排除 `.last-update.json` 后，元数据自身的写入不会触发快照变化——这正是期望的行为。否则每次更新后写入元数据都会导致快照变化，下次运行又检测到变化，形成无限循环。
 
 ### 8.2 为什么 `runGit()` 不抛异常
 

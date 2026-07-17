@@ -28,7 +28,7 @@ out_of_scope:
 `src/cli.tsx` 的结构从上到下分为三层：
 
 - **核心类型定义**（第 92-157 行）：`RunState` 辨别联合（discriminated union）、`RunLogItem`、`CompletedRun`、`ErrorDiagnostic`、`AppProps`
-- **React 组件树**（第 250-1334 行）：`App` 根组件和所有子组件（`HelpView`、`DryRunView`、`RunView`、`RunLogLine`、`MarkdownText` 等）
+- **React 组件树**（自第 228 行起）：`App` 根组件（250-933）和所有子组件；子组件定义散布在文件各处（如 `MarkdownText` 在 1405 行、`ChatInput` 在 1628 行、`Panel`/`Rows` 在 3518-3551 行）
 - **顶层入口与命令执行**（第 3553-4019 行）：参数解析、启动路由、分支到 TUI 或非交互路径；各非 TUI 命令的执行函数（`runAuthCommand`、`runNgrokCommand`、`runCronCommand`、`runIngestCommand`、`runPrintCommand`）
 
 文件最核心的组件是 `App`（第 250-933 行），它管理全局 UI 状态（`runState`、`completedRuns`、`sessionModelId` 等），并根据当前状态渲染不同的子树。
@@ -47,7 +47,7 @@ process.argv → parseCommand(argv) → loadOpenWikiEnv() → resolveStartupComm
 
 ### Step 2: 加载环境变量 (env loading)
 
-`src/cli.tsx:3556-3564` 只有 run、auth、cron、ingest、ngrok 命令才调用 `loadOpenWikiEnv()`，加载 `~/.openwiki/.env` 中的凭据和配置。
+`src/cli.tsx:3556-3564` 只有 run（且非 `--dry-run`）、auth、cron、ingest、ngrok 命令才调用 `loadOpenWikiEnv()`，加载 `~/.openwiki/.env` 中的凭据和配置。
 
 ### Step 3: 启动路由 (startup routing)
 
@@ -67,7 +67,7 @@ process.argv → parseCommand(argv) → loadOpenWikiEnv() → resolveStartupComm
 | 6 | `shouldRunNonInteractively()` 为真 | `runPrintCommand()` -- stdout 流式输出 |
 | 7 | 兜底 | `render(<App command={command} />)` -- Ink TUI |
 
-**`shouldRunNonInteractively()`**（`src/commands.ts:598-607`）返回 true 当命令是 `run` 且满足 `command.print || (!stdinIsTTY && command.shouldStart)`。这意味着 `-p/--print` 标志、管道输入、CI 环境会绕过 Ink，走纯文本输出路径。
+**`shouldRunNonInteractively()`**（`src/commands.ts:598-607`）返回 true 当命令是 `run` 且非 `dryRun`，并满足 `command.print || (!stdinIsTTY && command.shouldStart)`。这意味着 `-p/--print` 标志、管道输入、CI 环境会绕过 Ink，走纯文本输出路径（`--dry-run` 除外）。
 
 ## 3. Ink TUI 组件树 (Ink TUI Component Tree)
 
@@ -100,7 +100,8 @@ render(...)                                    // src/cli.tsx:3600-3605
 |------|------|------|
 | `App` | 250-933 | 根组件，管理全部 UI 状态和副作用 |
 | `Header` | 1073-1202 | 显示 OpenWiki ASCII logo、模型名、副标题 |
-| `StatusLine` | 1204-1247 | 彩色标签-值行（支持 tone: active/success/error/muted） |
+| `StatusLine` | 1204-1223 | 彩色标签-值行（支持 tone: active/success/error/muted） |
+| `IngestionSummary` | 1225-1238 | Ingestion 成功后的各 source 结果摘要面板 |
 | `RunView` | 1249-1311 | 流式运行视图，包裹 `RunLogLine` 列表 + 状态头 |
 | `RunLogLine` | 1313-1385 | 单条日志行，按 `RunLogItem.type` 分发为 tool/text/debug 渲染 |
 | `MarkdownText` | 1405-1422 | 用 `marked.lexer()` 解析 Markdown token 并用 Ink 组件渲染 |
@@ -110,7 +111,9 @@ render(...)                                    // src/cli.tsx:3600-3605
 | `Panel` | — | 可折叠的带标题边框面板 |
 | `Rows` | — | 对齐的标签-描述行列表 |
 | `HelpView` | 935-972 | 帮助信息视图，渲染 `helpContent`（来自 `src/commands.ts:628`） |
-| `DryRunView` | 974-1071 | 开发模式下的执行计划预览 |
+| `DryRunView` | 974-1022 | 开发模式下的执行计划预览 |
+| `CredentialDiagnosticsPanel` | 1024-1051 | 凭据诊断信息面板 |
+| `ErrorDiagnosticsPanel` | 1053-1071 | 错误诊断信息面板 |
 | `InitSetup` | — | 交互式凭据配置向导（来自 `src/credentials.tsx`） |
 
 ## 4. CliCommand 辨别联合 (CliCommand Discriminated Union)
@@ -277,9 +280,12 @@ function shouldAutoExitStartupRun(command: CliCommand): boolean {
 | `src/cli.tsx:329-409` | `startIngestionRun` | Ingestion 运行启动与生命周期 |
 | `src/cli.tsx:463-665` | `useEffect` x2 | Agent run 启动编排 + auto-exit 副作用 |
 | `src/cli.tsx:935-972` | `HelpView` | 帮助视图 |
-| `src/cli.tsx:974-1071` | `DryRunView` | 开发 dry-run 执行计划预览 |
+| `src/cli.tsx:974-1022` | `DryRunView` | 开发 dry-run 执行计划预览 |
+| `src/cli.tsx:1024-1051` | `CredentialDiagnosticsPanel` | 凭据诊断信息面板 |
+| `src/cli.tsx:1053-1071` | `ErrorDiagnosticsPanel` | 错误诊断信息面板 |
 | `src/cli.tsx:1073-1202` | `Header` | 顶部状态栏，ASCII logo |
-| `src/cli.tsx:1204-1247` | `StatusLine` | 彩色标签-值行组件 |
+| `src/cli.tsx:1204-1223` | `StatusLine` | 彩色标签-值行组件 |
+| `src/cli.tsx:1225-1238` | `IngestionSummary` | Ingestion 结果摘要面板 |
 | `src/cli.tsx:1249-1311` | `RunView` | 流式运行视图 |
 | `src/cli.tsx:1313-1385` | `RunLogLine` | 单条日志行，按 type 分发渲染 |
 | `src/cli.tsx:1387-1403` | `getActiveRunningToolLogId`, `getSpinnerFrame` | 动画辅助函数 |
@@ -290,8 +296,9 @@ function shouldAutoExitStartupRun(command: CliCommand): boolean {
 | `src/cli.tsx:2798-2826` | `completeToolGroupItem` | 工具组状态更新 |
 | `src/cli.tsx:3553-3606` | 顶层入口 | 参数解析 → 启动路由 → 分支到 TUI 或非交互路径 |
 | `src/cli.tsx:3608-3621` | `runNgrokCommand` | ngrok 命令执行 |
-| `src/cli.tsx:3623-3719` | `runCronCommand` | cron 命令执行 |
-| `src/cli.tsx:3721-3862` | `runIngestCommand` | ingest 命令执行 |
+| `src/cli.tsx:3623-3660` | `runCronCommand` | cron 命令执行 |
+| `src/cli.tsx:3662-3815` | `printCronSchedules` 及格式化辅助函数 | cron 调度状态打印与格式化 |
+| `src/cli.tsx:3817-3850` | `runIngestCommand` | ingest 命令执行 |
 | `src/cli.tsx:3940-3950` | `getRunModeCwd`, `getRunModeOutputMode` | 运行模式 → 目录/输出模式的映射 |
 | `src/cli.tsx:3951-3959` | `shouldAutoExitStartupRun` | Auto-exit 判断逻辑 |
 | `src/cli.tsx:3965-4005` | `runPrintCommand` | 非交互模式下的 agent 运行 |

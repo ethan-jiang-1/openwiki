@@ -59,13 +59,13 @@ macOS launchd 按 StartCalendarInterval 触发
 - **pmset**（`osascript` + administrator privileges 调用）：管理 macOS 电源调度
 - **openwiki-home**（`ensureOpenWikiHome`, `openWikiHomeDir`）：家目录管理
 
-文件导出 11 个公开函数和 8 个类型定义，内部包含 25 个私有辅助函数。
+文件导出 10 个公开函数和 7 个类型定义，内部包含 30 个私有辅助函数。
 
 ---
 
 ## 2. 类型体系（Type System）
 
-`schedules.ts:15-77` 定义了调度子系统的完整类型体系，所有类型均导出供外部使用：
+`schedules.ts:15-77` 定义了调度子系统的完整类型体系。其中 `CalendarInterval` 和 `RepeatScheduleTime` 为内部类型（未导出，见 2.6），其余类型均导出供外部使用：
 
 ### 2.1 CronValidationResult（`schedules.ts:15-25`）
 
@@ -255,7 +255,7 @@ async function pauseConnectorSchedules(
    - 如果无 `ingestionSchedule` 配置，直接返回
    - 如果 `pausedAt` 已存在（已经暂停），直接返回（幂等操作）
 
-2. **深拷贝配置并设置 pausedAt**（`:242-250`）：将 `pausedAt` 设为当前 ISO 时间戳，更新 `updatedAt`
+2. **浅拷贝配置（单层）并设置 pausedAt**（`:242-250`）：将 `pausedAt` 设为当前 ISO 时间戳，更新 `updatedAt`
 
 3. **卸载 LaunchAgent**（`:251`）：调用 `unloadLaunchAgent()`，执行 `launchctl bootout`
 
@@ -279,7 +279,7 @@ async function resumeConnectorSchedules({
 
 2. **重新安装调度**（`:287-291`）：调用 `installConnectorSchedule()`，使用保存的 cron 表达式和固定的 `connectorId: "git-repo"`
 
-3. **更新配置**（`:292-301`）：深拷贝配置，清除 `pausedAt`（恢复为 `undefined`），更新 `description`、`expression`、`launchAgentPath`、`updatedAt` 和 `warning`
+3. **更新配置**（`:292-301`）：浅拷贝配置（单层），清除 `pausedAt`（恢复为 `undefined`），更新 `description`、`expression`、`launchAgentPath`、`updatedAt` 和 `warning`
 
 4. **调解电源调度**（`:303-315`）：调用 `reconcileOpenWikiPowerSchedule()`，合并 warning 信息
 
@@ -298,7 +298,7 @@ async function deleteConnectorSchedules(
 
 1. **前置守卫**（`:322-329`）：target 非 `"all"` 或无 `ingestionSchedule` 时跳过
 
-2. **从配置中删除**（`:331-332`）：深拷贝配置，`delete nextConfig.ingestionSchedule`
+2. **从配置中删除**（`:331-332`）：浅拷贝配置（单层），`delete nextConfig.ingestionSchedule`
 
 3. **卸载并删除文件**（`:333-334`）：
    - `unloadLaunchAgent()`：执行 `launchctl bootout`
@@ -634,11 +634,11 @@ stdout 和 stderr 都输出到同一个日志文件（`:819-822`）。
 
 ---
 
-## 10. 深拷贝配置（cloneOnboardingConfig）
+## 10. 浅拷贝配置（cloneOnboardingConfig）
 
 **函数签名**：`schedules.ts:521-547`
 
-所有变更操作（暂停、恢复、删除）都先深拷贝配置，再修改拷贝。这确保：
+所有变更操作（暂停、恢复、删除）都先对配置做单层浅拷贝，再修改拷贝。这确保：
 
 - sourceInstances 数组被浅拷贝，每个元素被浅拷贝
 - connectorConfig 子对象被浅拷贝
@@ -701,7 +701,7 @@ stdout 和 stderr 都输出到同一个日志文件（`:819-822`）。
 | `src/schedules.ts:424-478` | `reconcileOpenWikiPowerSchedule` | 调度变更后调解电源调度 |
 | `src/schedules.ts:480-513` | `cancelOpenWikiPowerSchedule` | 取消 pmset 电源调度 |
 | `src/schedules.ts:515-519` | `hasActiveIngestionSchedule` | 检查是否存在活跃（非暂停）的调度 |
-| `src/schedules.ts:521-547` | `cloneOnboardingConfig` | 深拷贝 onboarding 配置 |
+| `src/schedules.ts:521-547` | `cloneOnboardingConfig` | 浅拷贝（单层）onboarding 配置 |
 | `src/schedules.ts:549-565` | `deriveLegacySources` | 从 sourceInstances 重建 legacy sources 映射 |
 | `src/schedules.ts:567-569` | `normalizeCronExpression` | 规范化 cron 表达式空白 |
 | `src/schedules.ts:571-619` | `parseLaunchdCalendarInterval` | cron → launchd CalendarInterval 转换 |
@@ -713,6 +713,7 @@ stdout 和 stderr 都输出到同一个日志文件（`:819-822`）。
 | `src/schedules.ts:744-748` | `mergePmsetDays` | 合并多个 pmset 日集合 |
 | `src/schedules.ts:750-756` | `formatPmsetTime` | 将 minuteOfDay 格式化为 `HH:MM:SS` |
 | `src/schedules.ts:758-768` | `pmsetCommand`, `toShellSingleQuotedArg`, `toAppleScriptString` | shell/osascript 命令构建与转义 |
+| `src/schedules.ts:770-772` | `getErrorMessage` | 从 unknown 错误中提取消息字符串 |
 | `src/schedules.ts:774-784` | `getSingleCronNumber` | 严格校验 cron 字段为单一数字 |
 | `src/schedules.ts:786-835` | `createLaunchAgentPlist` | 生成 Apple XML plist 模板 |
 | `src/schedules.ts:837-839` | `getLaunchdDomain` | 返回 `gui/<uid>` launchd 域 |

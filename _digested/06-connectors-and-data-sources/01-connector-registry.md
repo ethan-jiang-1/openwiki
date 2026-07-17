@@ -30,10 +30,10 @@ out_of_scope:
 
 | 文件 | 职责 |
 |------|------|
-| `registry.ts` (60 行) | 注册表工厂函数，枚举所有连接器 ID，提供运行时查询 |
-| `types.ts` (79 行) | 所有连接器相关类型定义 |
-| `io.ts` (109 行) | 连接器 state/config/raw 文件的读写 |
-| `tools.ts` (480 行) | 将连接器操作暴露为 agent 可调用的 DynamicStructuredTool |
+| `registry.ts` (59 行) | 注册表工厂函数，枚举所有连接器 ID，提供运行时查询 |
+| `types.ts` (78 行) | 所有连接器相关类型定义 |
+| `io.ts` (108 行) | 连接器 state/config/raw 文件的读写 |
+| `tools.ts` (479 行) | 将连接器操作暴露为 agent 可调用的 DynamicStructuredTool |
 | `sources/*.ts` | 7 个内置连接器的具体实现 |
 
 ---
@@ -76,7 +76,7 @@ export function createConnectorRegistry(): Record<ConnectorId, ConnectorRuntime>
 }
 ```
 
-每次调用都返回一个新的注册表对象（工厂模式，非单例）。键名与 `ConnectorId` 精确对应（`git-repo` 使用字符串键，其余用标识符键）。Note：Gmail 连接器的注册键是 `google`，但其实现返回的 `definition.id` 也是 `google`（见 `sources/gmail.ts:67`）。
+每次调用都返回一个新的注册表对象（工厂模式，非单例）。键名与 `ConnectorId` 精确对应（`git-repo` 和 `web-search` 因含连字符使用带引号的字符串键，其余用标识符键）。Note：Gmail 连接器的注册键是 `google`，但其实现返回的 `definition.id` 也是 `google`（见 `sources/gmail.ts:67`）。
 
 ### 2.3 已配置连接器查询
 
@@ -243,7 +243,7 @@ export type ConnectorState = {
 | supportsAgenticDiscovery | `false` |
 | 提供数据 | 通过公开的 Hacker News API 抓取 feeds（ask/best/job/new/show/top）和搜索查询结果 |
 
-`src/connectors/sources/hackernews.ts:65-73` 定义。默认抓取全部 6 种 feed，每 feed 最多 30 条，搜索结果最多 20 条。
+`src/connectors/sources/hackernews.ts:65-73` 定义。虽然共有 6 种 feed 类型可选（ask/best/job/new/show/top），但默认只抓取 2 种：`top` 和 `new`（`DEFAULT_FEEDS`，见 `hackernews.ts:63`，在 `hackernews.ts:89` 作为配置默认值应用）。每 feed 最多 30 条，搜索结果最多 20 条。
 
 ### 4.4 notion (MCP) — Notion via MCP
 
@@ -328,7 +328,7 @@ export type ConnectorState = {
 | `readConnectorConfig` | `(id, defaultConfig) => Promise<T>` | 读取 config.json，不存在则返回默认值 |
 | `readConnectorState` | `(id) => Promise<ConnectorState>` | 读取 state.json，不存在则返回 `{ version: 1 }` |
 
-`src/connectors/io.ts:11-49`。两者都在读取前调用 `ensureConnectorHome(id)` 确保目录存在。文件不存在时（ENOENT）返回默认值而非抛出异常。
+`src/connectors/io.ts:11-49`。两者都在读取前调用 `ensureConnectorHome(id)` 确保目录存在。文件不存在时（ENOENT）返回默认值而非抛出异常。当 config.json 存在时，`readConnectorConfig` 会将文件内容浅合并（shallow merge）到默认配置之上（`{ ...defaultConfig, ...parsed }`，见 `io.ts:18-23`），即文件中的顶层字段覆盖默认值，未出现的字段保留默认值。
 
 ### 5.3 写入操作
 
@@ -360,7 +360,7 @@ export type ConnectorState = {
 | `openwiki_list_mcp_tools` | `connectorId`（限 `notion`） | 发现已配置 MCP 连接器的 live MCP 工具列表，并将发现结果写入 raw 目录 |
 | `openwiki_call_mcp_tool` | `connectorId`、`toolName`、`args` | 调用 MCP 连接器的一个精确命名的只读工具，将结果写入 raw 目录 |
 | `openwiki_ingest_connector` | `connectorId`、`streams`、`limit`、`windowHours` | 对单个连接器执行确定性摄入（deterministic ingestion），将原始数据和 manifest 写入 raw 目录 |
-| `openwiki_ingest_all_connectors` | 无 | 对所有已配置连接器执行摄入。未配置或未启用的连接器会被跳过（skipped）。 |
+| `openwiki_ingest_all_connectors` | 无 | 无条件调用所有连接器的 `ingest()`（`tools.ts:270-281` 遍历注册表，不做筛选）。未配置或未启用的连接器由各自的 `ingest()` 实现自行返回 `skipped` 状态，跳过逻辑不在此聚合工具中。 |
 | `openwiki_list_raw_items` | `connectorId` | 列出指定连接器 raw 目录下的文件，按运行 ID 降序排列，附带 `latestRunId` 和 `latestFiles` |
 | `openwiki_read_raw_item` | `connectorId`、`path`、`maxBytes`（默认 100000） | 读取指定连接器的 raw 文件内容，支持截断（截断上限 500000 bytes），使用 `O_NOFOLLOW` 防止符号链接穿越 |
 

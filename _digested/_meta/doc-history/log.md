@@ -4,7 +4,7 @@ doc_type: "archive"
 status: "archive"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
+updated: "2026-07-18"
 sync_event: "2026-07-17"
 purpose: "记录 _digested 目录结构的创建、变更和重大重组"
 owns: "_digested 结构变更历史"
@@ -16,6 +16,22 @@ out_of_scope:
 ---
 
 # _digested 结构演进日志
+
+## 2026-07-18 — 覆盖地图与主题 README 去陈旧化
+
+**事件**：修正 `_meta/git-tracking/coverage-map.md` 和 8 个主题目录 README（03–10）中的陈旧状态标注，使其反映近期 commits 中已实际写出的深度文档。此前这些 meta 文件仍将已存在的实质性文档标为 gap / "计划文档"。
+
+**触发 commits**（内容文档实际落地的提交）：
+
+- `63a3517` — prompting strategy、git evidence/metadata、provider configuration
+- `62d4de4` — model creation branches、command parsing、DeepAgents backend
+- `daf929e` — connector registry、OAuth PKCE flow、LaunchAgent scheduling
+- `6350030` — ingestion pipeline、credential onboarding、config docs
+
+**变更内容**：
+
+1. coverage-map.md：以下源文件由 gap 改为 full — `src/connectors/registry.ts`、`src/auth/oauth.ts`、`src/ingestion.ts`、`src/schedules.ts`、`src/credentials.tsx`、`src/env.ts`、`src/constants.ts`、`src/openwiki-home.ts`、`src/fs-errors.ts`；`src/connectors/types.ts`、`src/connectors/tools.ts`、`src/auth/providers.ts` 改为 partial（被已有文档部分覆盖）。统计更新为 full 16 / partial 3 / gap 33（按唯一源文件计数）。
+2. 03–10 各主题 README："计划文档"表改为"文档"表并新增"状态"列（已完成 / 计划中），准确区分已存在文档与仍为计划的文档。frontmatter `status: "draft"` 保持不变（各目录均仍有计划中的文档未写出）。
 
 ## 2026-07-17 — 初始结构创建（v2）
 

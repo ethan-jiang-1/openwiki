@@ -628,7 +628,12 @@ TypeScript 会强制要求 `Record<OpenWikiProvider, ProviderConfig>` 为每个�
 
 ### Step 6: 实现模型创建逻辑
 
-在 `src/providers/` 目录下创建对应的模型工厂（Model Factory），实现在该提供商上创建 chat model 实例的逻辑。具体细节见 `05-model-providers/` 目录中对应提供商的专题文档。
+模型创建全部集中在 `src/agent/index.ts` 的 `createModel()` 函数中（`src/agent/index.ts:560-685`），没有独立的 provider 工厂目录：
+
+- **OpenAI 兼容 API 的提供商**：无需修改 `createModel()`——函数末尾的兜底分支（`ChatOpenAI` + `resolveProviderBaseUrl()`）自动覆盖，只需在 `PROVIDER_CONFIGS` 中配置好 `baseURL`（baseten、fireworks、nebius、nvidia 都走这条路径）。
+- **使用专用 SDK 的提供商**（如 `ChatOpenRouter`、`ChatBedrockConverse`）：在 `createModel()` 中兜底分支之前新增一个 `if (provider === "...")` 分支。
+
+详见 `02-provider-model-creation.md` §6。
 
 ### 改动总结
 
@@ -639,7 +644,7 @@ TypeScript 会强制要求 `Record<OpenWikiProvider, ProviderConfig>` 为每个�
 | `src/constants.ts` | PROVIDER_CONFIGS 新条目 | 192-319 |
 | `src/constants.ts` | （可选）resolveConfiguredProvider 新分支 | 539-564 |
 | `src/env.ts` | MANAGED_ENV_KEYS 添加新 key | 81-132 |
-| `src/providers/` | 新模型工厂文件 | 新建 |
+| `src/agent/index.ts` | （仅专用 SDK 提供商需要）createModel() 新增分支；OpenAI 兼容提供商由兜底分支覆盖，无需改动 | 560-685 |
 
 核心原则：**ProviderConfig 是单一配置点**——所有 TUI 选项、凭据检查、模型列表和 base URL 解析都从 `PROVIDER_CONFIGS` 读取。新增一个标准 API key 认证的提供商，只需要添加到 `PROVIDER_CONFIGS` 并在 `MANAGED_ENV_KEYS` 中注册其 env key 即可。
 

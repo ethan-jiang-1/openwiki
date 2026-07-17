@@ -6,7 +6,7 @@ branch: "ethan"
 created: "2026-07-17"
 updated: "2026-07-17"
 audience: "需要理解 OpenWiki 的环境变量加载流程、.env 持久化机制、家目录结构、文件系统安全操作和配置数据流的人"
-purpose: "完整说明 src/env.ts（415 行）的环境变量读写与诊断，src/constants.ts（609 行）的 env key 定义与校验，src/openwiki-home.ts（92 行）的家目录管理，以及 src/fs-errors.ts（35 行）的安全文件系统操作——即 OpenWiki 配置层的非交互式基础设施"
+purpose: "完整说明 src/env.ts（414 行）的环境变量读写与诊断，src/constants.ts（609 行）的 env key 定义与校验，src/openwiki-home.ts（91 行）的家目录管理，以及 src/fs-errors.ts（34 行）的安全文件系统操作——即 OpenWiki 配置层的非交互式基础设施"
 owns: "`src/env.ts` 的 .env 读写、managed env keys、凭据诊断；`src/constants.ts` 中所有 env key 常量、校验函数（isValidModelId、isValidBaseUrl 等）和提供商标识解析（normalizeProvider 等）；`src/openwiki-home.ts` 的 `~/.openwiki/` 目录结构与权限管理；`src/fs-errors.ts` 的文件系统错误分类"
 update_when:
   - "MANAGED_ENV_KEYS 新增或删除条目"
@@ -30,10 +30,10 @@ OpenWiki 的配置层有四块基础设施，合起来构成了「用户设置�
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
-| 环境变量管理 | `src/env.ts` (415 行) | 读写 `~/.openwiki/.env`，管理 49 个受控（managed）环境变量，提供凭据诊断 |
+| 环境变量管理 | `src/env.ts` (414 行) | 读写 `~/.openwiki/.env`，管理 50 个受控（managed）环境变量，提供凭据诊断 |
 | 常量与校验 | `src/constants.ts` (609 行) | 定义所有 env key 字符串常量、环境变量值校验函数，以及提供商标识解析辅助 |
-| 家目录管理 | `src/openwiki-home.ts` (92 行) | 创建 `~/.openwiki/` 及其子目录，权限硬化为 `0o700`（仅所有者可访问） |
-| 文件系统错误 | `src/fs-errors.ts` (35 行) | 跨模块共享的 Node.js 文件系统错误分类（ENOENT、EISDIR、ENOTDIR） |
+| 家目录管理 | `src/openwiki-home.ts` (91 行) | 创建 `~/.openwiki/` 及其子目录，权限硬化为 `0o700`（仅所有者可访问） |
+| 文件系统错误 | `src/fs-errors.ts` (34 行) | 跨模块共享的 Node.js 文件系统错误分类（ENOENT、EISDIR、ENOTDIR） |
 
 关键设计决策（Key Design Decisions）：
 
@@ -45,7 +45,7 @@ OpenWiki 的配置层有四块基础设施，合起来构成了「用户设置�
 
 ## 2. src/env.ts — .env 文件管理 (Environment Variable Management)
 
-文件：`src/env.ts` (415 行)
+文件：`src/env.ts` (414 行)
 
 `env.ts` 是整个 .env 持久化层：加载、保存、解析、格式化、诊断。
 
@@ -84,7 +84,7 @@ export async function loadOpenWikiEnv(): Promise<EnvMap> {
 3. 对每个 key：只有当 `process.env[key] === undefined`（未在 shell 中设置）时才注入。已存在的值不会被覆盖——这保证了 shell 环境变量的优先级高于持久化文件。
 4. 返回完整解析的 env map，供调用方进一步使用。
 
-调用方是 `src/startup.ts` 中的启动流程：init 命令或 wiki update 启动时最先执行 `loadOpenWikiEnv()`，确保 agent 运行前所有凭据已就绪。
+调用方包括：CLI 入口（`src/cli.tsx:3563`）、agent 启动（`src/agent/index.ts:112`）、连接器摄取（`src/ingestion.ts:64`）以及 OAuth 认证模块（`src/auth/oauth.ts:56`、`src/auth/tokens.ts:38` 和 `:53`）——各流程在使用凭据前都先执行 `loadOpenWikiEnv()`，确保 agent 运行前所有凭据已就绪。
 
 ### 2.3 saveOpenWikiEnv(): 持久化更新到 .env
 
@@ -119,7 +119,7 @@ export async function saveOpenWikiEnv(updates: EnvMap): Promise<void> {
 
 `src/env.ts:81-132`
 
-`MANAGED_ENV_KEYS` 是一个 `as const` 数组，包含 OpenWiki 读取或持久化的所有 49 个环境变量，按写入 `.env` 文件的顺序排列。分为几大类：
+`MANAGED_ENV_KEYS` 是一个 `as const` 数组，包含 OpenWiki 读取或持久化的所有 50 个环境变量，按写入 `.env` 文件的顺序排列。分为几大类：
 
 **AI 模型提供商 API Key（Provider API Keys）**：
 - `BASETEN_API_KEY`、`FIREWORKS_API_KEY`、`NEBIUS_API_KEY`、`NVIDIA_API_KEY`
@@ -248,7 +248,7 @@ const deprecatedEnvKeys = ["OPENAI_ORG_ID", "OPENAI_PROJECT"];
 
 ### 3.1 Env Key 常量定义 (Env Key Constants)
 
-`src/constants.ts:3-64` 定义了约 40 个 `export const` 环境变量名，按类别分为：
+`src/constants.ts:3-64` 定义了 45 个 `export const` 环境变量名，按类别分为：
 
 **模型提供商 API key**（行 3-25）：
 - `BASETEN_API_KEY_ENV_KEY` = `"BASETEN_API_KEY"`
@@ -277,7 +277,7 @@ const deprecatedEnvKeys = ["OPENAI_ORG_ID", "OPENAI_PROJECT"];
 - `OPENWIKI_MODEL_ID_ENV_KEY` = `"OPENWIKI_MODEL_ID"`
 - `OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY` = `"OPENWIKI_PROVIDER_RETRY_ATTEMPTS"`
 
-**连接器凭据**（行 37-64）：Google OAuth、Gmail token、Notion MCP、Slack、X/Twitter、Tavily——以 `OPENWIKI_` 前缀命名避免与上游 SDK 的环境变量冲突。
+**连接器凭据**（行 37-64）：Google OAuth、Gmail token、Notion MCP、Slack、X/Twitter、Tavily——以 `OPENWIKI_` 前缀命名避免与上游 SDK 的环境变量冲突。例外：Tavily 的环境变量值是 `TAVILY_API_KEY`（无 `OPENWIKI_` 前缀，`src/constants.ts:64`），只有其常量名 `OPENWIKI_TAVILY_API_KEY_ENV_KEY` 带前缀。
 
 **默认值**（行 30、36、65）：
 - `DEFAULT_VERTEX_LOCATION` = `"global"`
@@ -312,7 +312,7 @@ const deprecatedEnvKeys = ["OPENAI_ORG_ID", "OPENAI_PROJECT"];
 
 ## 4. src/openwiki-home.ts — 家目录管理 (Home Directory Management)
 
-文件：`src/openwiki-home.ts` (92 行)
+文件：`src/openwiki-home.ts` (91 行)
 
 ### 4.1 ~/.openwiki/ 目录结构 (Directory Structure)
 
@@ -400,7 +400,7 @@ export function assertSafeConnectorId(connectorId: string): void {
 
 ## 5. src/fs-errors.ts — 文件系统错误分类 (Filesystem Error Classification)
 
-文件：`src/fs-errors.ts` (35 行)
+文件：`src/fs-errors.ts` (34 行)
 
 这是一个共享工具模块，提供 Node.js 文件系统错误的统一分类函数。原先这些检查分散在多个模块中（注释称 "previously duplicated verbatim across several modules"），提取为独立模块避免随着容忍错误码的变更导致不同步（drift）。
 
@@ -472,7 +472,7 @@ export function isExpectedSnapshotRaceError(error: unknown): boolean {
 
 1. **持久化（Persistence）**：`credentials.tsx` 通过 `saveOpenWikiEnv(updates)` 写入 `~/.openwiki/.env`（`0o600`），同时更新内存中的 `process.env`。
 
-2. **启动加载（Startup Load）**：`startup.ts` 在 agent 创建前调用 `loadOpenWikiEnv()`，将 `.env` 中未在 shell 中设置的值注入 `process.env`。
+2. **启动加载（Startup Load）**：CLI 入口（`src/cli.tsx:3563`）和 agent 启动流程（`src/agent/index.ts:112`）在 agent 创建前调用 `loadOpenWikiEnv()`，将 `.env` 中未在 shell 中设置的值注入 `process.env`；`src/ingestion.ts:64` 和 `src/auth/`（oauth.ts、tokens.ts）也在各自流程开头调用它。
 
 3. **提供商解析（Provider Resolution）**：`resolveConfiguredProvider()` 按优先级链确定实际使用的提供商：`OPENWIKI_PROVIDER` > API key 检测 > `DEFAULT_PROVIDER ("openai")`。
 
@@ -490,7 +490,7 @@ export function isExpectedSnapshotRaceError(error: unknown): boolean {
 |--------|---------|------|
 | `src/env.ts:56-57` | `openWikiEnvDir`, `openWikiEnvPath` | .env 文件路径定义 |
 | `src/env.ts:61-71` | `CredentialDiagnostic` | 凭据诊断类型定义 |
-| `src/env.ts:81-132` | `MANAGED_ENV_KEYS` | 49 个受控环境变量列表 |
+| `src/env.ts:81-132` | `MANAGED_ENV_KEYS` | 50 个受控环境变量列表 |
 | `src/env.ts:147-153` | `CREDENTIAL_DIAGNOSTIC_ENV_KEYS` | 凭据诊断 key 列表（从 MANAGED_ENV_KEYS 派生） |
 | `src/env.ts:160-163` | `DEBUG_ENV_KEYS` | Agent debug 输出 key 列表 |
 | `src/env.ts:167` | `deprecatedEnvKeys` | 已弃用 key 列表 |
@@ -503,7 +503,7 @@ export function isExpectedSnapshotRaceError(error: unknown): boolean {
 | `src/env.ts:301-341` | `getCredentialWarnings`, `getModelWarnings`, `getProviderWarnings`, `getRetryAttemptsWarnings` | 凭据值合法性警告 |
 | `src/env.ts:355-382` | `parseEnv()` | .env 文件解析 |
 | `src/env.ts:397-414` | `formatEnv()` | EnvMap → .env 字符串格式化 |
-| `src/constants.ts:3-64` | 约 40 个 `*_ENV_KEY` 常量 | 环境变量 key 字符串定义 |
+| `src/constants.ts:3-64` | 45 个 `*_ENV_KEY` 常量 | 环境变量 key 字符串定义 |
 | `src/constants.ts:65` | `DEFAULT_PROVIDER` | 默认提供商标识 ("openai") |
 | `src/constants.ts:497-511` | `isValidBaseUrl()` | Base URL 校验 |
 | `src/constants.ts:523-533` | `normalizeProvider()` | 提供商标识规范化 |

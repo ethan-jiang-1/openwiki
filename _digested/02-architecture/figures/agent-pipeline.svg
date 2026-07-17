@@ -88,28 +88,29 @@
 
   <!-- Row 3: Steps 9-10 -->
   <!-- Step 9 -->
-  <rect x="120" y="255" width="260" height="80" rx="12" fill="#0f3460" filter="url(#shadow)"/>
-  <text x="250" y="283" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">⑨ 流式执行 Agent</text>
-  <text x="250" y="303" text-anchor="middle" font-size="10" fill="#aac">DeepAgents 执行 · 模型推理 · 工具调用</text>
-  <text x="250" y="318" text-anchor="middle" font-size="10" fill="#aac">事件流式推回 CLI · parseStreamEvent()</text>
-  <text x="250" y="333" text-anchor="middle" font-size="10" fill="#aac">Chat: 持久 checkpointer · Init/Update: 内存 checkpointer</text>
+  <rect x="100" y="255" width="300" height="92" rx="12" fill="#0f3460" filter="url(#shadow)"/>
+  <text x="250" y="280" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">⑨ 流式执行 Agent</text>
+  <text x="250" y="299" text-anchor="middle" font-size="10" fill="#aac">DeepAgents 执行 · 模型推理 · 工具调用</text>
+  <text x="250" y="314" text-anchor="middle" font-size="10" fill="#aac">事件流式推回 CLI · parseStreamEvent()</text>
+  <text x="250" y="329" text-anchor="middle" font-size="9" fill="#aac">Chat: 持久 checkpointer</text>
+  <text x="250" y="341" text-anchor="middle" font-size="9" fill="#aac">Init/Update: 内存 checkpointer</text>
 
   <!-- Step 10 -->
-  <rect x="440" y="255" width="260" height="80" rx="12" fill="#1b4332" filter="url(#shadow)"/>
-  <text x="570" y="283" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">⑩ 快照对比 &amp; 持久化</text>
-  <text x="570" y="303" text-anchor="middle" font-size="10" fill="#a0d0b0">persistRunMetadataIfChanged()</text>
-  <text x="570" y="318" text-anchor="middle" font-size="10" fill="#a0d0b0">前 SHA-256 vs 后 SHA-256</text>
-  <text x="570" y="333" text-anchor="middle" font-size="10" fill="#a0d0b0">仅内容变化时写 .last-update.json</text>
+  <rect x="440" y="255" width="280" height="92" rx="12" fill="#1b4332" filter="url(#shadow)"/>
+  <text x="580" y="280" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">⑩ 快照对比 &amp; 持久化</text>
+  <text x="580" y="299" text-anchor="middle" font-size="10" fill="#a0d0b0">persistRunMetadataIfChanged()</text>
+  <text x="580" y="314" text-anchor="middle" font-size="10" fill="#a0d0b0">前 SHA-256 vs 后 SHA-256</text>
+  <text x="580" y="329" text-anchor="middle" font-size="9" fill="#a0d0b0">仅内容变化时写 .last-update.json</text>
 
   <!-- arrows between 9 and 10 -->
-  <line x1="380" y1="295" x2="438" y2="295" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="400" y1="300" x2="438" y2="300" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Bottom: Output -->
-  <rect x="220" y="370" width="380" height="50" rx="10" fill="#333" filter="url(#shadow)"/>
-  <text x="410" y="394" text-anchor="middle" font-size="13" font-weight="700" fill="#ddd">📂 openwiki/ （Code Mode）或 ~/.openwiki/wiki/ （Personal Mode）</text>
+  <rect x="140" y="370" width="540" height="50" rx="10" fill="#333" filter="url(#shadow)"/>
+  <text x="410" y="392" text-anchor="middle" font-size="12" font-weight="700" fill="#ddd">openwiki/（Code Mode）或 ~/.openwiki/wiki/（Personal Mode）</text>
   <text x="410" y="410" text-anchor="middle" font-size="10" fill="#aaa">结构化的 Markdown 文档 + .last-update.json 元数据</text>
 
-  <line x1="410" y1="335" x2="410" y2="368" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="410" y1="347" x2="410" y2="368" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Snapshot branch for step 5→10 -->
   <rect x="20" y="405" width="160" height="50" rx="8" fill="#e8eaf6" stroke="#3f51b5" stroke-width="1" filter="url(#shadow)"/>
@@ -127,10 +128,10 @@
   <text x="410" y="525" text-anchor="middle" font-size="9" fill="#856404">update: 有 .last-update.json → 基于 Git diff 增量编辑</text>
 
   <!-- Key legend -->
-  <rect x="160" y="550" width="500" height="55" rx="10" fill="#f5f5f5" stroke="#ddd" stroke-width="1"/>
-  <text x="410" y="571" text-anchor="middle" font-size="10" font-weight="700" fill="#555">chat: 无快照无元数据 · 持久 checkpointer · 支持多轮对话</text>
-  <text x="410" y="587" text-anchor="middle" font-size="9" fill="#888">Git 证据策略: git log &lt;lastHead&gt;..HEAD → --since &lt;updatedAt&gt; → --max-count=20 → --name-status HEAD</text>
-  <text x="410" y="600" text-anchor="middle" font-size="9" fill="#888">可配置的重试次数 · Provider 最终错误直接抛出不切换 · Telemetry 记录运行结果</text>
+  <rect x="100" y="550" width="620" height="68" rx="10" fill="#f5f5f5" stroke="#ddd" stroke-width="1"/>
+  <text x="410" y="568" text-anchor="middle" font-size="10" font-weight="700" fill="#555">chat: 无快照无元数据 · 持久 checkpointer · 支持多轮对话</text>
+  <text x="410" y="583" text-anchor="middle" font-size="9" fill="#888">Git 证据策略：git log &lt;lastHead&gt;..HEAD → --since &lt;updatedAt&gt; → --max-count=20</text>
+  <text x="410" y="597" text-anchor="middle" font-size="9" fill="#888">可配置的重试次数 · Provider 最终错误直接抛出不切换 · Telemetry 记录运行结果</text>
 
   <text x="410" y="640" text-anchor="middle" font-size="9" fill="#bbb">agent/index.ts (1637 行) · agent/prompt.ts (473 行) · agent/utils.ts (479 行)</text>
 </svg>
