@@ -19,29 +19,30 @@ out_of_scope:
 
 # _digested — OpenWiki 源码消化文档
 
-`_digested/` 是对 OpenWiki（LangChain AI 的文档 wiki CLI 工具）源码的消化文档层。这里不改源码，只整理"源码已经是什么样"的事实、边界、入口和排错抓手。
+`_digested/` 是对 OpenWiki（LangChain AI 的 AI 文档 wiki 生成工具）源码的消化文档层。这里不改源码，只整理"源码已经是什么样"的事实、边界、入口和排错抓手。
 
 > **源码是唯一真相源。** 每一条论断（函数名、文件路径、架构关系、数字）都必须能在源码或项目原文档中找到对应。禁止臆造、推测或"应该是这样"。专有术语首次出现必须写成「中文（English）」以保留英文原词，便于 grep 回溯源码。
 
 ## 怎么使用
 
 - `README.md` 和 `_context/` 负责导航。
-- `01-beginner/` 到 `09-telemetry-and-infra/` 的主题文档负责自说明，正文应尽量独立阅读。
+- `01-quickstart/` 到 `10-configuration-and-telemetry/` 的主题文档负责自说明，正文应尽量独立阅读。
 - `_meta/` 只保留历史归档和 git 对齐追踪，不是当前导航的一部分。
 - 每篇文档头部都有 YAML front matter，用来说明这篇文档的读者、目标、负责范围和后续补充入口。
 
 ## 目录分工
 
 - `_context/`：快速上下文与入口速查。允许保留强导航。
-- `01-beginner/`：上手、配置、模型/提供商、排错、常见用户问题。
-- `02-system-architecture/`：系统全景、模块依赖图、数据流、入口点、模块边界。
-- `03-cli-and-startup/`：CLI 解析（commands.ts）、Ink TUI 渲染（cli.tsx）、启动路由（startup.ts）、code mode 初始化（code-mode.ts）。
-- `04-agent-core/`：DeepAgents 集成（index.ts）、提示词构建（prompt.ts）、skills 系统（skills.ts）、只读文件系统后端（docs-only-backend.ts）、索引中间件（index-middleware.ts）、frontmatter 校验、模型提供商路由、ChatGPT OAuth、Vertex AI surface。
-- `05-connectors/`：连接器注册（registry.ts）、类型定义（types.ts）、agent 工具暴露（tools.ts）、7 个数据源连接器（git-repo、gmail、hackernews、mcp/notion、slack、web-search、x）、MCP 子系统（mcp-client.ts、mcp-runtime.ts）。
-- `06-auth-and-oauth/`：OAuth 2.0 流程（oauth.ts）、认证提供商定义（providers.ts）、token 管理与刷新（tokens.ts）、认证配置生成（configure.ts）、ngrok HTTPS 隧道（ngrok.ts）。
-- `07-ingestion-and-scheduling/`：数据源摄取流水线（ingestion.ts）、macOS LaunchAgent 调度管理（schedules.ts）、cron 调度（cron-parser/cronstrue）、首次运行配置向导（onboarding.ts）。
-- `08-credentials-and-config/`：交互式凭据配置向导（credentials.tsx，4337 行 Ink TUI）、环境变量管理（env.ts）、常量和配置解析（constants.ts）、OpenWiki 家目录（openwiki-home.ts）、文件系统错误处理（fs-errors.ts）。
-- `09-telemetry-and-infra/`：PostHog 遥测系统（telemetry/，9 个文件）、诊断工具（diagnostics.ts）、构建系统（tsc + pnpm）、CI/CD（GitHub Actions）。
+- `01-quickstart/`：安装、首次运行、模型选择、常见排错。
+- `02-architecture/`：15 层架构全景、模块关系图、关键设计决策、数据流、扩展点。
+- `03-cli-and-tui/`：CLI 入口（cli.tsx，4019 行 Ink TUI）、命令解析（commands.ts，辨别联合类型）、启动路由（startup.ts）、code mode 初始化（code-mode.ts）。
+- `04-agent-and-wiki-generation/`：文档 agent 核心 — 完整运行流程（10 步）、DeepAgents 集成（index.ts）、系统提示词（prompt.ts）、Git 证据收集（utils.ts）、内容快照防重写机制、只读文件系统后端（docs-only-backend.ts）、skills 系统、索引中间件、frontmatter 校验。
+- `05-model-providers/`：9+ 模型提供商体系 — 提供商解析与回退链、各 provider 的模型创建分支（Anthropic/Vertex/OpenAI/ChatGPT-OAuth/OpenRouter/OpenAI-compatible/Fireworks/NVIDIA/Baseten）、base URL 解析、重试策略。
+- `06-connectors-and-data-sources/`：连接器注册与生命周期、7 个数据源连接器（git-repo、gmail、hackernews、notion-via-MCP、slack、web-search/Tavily、x/twitter）、MCP 子系统（mcp-client.ts 867 行、mcp-runtime.ts）、连接器→agent 工具暴露。
+- `07-authentication-and-oauth/`：连接器 OAuth 2.0 体系 — 浏览器 PKCE 流程（oauth.ts）、提供商定义（providers.ts）、token 存储刷新过期（tokens.ts）、认证配置生成（configure.ts）、ngrok HTTPS 隧道（ngrok.ts）。
+- `08-ingestion-and-personal-mode/`：数据摄取流水线（ingestion.ts）、首次运行配置（onboarding.ts）、个人 brain wiki 概念（open-questions.md、themes.md、commitments.md、personal-logistics.md）。
+- `09-scheduling-and-ci/`：macOS LaunchAgent 调度管理（schedules.ts，918 行）、cron 集成（cron-parser/cronstrue）、CI/CD 工作流（checks.yml、openwiki-update.yml）、fork 上的 opt-in 调度机制。
+- `10-configuration-and-telemetry/`：交互式凭据配置向导（credentials.tsx，4337 行 Ink TUI）、环境变量管理（env.ts）、常量和提供商配置（constants.ts，609 行）、家目录管理（openwiki-home.ts）、PostHog 遥测系统（telemetry/，9 个文件）、诊断工具（diagnostics.ts）。
 - `_meta/`：历史结构、归档记录、git 对齐追踪、upstream sync 日志。
 
 ## 阅读顺序
@@ -49,22 +50,24 @@ out_of_scope:
 1. 先看 `_context/01-quick_context.md`
 2. 再看 `_context/02-entrypoints-at-a-glance.md`
 3. 然后进入你关心的主题目录
-4. 需要查某个连接器的实现时，跳到 `05-connectors/`
-5. 只有在需要追历史决策和 git 对齐时才看 `_meta/`
+4. 需要理解 wiki 是怎么生成出来的，看 `04-agent-and-wiki-generation/`
+5. 需要添加模型提供商，看 `05-model-providers/`
+6. 只有追历史决策和 git 对齐时才看 `_meta/`
 
 ## 导航速查
 
 | 你要干什么 | 看哪里 |
 |-----------|--------|
-| 理解 OpenWiki 系统本身 | `_context/01-quick_context.md` |
+| 理解 OpenWiki 整体是什么 | `_context/01-quick_context.md` |
 | 找某个函数/入口的源码位置 | `_context/02-entrypoints-at-a-glance.md` |
 | 查源码→文档覆盖关系 | `_meta/git-tracking/coverage-map.md` |
+| 理解 agent 怎么生成 wiki | `04-agent-and-wiki-generation/` |
+| 了解支持哪些 AI 模型 | `05-model-providers/` |
+| 理解数据源连接器 | `06-connectors-and-data-sources/` |
+| 理解 OAuth 认证 | `07-authentication-and-oauth/` |
 | 做 upstream sync | `_meta/git-tracking/upstream-sync/README.md` |
 | 改某篇文档 | 先读目标文档的 front matter（`owns`, `update_when`, `out_of_scope`） |
 | 质量抽检 | `_meta/git-tracking/quality-review.md` |
-| 了解模型提供商 | `01-beginner/03-models-and-providers.md` |
-| 理解 OAuth 认证 | `06-auth-and-oauth/01-oauth-flows.md` |
-| 添加新连接器 | `05-connectors/01-connector-registry.md` |
 
 ## 维护契约
 
@@ -104,7 +107,7 @@ out_of_scope:
 
 | doc_type | 含义 | 示例 |
 |----------|------|------|
-| `owner` | 负责解释一个特定源码范围的主文档 | `04-agent-core/01-agent-creation-and-lifecycle.md` |
+| `owner` | 负责解释一个特定源码范围的主文档 | `04-agent-and-wiki-generation/01-agent-workflow.md` |
 | `reference` | 纯参考数据，不含源码解释 | `_meta/git-tracking/coverage-map.md` |
 | `topic` | 跨模块话题，不被单个 source area 独占 | 协议参考、集成概览 |
 | `index` | 导航页 | 每个目录的 `README.md` |
@@ -132,14 +135,6 @@ out_of_scope:
 | `src/agent/index.ts:42-80` | `createDeepAgent` | Agent 创建入口 |
 | `src/agent/prompt.ts:15-30` | `buildSystemPrompt` | 系统提示词组装 |
 ```
-
-### Beginner 层特殊约定
-
-`01-beginner/` 下的文档额外要求：
-- 正文最上方放 2-3 个 callout 块（概述"这是什么"、"为什么需要了解"、"用到哪里"）
-- 术语标注比其它层更严格：即使是常见术语也首次出现即标注
-- 每个文档末尾有"到这里就够了"提示 — 告诉读者什么情况下可以停止阅读
-- 末尾有验证 checklist（至少 3 条可核验的陈述）
 
 ---
 

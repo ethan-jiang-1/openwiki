@@ -6,11 +6,10 @@ branch: "ethan"
 created: "2026-07-17"
 updated: "2026-07-17"
 audience: "需要知道从哪开始读代码的人"
-purpose: "列出所有入口点和关键文件路径"
+purpose: "列出 OpenWiki 所有入口点、命令、核心模块和关键文件"
 owns: "OpenWiki 的入口路径速查"
 update_when:
-  - "新增或移除运行模式时"
-  - "新增或移除 CLI 命令时"
+  - "新增或移除运行模式/CLI 命令时"
 out_of_scope:
   - "入口点内部的详细实现"
 ---
@@ -19,64 +18,72 @@ out_of_scope:
 
 > **状态**：🟡 草稿
 
-## 运行模式与入口
+## CLI 命令与入口
 
-| 模式 | 入口 | 说明 |
+| 命令 | 入口 | 说明 |
 |------|------|------|
-| CLI 主入口（所有模式） | `src/cli.tsx` | Ink TUI 应用根组件，根据命令类型路由到不同渲染分支 |
-| Code mode | `src/code-mode.ts` | `openwiki code` 命令，初始化仓库级文档 wiki |
-| Personal mode（默认） | `src/cli.tsx` → agent 模式 | 交互式 chat agent |
-| Auth 命令 | `src/auth/configure.ts` → `src/credentials.tsx` | `openwiki auth configure`，凭据配置向导 |
-| Ingest 命令 | `src/ingestion.ts` | `openwiki ingest`，从指定数据源摄取内容 |
-| Cron 命令 | `src/schedules.ts` | `openwiki cron`，管理 macOS LaunchAgent 定时任务 |
-| Ngrok 命令 | `src/auth/ngrok.ts` | `openwiki ngrok`，启动 HTTPS 隧道 |
+| `openwiki`（默认） | `src/cli.tsx` → 交互式 chat agent | Personal mode，启动 Ink TUI |
+| `openwiki code` | `src/code-mode.ts` → `src/cli.tsx` | Code mode，为当前仓库初始化文档 wiki |
+| `openwiki auth configure` | `src/auth/configure.ts` → `src/credentials.tsx` | 交互式凭据配置向导 |
+| `openwiki auth list` | `src/cli.tsx` | 列出已配置的凭据 |
+| `openwiki auth oauth` | `src/auth/oauth.ts` | 启动 OAuth 认证流程 |
+| `openwiki ngrok start` | `src/auth/ngrok.ts` | 启动 ngrok HTTPS 隧道 |
+| `openwiki ingest` | `src/ingestion.ts` | 从指定数据源摄取内容 |
+| `openwiki cron` | `src/schedules.ts` | 管理 macOS LaunchAgent 定时任务 |
+| `openwiki --init` | `src/cli.tsx` → `src/agent/index.ts` | 首次生成文档 wiki |
+| `openwiki --update` | `src/cli.tsx` → `src/agent/index.ts` | 基于 Git 变更增量更新 wiki |
+| `openwiki --print` | `src/cli.tsx` → stdout | 非交互式输出（适合 CI/脚本） |
 
 ## 核心模块入口
 
-| 模块 | 关键入口文件 | 职责 |
-|------|-------------|------|
-| 命令解析 | `src/commands.ts` | `parseCommand()` — 解析 CLI 参数为 `CliCommand` 辨别联合 |
-| 启动路由 | `src/startup.ts` | `resolveStartupCommand()` — TTY 检测、模式路由、凭据预检 |
-| Agent 创建 | `src/agent/index.ts` | `createDeepAgent()` — 初始化 DeepAgent，配置模型、tools、中间件 |
-| 系统提示词 | `src/agent/prompt.ts` | 系统/用户提示词模板和组装 |
-| Skills 系统 | `src/agent/skills.ts` | 内置 skills 的注册和管理 |
-| 只读文件后端 | `src/agent/docs-only-backend.ts` | 限制写入到 `openwiki/` 目录的沙箱文件系统 |
-| 索引中间件 | `src/agent/index-middleware.ts` | wiki 目录索引的自动生成 |
-| Frontmatter 校验 | `src/agent/frontmatter-validator.ts` | 文档 YAML front matter 结构校验 |
-| ChatGPT OAuth | `src/agent/openai-chatgpt-oauth.ts` | OpenAI ChatGPT 订阅的 OAuth 认证 |
-| Vertex Surface | `src/agent/vertex-surface.ts` | Google Vertex AI 的模型路由和 surface 检测 |
-| 连接器注册 | `src/connectors/registry.ts` | 连接器实例的注册、发现和生命周期管理 |
-| 连接器工具 | `src/connectors/tools.ts` | 将连接器暴露为 agent 可调用的 tools |
-| MCP 客户端 | `src/connectors/mcp-client.ts` | MCP 协议客户端实现 |
-| OAuth 流程 | `src/auth/oauth.ts` | 浏览器 PKCE OAuth 2.0 流程 |
-| 认证提供商 | `src/auth/providers.ts` | 支持的 OAuth 提供商定义 |
-| Token 管理 | `src/auth/tokens.ts` | OAuth token 的存储、刷新和过期处理 |
-| Ngrok 隧道 | `src/auth/ngrok.ts` | ngrok HTTPS 隧道管理（用于 Slack OAuth 回调） |
-| 数据摄取 | `src/ingestion.ts` | 跨连接器的数据摄取编排 |
-| 定时调度 | `src/schedules.ts` | macOS LaunchAgent 的创建、列出、删除 |
-| 首次配置 | `src/onboarding.ts` | 首次运行的 wiki 模板和数据源选择 |
-| 凭据向导 | `src/credentials.tsx` | Ink 交互式凭据配置 UI（4337 行） |
-| 环境变量 | `src/env.ts` | `~/.openwiki/.env` 文件的读写和诊断 |
-| 常量定义 | `src/constants.ts` | 提供商配置、模型列表、env key 定义 |
+| 模块 | 关键文件 | 职责 |
+|------|---------|------|
+| CLI 入口与 TUI | `src/cli.tsx`（4019 行） | Ink TUI 应用根组件，auto-exit 逻辑 |
+| 命令解析 | `src/commands.ts`（819 行） | `parseCommand()` → `CliCommand` 辨别联合 |
+| 启动路由 | `src/startup.ts`（102 行） | `resolveStartupCommand()` — TTY 检测、凭据预检 |
+| Agent 核心 | `src/agent/index.ts`（1637 行） | `createDeepAgent()` — 10 步 agent 运行流程 |
+| 系统提示词 | `src/agent/prompt.ts`（473 行） | 编码产品规则的提示词模板 |
+| Git 证据 | `src/agent/utils.ts`（479 行） | Git 摘要、SHA-256 内容快照、元数据管理 |
+| DeepAgents 后端 | `src/agent/docs-only-backend.ts` | `OpenWikiLocalShellBackend` — docs-only 写入守卫 |
+| Skills 系统 | `src/agent/skills.ts` | 内置 skills（migrate-wiki-to-okf, write-connector） |
+| 索引中间件 | `src/agent/index-middleware.ts` | wiki 目录索引自动生成 |
+| Frontmatter 校验 | `src/agent/frontmatter-validator.ts` | YAML front matter 结构校验 |
+| ChatGPT OAuth | `src/agent/openai-chatgpt-oauth.ts`（546 行） | OpenAI ChatGPT 订阅 OAuth 登录 |
+| Vertex AI | `src/agent/vertex-surface.ts` | Vertex AI 模型路由和 surface 检测 |
+| 模型创建 | `src/agent/index.ts` → `createModel()` | 按 provider 分支的模型客户端创建 |
+| 连接器注册 | `src/connectors/registry.ts` | 连接器实例注册与发现 |
+| 连接器工具 | `src/connectors/tools.ts`（479 行） | 连接器 → agent tools 转换 |
+| MCP 客户端 | `src/connectors/mcp-client.ts`（867 行） | MCP 协议客户端实现 |
+| 7 个数据源 | `src/connectors/sources/*.ts` | git-repo, gmail, hackernews, mcp/notion, slack, web-search/Tavily, x |
+| OAuth 流程 | `src/auth/oauth.ts`（637 行） | 浏览器 PKCE OAuth 2.0 |
+| Token 管理 | `src/auth/tokens.ts` | token 存储、刷新、过期 |
+| Ngrok 隧道 | `src/auth/ngrok.ts` | Slack OAuth 回调用 HTTPS 隧道 |
+| 数据摄取 | `src/ingestion.ts`（421 行） | 跨连接器摄取编排 |
+| 首次配置 | `src/onboarding.ts`（478 行） | wiki 模板和数据源选择 |
+| 定时调度 | `src/schedules.ts`（918 行） | macOS LaunchAgent CRUD |
+| Code mode | `src/code-mode.ts` | GitHub Actions workflow + AGENTS.md/CLAUDE.md 生成 |
+| 凭据向导 | `src/credentials.tsx`（4337 行） | Ink TUI 交互式凭据配置 |
+| 环境变量 | `src/env.ts` | `~/.openwiki/.env` 读写和诊断 |
+| 常量 | `src/constants.ts`（609 行） | 提供商/模型配置、env key 定义、校验 |
 | 遥测客户端 | `src/telemetry/client.ts` | PostHog 客户端初始化 |
-| 遥测配置 | `src/telemetry/config.ts` | 遥测开关和配置 |
-| 遥测发送 | `src/telemetry/senders.ts` | 事件批量和实时发送 |
-| 安全记录 | `src/telemetry/record-run-safe.ts` | 安全的运行事件记录 |
+| 遥测发送 | `src/telemetry/senders.ts` | 事件批量发送 |
+| 安装 ID | `src/telemetry/install-id.ts` | 匿名安装标识 |
 
 ## 配置文件入口
 
 | 文件 | 作用 |
 |------|------|
-| `package.json` | npm 包元数据、scripts（build/test/lint/format/typecheck）、依赖声明 |
-| `tsconfig.json` | TypeScript 编译配置（ES2022、NodeNext、strict） |
+| `package.json` | npm 包元数据，scripts，依赖 |
+| `tsconfig.json` | TS 编译配置（ES2022，NodeNext，strict） |
 | `eslint.config.js` | ESLint 10 配置 |
-| `pnpm-workspace.yaml` | pnpm workspace 配置（供应链安全硬化） |
-| `.github/workflows/checks.yml` | CI 流水线：format → lint → build/typecheck/smoke → test → security audit |
-| `.github/workflows/openwiki-update.yml` | 定时 OpenWiki 文档更新工作流（fork 上默认关闭，需设置 `OPENWIKI_ENABLE_SCHEDULED_UPDATE=true`） |
+| `pnpm-workspace.yaml` | pnpm workspace（供应链安全硬化） |
+| `.github/workflows/checks.yml` | CI：format → lint → build/typecheck/smoke → test → Trivy |
+| `.github/workflows/openwiki-update.yml` | 定时 wiki 更新（fork 默认关闭，需 `OPENWIKI_ENABLE_SCHEDULED_UPDATE=true`） |
+| `CONTRIBUTING.md` | one PR = one change 贡献规范 |
+| `DEVELOPMENT.md` | 本地开发环境设置 |
 
 ## 待填充
 
-- [ ] 各入口 main 函数的完整启动流程（带源码行号）
-- [ ] CLI 参数完整列表和辨别联合的所有变体
-- [ ] `src/agent/utils.ts` 的 Git evidence 收集流程
-- [ ] `src/connectors/io.ts` 的 I/O 抽象层
+- [ ] 各 CLI 命令的完整参数表
+- [ ] `createModel()` 每个 provider 分支的详细创建逻辑（含行号）
+- [ ] Agent 10 步流程的逐行源码 trace

@@ -15,8 +15,6 @@ out_of_scope:
 
 # Git 追踪
 
-## 文件列表
-
 | 文件 | 用途 |
 |------|------|
 | `git-branch-and-upstream-tracking.md` | 分支/remote 快照和 sync 历史 |
