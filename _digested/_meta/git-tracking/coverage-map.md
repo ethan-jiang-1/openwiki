@@ -6,6 +6,7 @@ branch: "ethan"
 created: "2026-07-17"
 updated: "2026-07-17"
 sync_event: "2026-07-17"
+last_updated: "2026-07-17"
 baseline_ref: "origin/main"
 baseline_commit: "d4e94ab"
 purpose: "回答「哪段源码由哪篇 _digested doc 覆盖」——给 upstream delta triage 和覆盖审计做索引"
@@ -38,8 +39,8 @@ out_of_scope:
 
 | Source area | 覆盖文档 | 覆盖度 |
 |-------------|---------|--------|
-| `src/cli.tsx` — Ink TUI 主入口（4019 行） | `03-cli-and-tui/01-cli-entry-and-ink-tui.md` | gap |
-| `src/commands.ts` — 命令行解析（819 行） | `03-cli-and-tui/02-command-parsing.md` | gap |
+| `src/cli.tsx` — Ink TUI 主入口（4019 行） | `03-cli-and-tui/01-cli-entry-and-ink-tui.md` | full |
+| `src/commands.ts` — 命令行解析（819 行） | `03-cli-and-tui/02-command-parsing.md` | full |
 | `src/startup.ts` — 启动路由（102 行） | `03-cli-and-tui/03-startup-routing.md` | gap |
 | `src/code-mode.ts` — code mode 初始化 | `03-cli-and-tui/04-code-mode-setup.md` | gap |
 
@@ -47,24 +48,24 @@ out_of_scope:
 
 | Source area | 覆盖文档 | 覆盖度 |
 |-------------|---------|--------|
-| `src/agent/index.ts` — agent 创建、模型初始化、运行编排（1637 行） | `04-agent-and-wiki-generation/01-agent-workflow.md` | gap |
-| `src/agent/prompt.ts` — 系统/用户提示词（473 行） | `04-agent-and-wiki-generation/02-prompting-strategy.md` | gap |
-| `src/agent/utils.ts` — Git 证据、内容快照、元数据（479 行） | `04-agent-and-wiki-generation/03-git-evidence-and-metadata.md` | gap |
-| `src/agent/docs-only-backend.ts` — 只读文件后端 | `04-agent-and-wiki-generation/04-deepagents-backend.md` | gap |
+| `src/agent/index.ts` — agent 创建、模型初始化、运行编排（1637 行） | `04-agent-and-wiki-generation/01-agent-workflow.md` | full |
+| `src/agent/prompt.ts` — 系统/用户提示词（473 行） | `04-agent-and-wiki-generation/02-prompting-strategy.md` | full |
+| `src/agent/utils.ts` — Git 证据、内容快照、元数据（479 行） | `04-agent-and-wiki-generation/03-git-evidence-and-metadata.md` | full |
+| `src/agent/docs-only-backend.ts` — 只读文件后端 | `04-agent-and-wiki-generation/04-deepagents-backend.md` | full |
 | `src/agent/index-middleware.ts` — wiki 索引中间件 | `04-agent-and-wiki-generation/05-skills-and-middleware.md` | gap |
 | `src/agent/frontmatter-validator.ts` — frontmatter 校验 | `04-agent-and-wiki-generation/05-skills-and-middleware.md` | gap |
 | `src/agent/skills.ts` — skills 管理 | `04-agent-and-wiki-generation/05-skills-and-middleware.md` | gap |
-| `src/agent/types.ts` — 共享类型定义 | `04-agent-and-wiki-generation/01-agent-workflow.md` | gap |
+| `src/agent/types.ts` — 共享类型定义 | `04-agent-and-wiki-generation/01-agent-workflow.md` | full |
 
 ## C. 模型提供商（Model Providers）
 
 | Source area | 覆盖文档 | 覆盖度 |
 |-------------|---------|--------|
-| `src/agent/index.ts` — `createModel()` 各 provider 分支 | `05-model-providers/02-provider-model-creation.md` | gap |
+| `src/agent/index.ts` — `createModel()` 各 provider 分支 | `05-model-providers/02-provider-model-creation.md` | full |
 | `src/agent/openai-chatgpt-oauth.ts` — ChatGPT OAuth（546 行） | `05-model-providers/03-chatgpt-oauth-provider.md` | gap |
 | `src/agent/vertex-surface.ts` — Vertex AI surface 路由 | `05-model-providers/04-vertex-ai-provider.md` | gap |
-| `src/constants.ts` — provider configs, model lists, env keys | `05-model-providers/01-provider-configuration.md` | gap |
-| `src/env.ts` — managedEnvKeys, credential diagnostics | `05-model-providers/01-provider-configuration.md` | gap |
+| `src/constants.ts` — provider configs, model lists, env keys | `05-model-providers/01-provider-configuration.md` | full |
+| `src/env.ts` — managedEnvKeys, credential diagnostics | `05-model-providers/01-provider-configuration.md` | full |
 
 ## D. 连接器与数据源（Connectors and Data Sources）
 
@@ -143,7 +144,7 @@ out_of_scope:
 
 - **总源文件数**：52（src/ 下 52 个 .ts/.tsx 文件）
 - **已映射到文档的源文件**：52（100%）
-- **覆盖度 full**：0
+- **覆盖度 full**：9
 - **覆盖度 partial**：0
-- **覆盖度 gap**：51
+- **覆盖度 gap**：42
 - **覆盖度 gap\***（有意不覆盖）：1（test/ 目录）
