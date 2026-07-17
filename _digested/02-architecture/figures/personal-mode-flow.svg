@@ -39,16 +39,16 @@
 
   <!-- Auth layer -->
   <rect x="80" y="145" width="640" height="32" rx="6" fill="#8e44ad" opacity="0.25"/>
-  <text x="400" y="165" text-anchor="middle" font-size="10" fill="#6c3483">🔐 OAuth 2.0 PKCE 认证层 · Token 刷新 · ngrok HTTPS 隧道（Slack 回调）</text>
+  <text x="400" y="165" text-anchor="middle" font-size="10" fill="#6c3483">OAuth 2.0 PKCE 认证层 · Token 刷新 · ngrok HTTPS 隧道（Slack 回调）</text>
 
-  <!-- arrows from sources to auth -->
+  <!-- arrows from OAuth sources (Gmail, Slack, X) to auth layer -->
   <line x1="80" y1="128" x2="150" y2="143" stroke="#8e44ad" stroke-width="1" opacity="0.5"/>
   <line x1="195" y1="128" x2="300" y2="143" stroke="#8e44ad" stroke-width="1" opacity="0.5"/>
-  <line x1="310" y1="128" x2="450" y2="143" stroke="#8e44ad" stroke-width="1" opacity="0.5"/>
+  <line x1="425" y1="128" x2="450" y2="143" stroke="#8e44ad" stroke-width="1" opacity="0.5"/>
 
   <!-- Ingestion -->
   <rect x="150" y="195" width="500" height="55" rx="10" fill="#7b2d8b" filter="url(#shadow)"/>
-  <text x="400" y="218" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">📥 摄取流水线 (ingestion.ts)</text>
+  <text x="400" y="218" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">摄取流水线 (ingestion.ts)</text>
   <text x="400" y="236" text-anchor="middle" font-size="10" fill="#d0a0d0">parseIngestionTarget() → 遍历连接器 → 每个连接器 init→validate→ingest</text>
   <text x="400" y="250" text-anchor="middle" font-size="10" fill="#d0a0d0">scheduledOnly 过滤 · 确定性拉取 vs Agentic 发现 · 单连接器失败不影响其他</text>
 
@@ -57,7 +57,7 @@
 
   <!-- Agent -->
   <rect x="150" y="275" width="500" height="80" rx="12" fill="#0f3460" filter="url(#shadow)"/>
-  <text x="400" y="301" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">⚙️ 文档 Agent</text>
+  <text x="400" y="301" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">文档 Agent</text>
   <text x="400" y="320" text-anchor="middle" font-size="10" fill="#aac">构建提示词（含连接器数据摘要）→ 创建模型客户端 → DeepAgents 执行</text>
   <text x="400" y="335" text-anchor="middle" font-size="10" fill="#aac">输出维基页面 · 更新索引 · 标记来源引用</text>
   <text x="400" y="350" text-anchor="middle" font-size="10" fill="#aac">Personal mode 特有：open-questions.md · themes.md · commitments.md</text>
@@ -66,13 +66,14 @@
   <line x1="400" y1="250" x2="400" y2="273" stroke="#0f3460" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Output -->
-  <rect x="200" y="380" width="400" height="60" rx="10" fill="#333" filter="url(#shadow)"/>
-  <text x="400" y="404" text-anchor="middle" font-size="14" font-weight="700" fill="#ddd">📂 ~/.openwiki/wiki/</text>
-  <text x="400" y="422" text-anchor="middle" font-size="10" fill="#aaa">个人知识 Brain — 按数据源组织的 Markdown 文档 · sources/ · themes.md · commitments.md</text>
+  <rect x="150" y="380" width="500" height="68" rx="10" fill="#333" filter="url(#shadow)"/>
+  <text x="400" y="402" text-anchor="middle" font-size="14" font-weight="700" fill="#ddd">~/.openwiki/wiki/</text>
+  <text x="400" y="420" text-anchor="middle" font-size="10" fill="#aaa">个人知识 Brain — 按数据源组织的 Markdown 文档</text>
+  <text x="400" y="435" text-anchor="middle" font-size="10" fill="#aaa">sources/ · themes.md · commitments.md</text>
 
   <line x1="400" y1="355" x2="400" y2="378" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Scheduling -->
-  <rect x="250" y="465" width="300" height="40" rx="20" fill="#e8e8e8" stroke="#ccc" stroke-width="1"/>
-  <text x="400" y="490" text-anchor="middle" font-size="10" fill="#666">⏰ macOS LaunchAgent 定时自动摄取 → Agent 处理 → Wiki 持续更新</text>
+  <rect x="180" y="465" width="440" height="40" rx="20" fill="#e8e8e8" stroke="#ccc" stroke-width="1"/>
+  <text x="400" y="490" text-anchor="middle" font-size="10" fill="#666">macOS LaunchAgent 定时自动摄取 → Agent 处理 → Wiki 持续更新</text>
 </svg>

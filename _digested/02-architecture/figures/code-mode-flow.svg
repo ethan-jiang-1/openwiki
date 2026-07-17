@@ -76,8 +76,9 @@
   <line x1="500" y1="305" x2="450" y2="338" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
 
   <!-- 防重写说明 -->
-  <rect x="200" y="430" width="400" height="36" rx="18" fill="#fff3cd" stroke="#f0c000" stroke-width="1"/>
-  <text x="400" y="453" text-anchor="middle" font-size="10" fill="#856404">🔑 关键机制：内容快照防重写 — 文档没有实质变化就不更新 .last-update.json，防止 CI 死循环</text>
+  <rect x="130" y="425" width="540" height="48" rx="14" fill="#fff3cd" stroke="#f0c000" stroke-width="1"/>
+  <text x="400" y="445" text-anchor="middle" font-size="10" font-weight="700" fill="#856404">关键机制：内容快照防重写</text>
+  <text x="400" y="462" text-anchor="middle" font-size="9" fill="#856404">文档没有实质变化就不更新 .last-update.json，防止 CI 死循环</text>
 
   <text x="400" y="495" text-anchor="middle" font-size="9" fill="#bbb">Code mode 也写 AGENTS.md / CLAUDE.md 片段，让 AI 助手自动发现 openwiki/ 文档</text>
 </svg>

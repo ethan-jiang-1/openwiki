@@ -113,6 +113,8 @@ runOpenWikiIngestion(_cwd, options)
               ├─ 如果确定性拉取失败且无原始文件 → 返回 status: "error"
               │
               ├─ 发送确定性拉取摘要事件
+              │   （agentic 连接器无拉取结果时该函数提前返回，实际为 no-op，
+              │    见 `src/ingestion.ts:386-388`）
               │
               ├─ 调用 runOpenWikiAgent("update", cwd, {...})
               │   — 启动 agent 进行 wiki 更新
@@ -123,7 +125,7 @@ runOpenWikiIngestion(_cwd, options)
 ```
 
 **关键行为**：
-- 每个源实例**串行处理**（`for...of` 循环 + `await`），不会并行跑多个源的 agent。这是刻意设计：同时跑多个 agent 进程共享同一个 wiki 文件系统会导致写入冲突。
+- 每个源实例**串行处理**（`for...of` 循环 + `await`），不会并行跑多个源的 agent。一个合理的解释是避免多个 agent 进程同时写同一个 wiki 文件系统产生冲突（代码中未明确注释这一动机）。
 - `_cwd` 参数被显式忽略（`void _cwd`），代码内部使用 `openWikiLocalWikiDir` 作为 agent 的工作目录。
 - 即使 `resolveIngestionSourceInstances()` 返回 0 个实例，只要 `target` 是 `"all"`，就不会抛错（空运行，结果数组为空）。
 
@@ -365,7 +367,7 @@ try {
 
 `src/ingestion.ts:347-379`
 
-为每个连接器 ID 提供**特化的合成指导**（switch-case 结构），共覆盖 7 个连接器中的 6 个（`git-repo` 的指导最简洁，仅一行）：
+为每个连接器 ID 提供**特化的合成指导**（switch-case 结构），全部 7 个连接器均有对应 case（`git-repo` 的指导最简洁，仅一行）：
 
 | 连接器 | 核心指导 |
 |--------|---------|
@@ -432,5 +434,7 @@ const agentResult = await runOpenWikiAgent("update", cwd, {
 | `src/connectors/registry.ts:10-18` | `CONNECTOR_IDS` | 所有已知连接器 ID 的常量数组 |
 | `src/connectors/registry.ts:20-38` | `createConnectorRegistry()` | 构建连接器运行时注册表 |
 | `src/connectors/registry.ts:41-43` | `isConnectorId()` | 类型守卫：检查字符串是否为有效 ConnectorId |
-| `src/onboarding.ts:18-38` | `OnboardingSourceInstanceConfig`, `OnboardingSourceConfig` | Onboarding 配置中的源实例类型 |
+| `src/onboarding.ts:18-25` | `OnboardingSourceScheduleConfig` | 源调度配置类型（含 pausedAt） |
+| `src/onboarding.ts:27-32` | `OnboardingSourceConfig` | 源基础配置类型（connectedAt、ingestionGoal 等） |
+| `src/onboarding.ts:34-38` | `OnboardingSourceInstanceConfig` | 源实例类型（扩展 OnboardingSourceConfig，加 connectorId 和 id） |
 | `src/onboarding.ts:51-60+` | `OpenWikiOnboardingConfig` | 完整 onboarding 配置类型 |

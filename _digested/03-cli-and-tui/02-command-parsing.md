@@ -33,7 +33,7 @@ out_of_scope:
 `src/commands.ts` 的结构分为三个层次：
 
 - **类型与常量定义**（第 1-76 行）：`HelpRow`、`HelpContent`、`CliCommand`、`OpenWikiRunMode`、`OpenWikiRunModeSource`、`CronTarget`
-- **命令解析**（第 77-330 行）：`parseCommand()` 主解析器，`parseRunCommand()` run 子命令解析器，`resolveExplicitMode()` mode 冲突解决，`isOpenWikiRunMode()` 类型守卫
+- **命令解析**（第 77-589 行）：`parseCommand()` 主解析器（77-330），`parseRunCommand()` run 子命令解析器（332-565），`resolveExplicitMode()` mode 冲突解决（567-583），`isOpenWikiRunMode()` 类型守卫（585-589）
 - **运行时工具与帮助系统**（第 591-819 行）：`shouldRunNonInteractively()`、`isDevelopmentMode()`、`commandEmitsTelemetry()`、`helpContent`、`getHelpText()`、`formatRows()`
 
 整个文件的入口点是 `parseCommand(argv)`。`src/cli.tsx:3554` 调用它：
@@ -196,7 +196,7 @@ run 是最复杂的 variant，也是默认命令——当第一个参数不匹�
 | `exitCode` | `1` | 固定为 1（失败退出码） |
 | `message` | `string` | 人类可读的错误消息 |
 
-所有解析失败场景都返回这个 variant。`src/cli.tsx:3929-3931` 中有对应的类型守卫 `isCliError()`，用于在命令执行前过滤错误命令。
+所有解析失败场景都返回这个 variant。`src/cli.tsx:3927-3938` 中的类型守卫 `shouldPrintStartupError()` 用于判断是否直接向 stderr 输出错误信息并退出（否则错误命令交给 Ink TUI 展示）。
 
 ---
 
@@ -289,9 +289,9 @@ type HelpContent = {
 
 `src/commands.ts:628-773` 定义了完整的帮助内容，以字面量常量的形式维护。包含：
 
-- **usage**（18 行）：涵盖所有子命令的用法格式
+- **usage**（16 行）：涵盖所有子命令的用法格式
 - **commands**（12 行）：每个子命令的描述
-- **options**（7 行）：`--init`、`--update`、`--mode`、`--print`、`--modelId`、`--telemetry-file`
+- **options**（6 行）：`--init`、`--update`、`--mode`、`--print`、`--modelId`、`--telemetry-file`
 - **developmentOptions**（1 行）：`--dry-run`
 - **examples**（20 行）：常见使用场景
 - **developmentExamples**（1 行）：`openwiki --dry-run`
@@ -390,12 +390,12 @@ process.argv.slice(2)                  // src/cli.tsx:3554
         - runCronCommand(command)       // kind: "cron"
         - runIngestCommand(command)     // kind: "ingest"
         - runPrintCommand(command)      // kind: "run" + print
-        - isCliError(command) → 输出错误并退出
+        - shouldPrintStartupError(...) → 输出错误并退出
 ```
 
 两个运行时判定函数：
 
-- **`shouldRunNonInteractively()`**（`src/commands.ts:598-607`）：当命令是 run 且启用了 print 模式，或者在非 TTY 环境（CI/cron/管道）且 shouldStart 为 true 时，返回 true。此时跳过 Ink TUI，走非交互路径。
+- **`shouldRunNonInteractively()`**（`src/commands.ts:598-607`）：当命令是 run 且非 dryRun，并且启用了 print 模式，或者在非 TTY 环境（CI/cron/管道）且 shouldStart 为 true 时，返回 true。此时跳过 Ink TUI，走非交互路径。
 - **`commandEmitsTelemetry()`**（`src/commands.ts:620-626`）：仅当 command 是 init 或 update（非 dryRun）时返回 true。chat、auth、ingest 等不发送遥测，无需显示一次性隐私声明。
 
 ---

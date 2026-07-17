@@ -111,7 +111,7 @@ modelId = resolveModelId(options, provider);
 `resolveModelId()` 按优先级确定模型 ID：
 1. `options.modelId`（CLI `--modelId` 参数）
 2. `OPENWIKI_MODEL_ID` 环境变量
-3. `getDefaultModelId(provider)` —— provider 的内置默认模型（如 Anthropic 的 `claude-sonnet-4-5`）
+3. `getDefaultModelId(provider)` —— provider 的内置默认模型（`modelOptions[0]`，如 Anthropic 的 `claude-haiku-4-5`）
 
 解析出的 model ID 经过 `normalizeModelId()`（统一命名变体）和 `isValidModelId()` 校验。
 
@@ -312,7 +312,7 @@ const agent = createDeepAgent({
 ```
 
 - **`createDeepAgent()`**：DeepAgents 框架的核心工厂函数。它创建一个配备文件系统工具（ls、glob、grep、read_file、write_file、edit_file）、shell execute 和 task（subagent）工具的 agent。
-- **`tools: createOpenWikiConnectorTools()`**：注入 OpenWiki 特定的连接器工具（`openwiki_ingest_connector`、`openwiki_list_connectors`、`openwiki_list_raw_items`、`openwiki_read_raw_item`、`openwiki_list_mcp_tools`、`openwiki_call_mcp_tool`）。这些工具让 agent 能访问 Gmail、Slack、Notion 等数据源。
+- **`tools: createOpenWikiConnectorTools()`**：注入 OpenWiki 特定的连接器工具（`openwiki_ingest_connector`、`openwiki_ingest_all_connectors`、`openwiki_list_connectors`、`openwiki_list_raw_items`、`openwiki_read_raw_item`、`openwiki_list_mcp_tools`、`openwiki_call_mcp_tool`）。这些工具让 agent 能访问 Gmail、Slack、Notion 等数据源。
 - **Index middleware**：`createOpenWikiIndexMiddleware()`（`src/agent/index-middleware.ts:22-39`）在 init/update 完成后为每个 wiki 目录自动生成 `index.md` 文件。Chat 命令跳过此中间件。
 - **Skills**：加载 `~/.openwiki/skills/` 中的内置 skills（如 `migrate-wiki-to-okf`、`write-connector`）。
 
@@ -392,7 +392,7 @@ else
   "updatedAt": "2026-07-17T12:00:00.000Z",
   "command": "init",
   "gitHead": "a1b2c3d4e5f6...",
-  "model": "claude-sonnet-4-5"
+  "model": "claude-haiku-4-5"
 }
 ```
 
@@ -542,7 +542,7 @@ type UpdateMetadata = {
 
 ```
 "anthropic" | "gemini" | "gemini-enterprise" | "openai" | "openai-chatgpt" |
-"openrouter" | "bedrock" | "baseten" | "fireworks" | "nvidia" | "openai-compatible" | "nebuis"
+"openrouter" | "bedrock" | "baseten" | "fireworks" | "nvidia" | "openai-compatible" | "nebius"
 ```
 
 ## 5. 错误处理与重试行为（Error Handling and Retry Behavior）
@@ -600,7 +600,7 @@ function createRunThreadId(): string {
 }
 ```
 
-thread ID 的前缀是工作目录路径的 SHA-256 前 32 个十六进制字符。这意味着同一个仓库的连续 chat 调用共享相同的 checkpointer 命名空间，agent 可以从中恢复之前的对话状态。每次运行附加一个唯一的后缀（timestamp + random），所以即使同一个仓库的不同运行也不会互相覆盖 checkpoint。
+thread ID 的前缀是工作目录路径的 SHA-256 前 32 个十六进制字符，用于标识 checkpoint 属于哪个仓库；每次运行附加一个唯一的后缀（timestamp + random），所以不同运行生成的 thread ID 互不相同、不会互相覆盖 checkpoint。注意：LangGraph 的 checkpoint 以**完整** thread_id（含后缀）为键，因此仅凭共享前缀并不能恢复之前的对话状态——对话连续性来自调用方跨调用传入同一个 `options.threadId`（`index.ts:224` 优先使用它；TUI 在 `cli.tsx` 中用 `sessionThreadId` 在整个 chat 会话内复用同一个 thread ID）。
 
 ### Checkpointer 安全
 

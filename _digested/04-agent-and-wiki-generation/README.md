@@ -4,9 +4,9 @@ doc_type: "index"
 status: "draft"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
+updated: "2026-07-18"
 audience: "需要理解文档 agent 的完整运行流程、DeepAgents 集成和 wiki 生成机制的人"
-purpose: "列出 04-agent-and-wiki-generation 目录的计划文档"
+purpose: "列出 04-agent-and-wiki-generation 目录的文档（已完成与计划中）"
 owns: "04-agent-and-wiki-generation 目录导航"
 update_when:
   - "新增或移除计划文档时"
@@ -34,15 +34,15 @@ out_of_scope:
 9. 流式传输消息和工具事件回 CLI
 10. init/update 完成后比较前后内容快照，**仅内容变更时才**写入 `.last-update.json`
 
-## 计划文档
+## 文档
 
-| # | 文档 | 说明 |
-|---|------|------|
-| 1 | `01-agent-workflow.md` | 完整的 10 步流程详解 — `src/agent/index.ts`（1637 行） |
-| 2 | `02-prompting-strategy.md` | 系统提示词 — 编码了产品规则：文件系统发现优先于编造、避免薄页面、git 历史用于 init/update、AGENTS.md/CLAUDE.md 标准化 |
-| 3 | `03-git-evidence-and-metadata.md` | Git 证据收集（`utils.ts`）— git status/log/diff、内容快照 SHA-256、`.last-update.json` 的读写和防重写机制 |
-| 4 | `04-deepagents-backend.md` | `OpenWikiLocalShellBackend`（`docs-only-backend.ts`）— 继承 DeepAgents LocalShellBackend，docs-only 写入守卫，virtualMode |
-| 5 | `05-skills-and-middleware.md` | Skills 系统（migrate-wiki-to-okf, write-connector）+ 索引中间件（index-middleware.ts）+ frontmatter 校验（frontmatter-validator.ts） |
+| # | 文档 | 状态 | 说明 |
+|---|------|------|------|
+| 1 | `01-agent-workflow.md` | 已完成 | 完整的 10 步流程详解 — `src/agent/index.ts`（1637 行） |
+| 2 | `02-prompting-strategy.md` | 已完成 | 系统提示词 — 编码了产品规则：文件系统发现优先于编造、避免薄页面、git 历史用于 init/update、AGENTS.md/CLAUDE.md 标准化 |
+| 3 | `03-git-evidence-and-metadata.md` | 已完成 | Git 证据收集（`utils.ts`）— git status/log/diff、内容快照 SHA-256、`.last-update.json` 的读写和防重写机制 |
+| 4 | `04-deepagents-backend.md` | 已完成 | `OpenWikiLocalShellBackend`（`docs-only-backend.ts`）— 继承 DeepAgents LocalShellBackend，docs-only 写入守卫，virtualMode |
+| 5 | `05-skills-and-middleware.md` | 计划中 | Skills 系统（migrate-wiki-to-okf, write-connector）+ 索引中间件（index-middleware.ts）+ frontmatter 校验（frontmatter-validator.ts） |
 
 ## 关键源文件
 

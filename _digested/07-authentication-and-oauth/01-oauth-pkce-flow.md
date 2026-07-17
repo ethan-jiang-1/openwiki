@@ -16,9 +16,9 @@ update_when:
   - "token 响应映射（mapTokenResponse）逻辑变化时"
   - "浏览器打开和剪贴板复制逻辑变化时"
 out_of_scope:
-  - "token 的后续存储、刷新和过期处理（在 02-token-storage-and-refresh.md）"
+  - "token 的后续存储、刷新和过期处理（在 03-token-management.md）"
   - "交互式凭据配置向导的 TUI 实现（在 10-configuration-and-telemetry/）"
-  - "ngrok HTTPS 隧道建立（在 03-ngrok-tunnel.md）"
+  - "ngrok HTTPS 隧道建立（在 05-ngrok-tunnel.md）"
   - "MCP 子系统的认证集成（在 06-connectors-and-data-sources/）"
   - "连接器运行时的 token 使用（在 06-connectors-and-data-sources/）"
 ---
@@ -214,7 +214,7 @@ function providerUsesHttpsRedirectOverride(provider: OAuthProviderConfig): boole
 
 Slack OAuth 要求 redirect URI 必须为 HTTPS。为了解决本地开发中 HTTP 服务器的限制，OpenWiki 支持通过 `OPENWIKI_HTTPS_OAUTH_REDIRECT_URI` 环境变量指定一个 HTTPS 重定向 URI（通常由 ngrok 隧道提供）。该 URL 必须满足：
 - 协议为 `https:`
-- 路径以 `/callback` 结尾
+- 路径必须**精确等于** `/callback`（`oauth.ts:541` 的检查是 `url.pathname !== "/callback"`，即完全相等匹配，而非后缀匹配 —— 尽管错误消息措辞为 "must end with /callback"）
 - 不包含用户名、密码或 hash fragment
 
 如果未设置该环境变量，Slack 也使用本地 HTTP URI（降级到直接使用）。
@@ -375,13 +375,13 @@ if (expiresIn && provider.tokenMapping.expiresAtEnvKey) {
 
 根据 provider 的 `tokenMapping`（定义在 `src/auth/types.ts:19-26`），将提取的 token 映射到对应的环境变量 key：
 
-| tokenMapping 字段 | 说明 | 总是写入 |
+| tokenMapping 字段 | 说明 | 写入条件 |
 |-------------------|------|---------|
 | `accessTokenEnvKey` | access token 的环境变量名 | 是（必须存在，否则抛错） |
 | `refreshTokenEnvKey` | refresh token 的环境变量名 | 仅在 refresh token 存在时 |
 | `tokenTypeEnvKey` | token 类型（如 `"Bearer"`）的环境变量名 | 仅在 token type 存在时 |
 | `expiresAtEnvKey` | 过期时间的 ISO 时间戳环境变量名 | 仅在 expires_in 存在时 |
-| `clientIdEnvKey` | client ID 的环境变量名 | 总是写入 |
+| `clientIdEnvKey` | client ID 的环境变量名 | 仅在 provider 的 `tokenMapping` 定义了该字段时（`oauth.ts:391-393` 的 `if` 条件；目前只有 Notion 定义，见 `providers.ts:48`。Gmail/Slack/X 不写入 client ID env key） |
 
 ### 7.4 持久化到 .env 文件
 
@@ -421,14 +421,14 @@ if (expiresIn && provider.tokenMapping.expiresAtEnvKey) {
 | `clientIdEnvKey` | `OPENWIKI_SLACK_CLIENT_ID` | 从 env 读取 |
 | `clientSecretEnvKey` | `OPENWIKI_SLACK_CLIENT_SECRET` | 从 env 读取 |
 | `scopes` | `[]`（空数组） | scope 不使用标准参数 |
-| `extraAuthParams` | `user_scope`: 12 个权限 | 通过额外参数传递 user scope |
+| `extraAuthParams` | `user_scope`: 16 个权限 | 通过额外参数传递 user scope |
 | `extraAuthParams.scope` | `""`（空字符串） | 显式清空 bot scope |
 
 **特殊行为**：
 
 1. **scope 参数处理**：Slack 不使用标准 `scope` 参数。scopes 字段为空数组（`oauth.ts:283-285` 对空数组不设置 `scope` 参数），实际权限通过 `extraAuthParams.user_scope` 传递。
 
-2. **user scope 权限列表**（12 个）：
+2. **user scope 权限列表**（16 个）：
    ```
    channels:read, channels:history, groups:read, groups:history,
    im:read, im:history, mpim:read, mpim:history, users:read,
@@ -486,7 +486,7 @@ if (expiresIn && provider.tokenMapping.expiresAtEnvKey) {
    - 注册参数：`client_name: "OpenWiki"`、`grant_types: ["authorization_code", "refresh_token"]`、`token_endpoint_auth_method: "none"`
    - 从响应中获取临时 `client_id`
 
-动态注册获取的 `client_id` 也会被保存到 env（通过 `tokenMapping.clientIdEnvKey`），下次运行时可以直接使用，但注册是一次性的 —— 如果注册失效，下次认证时会重新注册。
+动态注册获取的 `client_id` 也会被保存到 env（通过 `tokenMapping.clientIdEnvKey`），但**重新运行认证流程不会复用它** —— `runOAuthAuth()` 对 MCP provider 无条件地重新执行发现 + 注册（`oauth.ts:133-135`），每次认证都会得到一个新的 `client_id`。保存的 `client_id` 只被独立的 token 刷新路径复用（`src/auth/tokens.ts:230` 的 `getProviderClientId()` 从 env 读取它来发起 refresh 请求）。
 
 ---
 

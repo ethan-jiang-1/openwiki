@@ -113,7 +113,7 @@ Refused path: <filePath>
 |------|-----------------------------------|------------------------|
 | 写入守卫 | **启用**。只能写入 `openwiki/` 下 | **禁用**。可写入仓库任意位置 |
 | outputMode 影响 | `"repository"`: 写入仓库内 `openwiki/`；`"local-wiki"`: guard 自动放行 | 同左 |
-| Checkpoint | MemorySaver（不持久化） | SQLite（持久化到 `~/.openwiki/openwiki.sqlite`） |
+| Checkpoint | 内存 SQLite（`SqliteSaver`, `:memory:`，不持久化） | SQLite（持久化到 `~/.openwiki/openwiki.sqlite`） |
 | 索引中间件 | 启用 (`createOpenWikiIndexMiddleware`) | 不启用 |
 
 ### 2.5 isOpenWikiDocsPath 函数
@@ -214,12 +214,12 @@ const checkpointPath = path.join(openWikiEnvDir, "openwiki.sqlite");
 | 命令 | Checkpoint 类型 | connString | persistent |
 |------|----------------|------------|------------|
 | `chat` | SQLite (持久化) | `~/.openwiki/openwiki.sqlite` | `true` |
-| `init` / `update` | MemorySaver (内存) | `:memory:` | `false` |
+| `init` / `update` | 内存 SQLite (`SqliteSaver`, `:memory:`) | `:memory:` | `false` |
 
 **为什么 chat 持久化而 init/update 不持久化？**
 
 - **chat**：需要保留对话历史。用户可能在多次 chat 会话之间继续对话，因此 agent 状态必须持久化到 SQLite 中。每次 chat 使用相同的 thread ID（基于仓库路径的 SHA-256 哈希），同一仓库的连续 chat 可以访问之前的对话状态。
-- **init / update**：每次都是独立运行的完整任务。不需要跨运行的状态恢复，使用 MemorySaver 即可，同时也避免了 SQLite 文件在频繁的单次运行中产生不必要的磁盘写入。
+- **init / update**：每次都是独立运行的完整任务。不需要跨运行的状态恢复，使用 `:memory:` 内存 SQLite 即可（`createCheckpointer()` 对所有命令都返回 `SqliteSaver.fromConnString()`，区别只在 connString），同时也避免了 SQLite 文件在频繁的单次运行中产生不必要的磁盘写入。
 
 **目录和权限** (`src/agent/index.ts:414-421`)：`prepareCheckpointDirectory` 确保 `~/.openwiki/` 目录存在且权限为 `0o700`（只有 owner 可读写执行）。运行结束后，如果使用了持久化 checkpoint，文件权限也会被设为 `0o600` (`src/agent/index.ts:327-329`)。
 

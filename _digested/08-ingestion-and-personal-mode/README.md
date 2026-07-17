@@ -4,9 +4,9 @@ doc_type: "index"
 status: "draft"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
+updated: "2026-07-18"
 audience: "需要理解 OpenWiki personal mode 的数据摄取流水线和个人 brain wiki 概念的人"
-purpose: "列出 08-ingestion-and-personal-mode 目录的计划文档"
+purpose: "列出 08-ingestion-and-personal-mode 目录的文档（已完成与计划中）"
 owns: "08-ingestion-and-personal-mode 目录导航"
 update_when:
   - "摄取架构或个人 wiki 概念发生重大变化时"
@@ -29,13 +29,13 @@ Personal mode 的 wiki 有几个特殊文件（来自 `src/agent/prompt.ts` 中�
 | `commitments.md` | 工作承诺 — 跟进事项、审批、截止日期 |
 | `personal-logistics.md` | 个人事务 — 预约、接送、旅行、家庭任务 |
 
-## 计划文档
+## 文档
 
-| # | 文档 | 说明 |
-|---|------|------|
-| 1 | `01-ingestion-pipeline.md` | 跨连接器摄取编排（ingestion.ts，421 行）— 摄取目标解析、调度过滤、agent 运行 |
-| 2 | `02-onboarding.md` | 首次运行配置（onboarding.ts，478 行）— wiki 模板选择、数据源选择 |
-| 3 | `03-personal-brain-wiki.md` | 个人 brain wiki 概念详解 — open-questions、themes、commitments、personal-logistics 的结构和用途 |
+| # | 文档 | 状态 | 说明 |
+|---|------|------|------|
+| 1 | `01-ingestion-pipeline.md` | 已完成 | 跨连接器摄取编排（ingestion.ts，421 行）— 摄取目标解析、调度过滤、agent 运行 |
+| 2 | `02-onboarding.md` | 计划中 | 首次运行配置（onboarding.ts，478 行）— wiki 模板选择、数据源选择 |
+| 3 | `03-personal-brain-wiki.md` | 计划中 | 个人 brain wiki 概念详解 — open-questions、themes、commitments、personal-logistics 的结构和用途 |
 
 ## 关键源文件
 
