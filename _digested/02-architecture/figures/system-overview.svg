@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 620" font-family="system-ui, -apple-system, sans-serif">
+  <defs>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1a1a2e"/><stop offset="100%" stop-color="#16213e"/>
+    </linearGradient>
+    <linearGradient id="agent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0f3460"/><stop offset="100%" stop-color="#1a1a6e"/>
+    </linearGradient>
+    <linearGradient id="codeMode" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2d6a4f"/><stop offset="100%" stop-color="#1b4332"/>
+    </linearGradient>
+    <linearGradient id="personalMode" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7b2d8b"/><stop offset="100%" stop-color="#4a1942"/>
+    </linearGradient>
+    <linearGradient id="providers" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#e07b39"/><stop offset="100%" stop-color="#c06014"/>
+    </linearGradient>
+    <linearGradient id="connectors" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2b7a9b"/><stop offset="100%" stop-color="#1a5068"/>
+    </linearGradient>
+    <linearGradient id="output" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#555"/><stop offset="100%" stop-color="#333"/>
+    </linearGradient>
+    <filter id="shadow" x="-3%" y="-3%" width="106%" height="112%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.15"/>
+    </filter>
+    <marker id="arrowRight" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    </marker>
+    <marker id="arrowDown" markerWidth="7" markerHeight="10" refX="3.5" refY="10" orient="auto">
+      <polygon points="0 0, 7 0, 3.5 10" fill="#666"/>
+    </marker>
+  </defs>
+
+  <!-- background -->
+  <rect width="800" height="620" fill="#f8f9fa" rx="8"/>
+
+  <!-- title -->
+  <text x="400" y="32" text-anchor="middle" font-size="18" font-weight="700" fill="#1a1a2e">OpenWiki 系统全景</text>
+  <text x="400" y="52" text-anchor="middle" font-size="12" fill="#888">三个角色，一个引擎</text>
+
+  <!-- ===== TOP: CLI Layer ===== -->
+  <rect x="20" y="70" width="760" height="72" rx="10" fill="url(#header)" filter="url(#shadow)"/>
+  <text x="400" y="95" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">CLI 入口</text>
+  <text x="400" y="113" text-anchor="middle" font-size="11" fill="#aab">Ink TUI 终端界面 · 命令解析 · 凭据配置</text>
+
+  <!-- Code mode / Personal mode boxes under CLI -->
+  <rect x="80" y="155" width="280" height="50" rx="8" fill="url(#codeMode)" filter="url(#shadow)"/>
+  <text x="220" y="174" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">📝 Code Mode</text>
+  <text x="220" y="193" text-anchor="middle" font-size="11" fill="#a0d0b0">为代码仓库生成文档 Wiki</text>
+
+  <rect x="440" y="155" width="280" height="50" rx="8" fill="url(#personalMode)" filter="url(#shadow)"/>
+  <text x="580" y="174" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">🧠 Personal Mode</text>
+  <text x="580" y="193" text-anchor="middle" font-size="11" fill="#d0a0d0">从数据源构建个人知识库</text>
+
+  <!-- arrows from CLI to modes -->
+  <line x1="280" y1="142" x2="230" y2="153" stroke="#2d6a4f" stroke-width="2" marker-end="url(#arrowDown)"/>
+  <line x1="520" y1="142" x2="570" y2="153" stroke="#7b2d8b" stroke-width="2" marker-end="url(#arrowDown)"/>
+
+  <!-- ===== MIDDLE: Agent Engine ===== -->
+  <rect x="180" y="230" width="440" height="80" rx="12" fill="url(#agent)" filter="url(#shadow)"/>
+  <text x="400" y="256" text-anchor="middle" font-size="16" font-weight="700" fill="#fff">⚙️ 文档 Agent</text>
+  <text x="400" y="275" text-anchor="middle" font-size="11" fill="#aac">DeepAgents + LangChain · 10 步流水线 · Git 证据驱动</text>
+  <text x="400" y="295" text-anchor="middle" font-size="11" fill="#aac">内容快照防重写 · 只读沙箱 · SQLite 检查点</text>
+
+  <!-- arrows from modes to agent -->
+  <line x1="300" y1="205" x2="350" y2="228" stroke="#2d6a4f" stroke-width="2" marker-end="url(#arrowDown)"/>
+  <line x1="500" y1="205" x2="450" y2="228" stroke="#7b2d8b" stroke-width="2" marker-end="url(#arrowDown)"/>
+
+  <!-- ===== BOTTOM-LEFT: Model Providers ===== -->
+  <rect x="20" y="340" width="370" height="100" rx="10" fill="url(#providers)" filter="url(#shadow)" opacity="0.92"/>
+  <text x="205" y="365" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">🤖 模型提供商</text>
+  <text x="205" y="385" text-anchor="middle" font-size="10" fill="#ffe0c0">OpenAI · Anthropic · Gemini · OpenRouter</text>
+  <text x="205" y="400" text-anchor="middle" font-size="10" fill="#ffe0c0">AWS Bedrock · NVIDIA · Fireworks · Baseten</text>
+  <text x="205" y="415" text-anchor="middle" font-size="10" fill="#ffe0c0">Vertex AI · Nebius · OpenAI-compatible</text>
+  <text x="205" y="432" text-anchor="middle" font-size="9" fill="#ffcc88">通过 createModel() 按 provider 分支创建客户端</text>
+
+  <!-- arrow from agent to providers -->
+  <line x1="300" y1="310" x2="230" y2="338" stroke="#c06014" stroke-width="2" marker-end="url(#arrowDown)"/>
+
+  <!-- ===== BOTTOM-RIGHT: Connectors (personal mode only) ===== -->
+  <rect x="410" y="340" width="370" height="100" rx="10" fill="url(#connectors)" filter="url(#shadow)" opacity="0.92"/>
+  <text x="595" y="365" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">📡 数据源连接器</text>
+  <text x="595" y="385" text-anchor="middle" font-size="10" fill="#b0d0e0">Git Repo · Gmail · Slack · Notion</text>
+  <text x="595" y="400" text-anchor="middle" font-size="10" fill="#b0d0e0">X/Twitter · Hacker News · Web Search</text>
+  <text x="595" y="415" text-anchor="middle" font-size="10" fill="#b0d0e0">OAuth PKCE 认证 · MCP 协议</text>
+  <text x="595" y="432" text-anchor="middle" font-size="9" fill="#88ccdd">Personal mode 的数据输入源</text>
+
+  <!-- arrow from agent to connectors -->
+  <line x1="500" y1="310" x2="570" y2="338" stroke="#1a5068" stroke-width="2" marker-end="url(#arrowDown)"/>
+
+  <!-- ===== BOTTOM: Outputs ===== -->
+  <rect x="80" y="470" width="280" height="50" rx="8" fill="url(#output)" filter="url(#shadow)"/>
+  <text x="220" y="492" text-anchor="middle" font-size="13" font-weight="700" fill="#ddd">📂 openwiki/</text>
+  <text x="220" y="509" text-anchor="middle" font-size="10" fill="#aaa">代码仓库文档 Wiki</text>
+
+  <rect x="440" y="470" width="280" height="50" rx="8" fill="url(#output)" filter="url(#shadow)"/>
+  <text x="580" y="492" text-anchor="middle" font-size="13" font-weight="700" fill="#ddd">📂 ~/.openwiki/wiki/</text>
+  <text x="580" y="509" text-anchor="middle" font-size="10" fill="#aaa">个人知识 Brain</text>
+
+  <!-- arrows from modes to outputs -->
+  <line x1="220" y1="310" x2="220" y2="468" stroke="#666" stroke-width="1.5" marker-end="url(#arrowDown)" stroke-dasharray="6,3"/>
+  <line x1="580" y1="310" x2="580" y2="468" stroke="#666" stroke-width="1.5" marker-end="url(#arrowDown)" stroke-dasharray="6,3"/>
+
+  <!-- low-key annotations -->
+  <text x="400" y="555" text-anchor="middle" font-size="10" fill="#bbb">OSS · MIT License · npm: openwiki v0.2.0 · Node ≥ 22</text>
+
+  <!-- scheduling badge -->
+  <rect x="280" y="570" width="240" height="28" rx="14" fill="#e8e8e8" stroke="#ccc" stroke-width="1"/>
+  <text x="400" y="588" text-anchor="middle" font-size="10" fill="#666">⏰ macOS LaunchAgent · Cron · CI/CD 定时调度</text>
+</svg>
