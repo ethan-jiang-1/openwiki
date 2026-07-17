@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 540" font-family="system-ui, -apple-system, sans-serif">
+  <defs>
+    <filter id="shadow" x="-3%" y="-3%" width="106%" height="112%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    </marker>
+  </defs>
+  <rect width="800" height="540" fill="#f8f9fa" rx="8"/>
+
+  <text x="400" y="28" text-anchor="middle" font-size="16" font-weight="700" fill="#1a1a2e">Personal Mode：构建个人知识 Brain</text>
+  <text x="400" y="46" text-anchor="middle" font-size="11" fill="#888">openwiki（默认模式）· 从外部数据源摄取 → Agent 处理 → 写入个人 Wiki</text>
+
+  <!-- Data Sources -->
+  <text x="400" y="78" text-anchor="middle" font-size="12" font-weight="700" fill="#555">数据源</text>
+
+  <rect x="30" y="88" width="100" height="40" rx="8" fill="#c0392b" filter="url(#shadow)"/>
+  <text x="80" y="113" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Gmail</text>
+
+  <rect x="145" y="88" width="100" height="40" rx="8" fill="#611f69" filter="url(#shadow)"/>
+  <text x="195" y="113" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Slack</text>
+
+  <rect x="260" y="88" width="100" height="40" rx="8" fill="#1d3557" filter="url(#shadow)"/>
+  <text x="310" y="113" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Notion</text>
+
+  <rect x="375" y="88" width="100" height="40" rx="8" fill="#1a1a2e" filter="url(#shadow)"/>
+  <text x="425" y="113" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">X</text>
+
+  <rect x="490" y="88" width="100" height="40" rx="8" fill="#e67e22" filter="url(#shadow)"/>
+  <text x="540" y="108" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">Hacker</text>
+  <text x="540" y="120" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">News</text>
+
+  <rect x="605" y="88" width="100" height="40" rx="8" fill="#27ae60" filter="url(#shadow)"/>
+  <text x="655" y="113" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Web Search</text>
+
+  <rect x="720" y="88" width="50" height="40" rx="8" fill="#2c3e50" filter="url(#shadow)"/>
+  <text x="745" y="113" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">Git</text>
+
+  <!-- Auth layer -->
+  <rect x="80" y="145" width="640" height="32" rx="6" fill="#8e44ad" opacity="0.25"/>
+  <text x="400" y="165" text-anchor="middle" font-size="10" fill="#6c3483">🔐 OAuth 2.0 PKCE 认证层 · Token 刷新 · ngrok HTTPS 隧道（Slack 回调）</text>
+
+  <!-- arrows from sources to auth -->
+  <line x1="80" y1="128" x2="150" y2="143" stroke="#8e44ad" stroke-width="1" opacity="0.5"/>
+  <line x1="195" y1="128" x2="300" y2="143" stroke="#8e44ad" stroke-width="1" opacity="0.5"/>
+  <line x1="310" y1="128" x2="450" y2="143" stroke="#8e44ad" stroke-width="1" opacity="0.5"/>
+
+  <!-- Ingestion -->
+  <rect x="150" y="195" width="500" height="55" rx="10" fill="#7b2d8b" filter="url(#shadow)"/>
+  <text x="400" y="218" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">📥 摄取流水线 (ingestion.ts)</text>
+  <text x="400" y="236" text-anchor="middle" font-size="10" fill="#d0a0d0">parseIngestionTarget() → 遍历连接器 → 每个连接器 init→validate→ingest</text>
+  <text x="400" y="250" text-anchor="middle" font-size="10" fill="#d0a0d0">scheduledOnly 过滤 · 确定性拉取 vs Agentic 发现 · 单连接器失败不影响其他</text>
+
+  <!-- arrow from auth to ingestion -->
+  <line x1="400" y1="177" x2="400" y2="193" stroke="#7b2d8b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Agent -->
+  <rect x="150" y="275" width="500" height="80" rx="12" fill="#0f3460" filter="url(#shadow)"/>
+  <text x="400" y="301" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">⚙️ 文档 Agent</text>
+  <text x="400" y="320" text-anchor="middle" font-size="10" fill="#aac">构建提示词（含连接器数据摘要）→ 创建模型客户端 → DeepAgents 执行</text>
+  <text x="400" y="335" text-anchor="middle" font-size="10" fill="#aac">输出维基页面 · 更新索引 · 标记来源引用</text>
+  <text x="400" y="350" text-anchor="middle" font-size="10" fill="#aac">Personal mode 特有：open-questions.md · themes.md · commitments.md</text>
+
+  <!-- arrow -->
+  <line x1="400" y1="250" x2="400" y2="273" stroke="#0f3460" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Output -->
+  <rect x="200" y="380" width="400" height="60" rx="10" fill="#333" filter="url(#shadow)"/>
+  <text x="400" y="404" text-anchor="middle" font-size="14" font-weight="700" fill="#ddd">📂 ~/.openwiki/wiki/</text>
+  <text x="400" y="422" text-anchor="middle" font-size="10" fill="#aaa">个人知识 Brain — 按数据源组织的 Markdown 文档 · sources/ · themes.md · commitments.md</text>
+
+  <line x1="400" y1="355" x2="400" y2="378" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Scheduling -->
+  <rect x="250" y="465" width="300" height="40" rx="20" fill="#e8e8e8" stroke="#ccc" stroke-width="1"/>
+  <text x="400" y="490" text-anchor="middle" font-size="10" fill="#666">⏰ macOS LaunchAgent 定时自动摄取 → Agent 处理 → Wiki 持续更新</text>
+</svg>
