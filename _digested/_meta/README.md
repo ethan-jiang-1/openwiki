@@ -15,17 +15,17 @@ out_of_scope:
 
 # _meta — 归档与元数据
 
-`_meta/` 是 `_digested/` 的归档层，**不是当前导航的一部分**。这里存放：
+`_meta/` 是 `_digested/` 的归档层，**不是当前导航的一部分**。
 
 ## 子目录
 
 ### `doc-history/`
-`_digested/` 文档本身的结构演进记录。什么时候添加/合并/重命名了哪些文档。
+`_digested/` 文档本身的结构演进记录。
 
 ### `git-tracking/`
 Git 分支、remote、upstream sync 的追踪文件：
 - `git-branch-and-upstream-tracking.md` — 分支拓扑和 sync 历史
-- `coverage-map.md` — 源码→文档覆盖矩阵（**唯一的例外**：虽然是归档层但是日常维护中会频繁查阅）
+- `coverage-map.md` — 源码→文档覆盖矩阵（日常维护频繁查阅）
 - `quality-review.md` — 文档质量审查 checklist
 - `upstream-sync/` — sync 事件日志和模板
 - `scripts/track.sh` — 辅助脚本

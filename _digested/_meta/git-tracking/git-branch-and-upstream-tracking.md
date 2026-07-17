@@ -40,10 +40,10 @@ upstream/main (langchain-ai/openwiki)
 ```
 
 - `main`：源码基线，不含 `_digested/`，定期与 upstream 同步
-- `ethan`：工作分支，= `main` + `_digested/` + `_faq_on_digested/` + `_tmp_tracking/`
+- `ethan`：工作分支 = `main` + `_digested/` + `_faq_on_digested/` + `_tmp_tracking/`
 
 ## sync_event 历史
 
 | 日期 | 基线 commit | 说明 |
 |------|------------|------|
-| 2026-07-17 | `d4e94ab` | 初始 snapshot，文档骨架建立 |
+| 2026-07-17 | `d4e94ab` | 初始 snapshot，10 主题区文档骨架建立 |

@@ -34,98 +34,108 @@ out_of_scope:
 
 ---
 
-## A. CLI 与启动（CLI and Startup）
+## A. CLI 与 TUI（CLI and TUI）
 
 | Source area | 覆盖文档 | 覆盖度 |
 |-------------|---------|--------|
-| `src/cli.tsx` — Ink TUI 入口 | `03-cli-and-startup/02-ink-tui-rendering.md` | gap |
-| `src/commands.ts` — 命令行解析 | `03-cli-and-startup/01-cli-parsing.md` | gap |
-| `src/startup.ts` — 启动命令路由 | `03-cli-and-startup/03-startup-resolution.md` | gap |
-| `src/code-mode.ts` — code mode 初始化 | `03-cli-and-startup/04-code-mode.md` | gap |
+| `src/cli.tsx` — Ink TUI 主入口（4019 行） | `03-cli-and-tui/01-cli-entry-and-ink-tui.md` | gap |
+| `src/commands.ts` — 命令行解析（819 行） | `03-cli-and-tui/02-command-parsing.md` | gap |
+| `src/startup.ts` — 启动路由（102 行） | `03-cli-and-tui/03-startup-routing.md` | gap |
+| `src/code-mode.ts` — code mode 初始化 | `03-cli-and-tui/04-code-mode-setup.md` | gap |
 
-## B. Agent 核心（Agent Core）
-
-| Source area | 覆盖文档 | 覆盖度 |
-|-------------|---------|--------|
-| `src/agent/index.ts` — agent 创建与模型初始化 | `04-agent-core/01-agent-creation-and-lifecycle.md` | gap |
-| `src/agent/prompt.ts` — 系统/用户提示词 | `04-agent-core/02-prompting-and-system-prompt.md` | gap |
-| `src/agent/skills.ts` — skills 管理 | `04-agent-core/03-skills-system.md` | gap |
-| `src/agent/docs-only-backend.ts` — 只读文件系统后端 | `04-agent-core/04-docs-only-backend.md` | gap |
-| `src/agent/index-middleware.ts` — wiki 索引中间件 | `04-agent-core/05-index-middleware.md` | gap |
-| `src/agent/frontmatter-validator.ts` — frontmatter 校验 | `04-agent-core/04-docs-only-backend.md` | gap |
-| `src/agent/types.ts` — agent 类型定义 | `04-agent-core/01-agent-creation-and-lifecycle.md` | gap |
-| `src/agent/utils.ts` — agent 工具函数 | `04-agent-core/01-agent-creation-and-lifecycle.md` | gap |
-| `src/agent/openai-chatgpt-oauth.ts` — ChatGPT OAuth | `04-agent-core/07-chatgpt-oauth.md` | gap |
-| `src/agent/vertex-surface.ts` — Vertex AI 路由 | `04-agent-core/08-vertex-surface.md` | gap |
-
-## C. 连接器（Connectors）
+## B. Agent 与 Wiki 生成（Agent and Wiki Generation）
 
 | Source area | 覆盖文档 | 覆盖度 |
 |-------------|---------|--------|
-| `src/connectors/registry.ts` — 连接器注册 | `05-connectors/01-connector-registry.md` | gap |
-| `src/connectors/types.ts` — 连接器类型 | `05-connectors/02-connector-types-and-lifecycle.md` | gap |
-| `src/connectors/tools.ts` — 连接器→agent 工具 | `05-connectors/03-connector-tools-for-agent.md` | gap |
-| `src/connectors/io.ts` — 连接器 I/O | `05-connectors/02-connector-types-and-lifecycle.md` | gap |
-| `src/connectors/mcp-client.ts` — MCP 客户端 | `05-connectors/11-mcp-subsystem.md` | gap |
-| `src/connectors/mcp-runtime.ts` — MCP 运行时 | `05-connectors/11-mcp-subsystem.md` | gap |
-| `src/connectors/sources/git-repo.ts` — Git 仓库连接器 | `05-connectors/04-git-repo-connector.md` | gap |
-| `src/connectors/sources/gmail.ts` — Gmail 连接器 | `05-connectors/05-gmail-connector.md` | gap |
-| `src/connectors/sources/hackernews.ts` — HN 连接器 | `05-connectors/10-hackernews-connector.md` | gap |
-| `src/connectors/sources/mcp.ts` — Notion/MCP 连接器 | `05-connectors/06-notion-mcp-connector.md` | gap |
-| `src/connectors/sources/slack.ts` — Slack 连接器 | `05-connectors/07-slack-connector.md` | gap |
-| `src/connectors/sources/web-search.ts` — Web Search (Tavily) | `05-connectors/08-web-search-connector.md` | gap |
-| `src/connectors/sources/x.ts` — X/Twitter 连接器 | `05-connectors/09-x-connector.md` | gap |
+| `src/agent/index.ts` — agent 创建、模型初始化、运行编排（1637 行） | `04-agent-and-wiki-generation/01-agent-workflow.md` | gap |
+| `src/agent/prompt.ts` — 系统/用户提示词（473 行） | `04-agent-and-wiki-generation/02-prompting-strategy.md` | gap |
+| `src/agent/utils.ts` — Git 证据、内容快照、元数据（479 行） | `04-agent-and-wiki-generation/03-git-evidence-and-metadata.md` | gap |
+| `src/agent/docs-only-backend.ts` — 只读文件后端 | `04-agent-and-wiki-generation/04-deepagents-backend.md` | gap |
+| `src/agent/index-middleware.ts` — wiki 索引中间件 | `04-agent-and-wiki-generation/05-skills-and-middleware.md` | gap |
+| `src/agent/frontmatter-validator.ts` — frontmatter 校验 | `04-agent-and-wiki-generation/05-skills-and-middleware.md` | gap |
+| `src/agent/skills.ts` — skills 管理 | `04-agent-and-wiki-generation/05-skills-and-middleware.md` | gap |
+| `src/agent/types.ts` — 共享类型定义 | `04-agent-and-wiki-generation/01-agent-workflow.md` | gap |
 
-## D. 认证与 OAuth（Auth and OAuth）
+## C. 模型提供商（Model Providers）
 
 | Source area | 覆盖文档 | 覆盖度 |
 |-------------|---------|--------|
-| `src/auth/oauth.ts` — OAuth 2.0 流程 | `06-auth-and-oauth/01-oauth-flows.md` | gap |
-| `src/auth/providers.ts` — 认证提供商定义 | `06-auth-and-oauth/02-auth-providers.md` | gap |
-| `src/auth/tokens.ts` — token 管理与刷新 | `06-auth-and-oauth/03-token-management.md` | gap |
-| `src/auth/configure.ts` — 认证配置生成 | `06-auth-and-oauth/04-auth-configuration.md` | gap |
-| `src/auth/ngrok.ts` — ngrok 隧道 | `06-auth-and-oauth/05-ngrok-integration.md` | gap |
-| `src/auth/types.ts` — 认证类型定义 | `06-auth-and-oauth/02-auth-providers.md` | gap |
+| `src/agent/index.ts` — `createModel()` 各 provider 分支 | `05-model-providers/02-provider-model-creation.md` | gap |
+| `src/agent/openai-chatgpt-oauth.ts` — ChatGPT OAuth（546 行） | `05-model-providers/03-chatgpt-oauth-provider.md` | gap |
+| `src/agent/vertex-surface.ts` — Vertex AI surface 路由 | `05-model-providers/04-vertex-ai-provider.md` | gap |
+| `src/constants.ts` — provider configs, model lists, env keys | `05-model-providers/01-provider-configuration.md` | gap |
+| `src/env.ts` — managedEnvKeys, credential diagnostics | `05-model-providers/01-provider-configuration.md` | gap |
 
-## E. 摄取与调度（Ingestion and Scheduling）
-
-| Source area | 覆盖文档 | 覆盖度 |
-|-------------|---------|--------|
-| `src/ingestion.ts` — 数据源摄取流水线 | `07-ingestion-and-scheduling/01-source-ingestion.md` | gap |
-| `src/schedules.ts` — macOS LaunchAgent 调度 | `07-ingestion-and-scheduling/02-macos-launchagents.md` | gap |
-| `src/onboarding.ts` — 首次运行配置 | `07-ingestion-and-scheduling/04-onboarding-config.md` | gap |
-
-## F. 凭据与配置（Credentials and Config）
+## D. 连接器与数据源（Connectors and Data Sources）
 
 | Source area | 覆盖文档 | 覆盖度 |
 |-------------|---------|--------|
-| `src/credentials.tsx` — 交互式凭据配置向导 | `08-credentials-and-config/01-credential-onboarding.md` | gap |
-| `src/env.ts` — 环境变量管理 | `08-credentials-and-config/02-environment-variables.md` | gap |
-| `src/constants.ts` — 常量和配置解析 | `08-credentials-and-config/03-constants-and-resolution.md` | gap |
-| `src/openwiki-home.ts` — OpenWiki 家目录 | `08-credentials-and-config/04-openwiki-home.md` | gap |
-| `src/fs-errors.ts` — 文件系统错误处理 | `08-credentials-and-config/04-openwiki-home.md` | gap |
+| `src/connectors/registry.ts` — 连接器注册 | `06-connectors-and-data-sources/01-connector-registry.md` | gap |
+| `src/connectors/types.ts` — 连接器类型 | `06-connectors-and-data-sources/02-connector-lifecycle.md` | gap |
+| `src/connectors/io.ts` — 连接器 I/O | `06-connectors-and-data-sources/02-connector-lifecycle.md` | gap |
+| `src/connectors/tools.ts` — agent 工具暴露（479 行） | `06-connectors-and-data-sources/03-connector-tools.md` | gap |
+| `src/connectors/mcp-client.ts` — MCP 客户端（867 行） | `06-connectors-and-data-sources/11-mcp-subsystem.md` | gap |
+| `src/connectors/mcp-runtime.ts` — MCP 运行时 | `06-connectors-and-data-sources/11-mcp-subsystem.md` | gap |
+| `src/connectors/sources/git-repo.ts` | `06-connectors-and-data-sources/04-git-repo-connector.md` | gap |
+| `src/connectors/sources/gmail.ts` | `06-connectors-and-data-sources/05-gmail-connector.md` | gap |
+| `src/connectors/sources/hackernews.ts` | `06-connectors-and-data-sources/10-hackernews-connector.md` | gap |
+| `src/connectors/sources/mcp.ts` — Notion via MCP | `06-connectors-and-data-sources/06-notion-connector.md` | gap |
+| `src/connectors/sources/slack.ts`（752 行） | `06-connectors-and-data-sources/07-slack-connector.md` | gap |
+| `src/connectors/sources/web-search.ts` — Tavily | `06-connectors-and-data-sources/08-web-search-connector.md` | gap |
+| `src/connectors/sources/x.ts` — X/Twitter | `06-connectors-and-data-sources/09-x-connector.md` | gap |
 
-## G. 遥测与基础设施（Telemetry and Infra）
-
-| Source area | 覆盖文档 | 覆盖度 |
-|-------------|---------|--------|
-| `src/telemetry/client.ts` — PostHog 客户端 | `09-telemetry-and-infra/01-telemetry.md` | gap |
-| `src/telemetry/config.ts` — 遥测配置 | `09-telemetry-and-infra/01-telemetry.md` | gap |
-| `src/telemetry/errors.ts` — 错误报告 | `09-telemetry-and-infra/01-telemetry.md` | gap |
-| `src/telemetry/gates.ts` — 功能开关 | `09-telemetry-and-infra/01-telemetry.md` | gap |
-| `src/telemetry/index.ts` — 遥测导出 | `09-telemetry-and-infra/01-telemetry.md` | gap |
-| `src/telemetry/install-id.ts` — 安装 ID | `09-telemetry-and-infra/01-telemetry.md` | gap |
-| `src/telemetry/record-run-safe.ts` — 安全运行记录 | `09-telemetry-and-infra/01-telemetry.md` | gap |
-| `src/telemetry/senders.ts` — 事件发送 | `09-telemetry-and-infra/01-telemetry.md` | gap |
-| `src/telemetry/types.ts` — 遥测类型 | `09-telemetry-and-infra/01-telemetry.md` | gap |
-| `src/diagnostics.ts` — 诊断工具 | `09-telemetry-and-infra/01-telemetry.md` | gap |
-| `src/utils.ts` — 通用工具函数 | `09-telemetry-and-infra/02-build-and-ci.md` | gap |
-
-## H. 测试（Testing）
+## E. 认证与 OAuth（Authentication and OAuth）
 
 | Source area | 覆盖文档 | 覆盖度 |
 |-------------|---------|--------|
-| `test/` — 全部 31 个 vitest 测试文件 | `09-telemetry-and-infra/02-build-and-ci.md` | gap* |
+| `src/auth/oauth.ts` — OAuth 2.0 PKCE 流程（637 行） | `07-authentication-and-oauth/01-oauth-pkce-flow.md` | gap |
+| `src/auth/providers.ts` — 提供商定义 | `07-authentication-and-oauth/02-auth-providers.md` | gap |
+| `src/auth/tokens.ts` — token 存储刷新过期 | `07-authentication-and-oauth/03-token-management.md` | gap |
+| `src/auth/configure.ts` — 认证配置生成 | `07-authentication-and-oauth/04-auth-configuration.md` | gap |
+| `src/auth/ngrok.ts` — HTTPS 隧道 | `07-authentication-and-oauth/05-ngrok-tunnel.md` | gap |
+| `src/auth/types.ts` — 认证类型 | `07-authentication-and-oauth/02-auth-providers.md` | gap |
+
+## F. 摄取与个人模式（Ingestion and Personal Mode）
+
+| Source area | 覆盖文档 | 覆盖度 |
+|-------------|---------|--------|
+| `src/ingestion.ts` — 摄取编排（421 行） | `08-ingestion-and-personal-mode/01-ingestion-pipeline.md` | gap |
+| `src/onboarding.ts` — 首次配置（478 行） | `08-ingestion-and-personal-mode/02-onboarding.md` | gap |
+
+## G. 调度与 CI（Scheduling and CI）
+
+| Source area | 覆盖文档 | 覆盖度 |
+|-------------|---------|--------|
+| `src/schedules.ts` — LaunchAgent 管理（918 行） | `09-scheduling-and-ci/01-macos-launchagents.md` | gap |
+| `.github/workflows/checks.yml` — CI 流水线 | `09-scheduling-and-ci/02-ci-workflows.md` | gap |
+| `.github/workflows/openwiki-update.yml` — 定时更新 | `09-scheduling-and-ci/03-scheduled-openwiki-updates.md` | gap |
+
+## H. 配置与遥测（Configuration and Telemetry）
+
+| Source area | 覆盖文档 | 覆盖度 |
+|-------------|---------|--------|
+| `src/credentials.tsx` — 交互式凭据向导（4337 行） | `10-configuration-and-telemetry/01-credential-onboarding.md` | gap |
+| `src/env.ts` — .env 管理 | `10-configuration-and-telemetry/02-environment-and-config.md` | gap |
+| `src/constants.ts` — 常量与配置（609 行） | `10-configuration-and-telemetry/02-environment-and-config.md` | gap |
+| `src/openwiki-home.ts` — 家目录 | `10-configuration-and-telemetry/02-environment-and-config.md` | gap |
+| `src/fs-errors.ts` — 文件系统错误 | `10-configuration-and-telemetry/02-environment-and-config.md` | gap |
+| `src/telemetry/client.ts` — PostHog 客户端 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
+| `src/telemetry/config.ts` — 遥测配置 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
+| `src/telemetry/errors.ts` — 错误报告 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
+| `src/telemetry/gates.ts` — 功能开关 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
+| `src/telemetry/index.ts` | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
+| `src/telemetry/install-id.ts` — 安装 ID | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
+| `src/telemetry/record-run-safe.ts` — 安全记录 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
+| `src/telemetry/senders.ts` — 事件发送 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
+| `src/telemetry/types.ts` — 遥测类型 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
+| `src/diagnostics.ts` — 诊断 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
+| `src/utils.ts` — 通用工具 | `10-configuration-and-telemetry/02-environment-and-config.md` | gap |
+
+## I. 测试（Testing）
+
+| Source area | 覆盖文档 | 覆盖度 |
+|-------------|---------|--------|
+| `test/` — 全部 31 个 vitest 测试文件 | `09-scheduling-and-ci/02-ci-workflows.md` | gap* |
 
 ---
 
