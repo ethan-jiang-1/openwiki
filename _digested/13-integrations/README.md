@@ -1,7 +1,7 @@
 ---
 title: "13 — 宿主集成 (Integrations)"
 doc_type: "index"
-status: "draft"
+status: "current"
 branch: "ethan"
 created: "2026-09-13"
 updated: "2026-09-13"
@@ -27,8 +27,8 @@ out_of_scope:
 
 | # | 文档 | 状态 | 说明 |
 |---|------|------|------|
-| 1 | `01-host-targets-and-transactional-install.md` | 计划中 | 4 目标安装路径表、事务安装/卸载/状态（staging→receipt→commit→rollback）、3 种 config 适配器（JSON/TOML/JSONC）、扩展新 target 的三个触点 |
-| 2 | `02-mcp-lifecycle-protocol-and-skills.md` | 计划中 | 6 个 MCP 工具（begin/submit_plan/next_page/inspect_page_claims/submit_page/finish）、host skill prompt 契约、producerActor 溯源、bundled skills 与 host skills 的区别 |
+| 1 | `01-host-targets-and-transactional-install.md` | 已完成| 4 目标安装路径表、事务安装/卸载/状态（staging→receipt→commit→rollback）、3 种 config 适配器（JSON/TOML/JSONC）、扩展新 target 的三个触点 |
+| 2 | `02-mcp-lifecycle-protocol-and-skills.md` | 已完成| 6 个 MCP 工具（begin/submit_plan/next_page/inspect_page_claims/submit_page/finish）、host skill prompt 契约、producerActor 溯源、bundled skills 与 host skills 的区别 |
 
 ## 关键源文件
 

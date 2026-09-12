@@ -1,111 +1,114 @@
 ---
-title: "01 — 连接器注册与发现 (Connector Registry and Discovery)"
+title: "01 — 连接器注册表 (Connector Registry)"
 doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
+updated: "2026-09-13"
+sync_event: "2026-09-13"
 audience: "需要理解 OpenWiki 数据源接入体系的开发者与 Agent"
-purpose: "解释连接器注册中心（connector registry）如何发现与管理 7 个内置数据源连接器，以及连接器的类型定义、生命周期、I/O 和工具暴露机制"
-owns: "`src/connectors/` 目录下的 registry、types、io、tools 以及 sources/ 下 7 个连接器实现"
+purpose: "解释连接器注册表（connector registry）如何注册 9 个内置数据源连接器、ConnectorDefinition 的字段语义（含 mode 分流）、以及连接器工具如何暴露给 agent 并被 repository 模式门控"
+owns: "`src/connectors/` 的 registry、types、io、tools 与 sources/ 下 9 个连接器实现的注册面（definition/工厂/一览）"
 update_when:
   - "新增或移除连接器时"
-  - "ConnectorRuntime / ConnectorDefinition / ConnectorIngestOptions / ConnectorState 类型发生变化时"
-  - "I/O 文件路径约定或 state 结构变化时"
-  - "tools.ts 暴露给 agent 的工具列表或 schema 变化时"
+  - "ConnectorId / ConnectorDefinition / ConnectorIngestOptions / ConnectorRuntime 类型变化时"
+  - "tools.ts 暴露给 agent 的工具列表、schema 枚举或 repository 门控逻辑变化时"
+  - "registry 工厂参数化方式变化时"
 out_of_scope:
-  - "各连接器的 ingest 内部实现细节（应归入对应连接器源码的独立文档）"
-  - "MCP 客户端与 MCP runtime 的底层协议（应归入 MCP 子系统文档）"
-  - "OAuth 认证流程（应归入 07-authentication-and-oauth/）"
-  - "调度系统如何触发摄入（应归入 09-scheduling-and-ci/）"
+  - "双配置通路、弹性 HTTP、配置规整与安全模型（见 `02-connector-config-paths-and-security.md`）"
+  - "各连接器 ingest 的内部实现细节（分篇文档）"
+  - "MCP 客户端与 runtime 的协议细节（mcp-client.ts/mcp-runtime.ts，见 `11-mcp-subsystem.md`）"
+  - "摄取流水线如何消费连接器产物（见 `10-ingestion-and-personal-mode/`）"
 ---
 
-# 01 — 连接器注册与发现 (Connector Registry and Discovery)
+# 01 — 连接器注册表 (Connector Registry)
 
 ## 1. 概述 (Overview)
 
-连接器注册中心（connector registry）是 OpenWiki 数据源接入的中央发现机制。它维护一张从连接器 ID（ConnectorId）到连接器运行时（ConnectorRuntime）的映射表，让 agent 和调度系统能通过 ID 统一发现、查询、触发任意数据源的摄入（ingest）。
+连接器注册表（connector registry）是 OpenWiki 数据源接入的中央发现机制：一张从连接器 ID（ConnectorId）到连接器运行时（ConnectorRuntime）的映射表。agent 工具、个人模式摄取（personal-mode ingestion）与 code 模式摄取（code-mode ingestion）都通过这张表按 ID 发现并触发连接器。
 
-核心文件位于 `src/connectors/`：
+2026-09-13 re-baseline 后的两条主轴：
 
-| 文件 | 职责 |
-|------|------|
-| `registry.ts` (59 行) | 注册表工厂函数，枚举所有连接器 ID，提供运行时查询 |
-| `types.ts` (78 行) | 所有连接器相关类型定义 |
-| `io.ts` (108 行) | 连接器 state/config/raw 文件的读写 |
-| `tools.ts` (479 行) | 将连接器操作暴露为 agent 可调用的 DynamicStructuredTool |
-| `sources/*.ts` | 7 个内置连接器的具体实现 |
+1. **连接器从 7 个增至 9 个**（新增 `custom-mcp` 与 `langsmith`，见 `src/connectors/types.ts:1-10`）。
+2. **`ConnectorDefinition` 新增必填字段 `mode: "code" | "personal"`**（`src/connectors/types.ts:20`）。mode 决定连接器属于哪条配置通路与摄取管线：`"code"` 连接器的配置以文件形式提交在仓库内、由 code 模式摄取管线驱动；`"personal"` 连接器的配置存放在用户主目录、由个人模式摄取驱动。当前只有 `langsmith` 是 `"code"`，其余 8 个都是 `"personal"`。
+
+核心文件（`src/connectors/`，行数为当前实测）：
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `registry.ts` | 72 | 连接器注册表工厂：ID 常量、9 条注册项、类型守卫、已配置查询 |
+| `types.ts` | 82 | 全部连接器类型定义（含 `mode` 字段） |
+| `io.ts` | 108 | 连接器 config/state/raw 文件的持久化读写 |
+| `tools.ts` | 575 | 将连接器操作暴露为 agent 可调用的 `DynamicStructuredTool`（7 个工具） |
+| `mcp-client.ts` | 973 | MCP JSON-RPC 客户端（stdio + HTTP 两种 transport） |
+| `mcp-runtime.ts` | 275 | MCP 连接器的工具发现/调用 runtime 与只读门控 |
+| `http.ts` | 145 | 弹性 HTTP 帮助函数 `fetchWithResilience`（见 02 号文档） |
+| `config.ts` | 24 | 配置规整帮助函数 `normalizeStringArray`（见 02 号文档） |
+| `sources/*.ts` | 8 文件 | 8 个 personal 连接器实现 |
+| `sources/langsmith/` | 6 文件 1363 行 | langsmith code 连接器（多文件模块） |
 
 ---
 
-## 2. 连接器注册 (Connector Registration)
+## 2. 连接器 ID 与注册表 (Connector IDs and the Registry)
 
 ### 2.1 连接器 ID 枚举
 
-`src/connectors/types.ts:1-8` 定义了 `ConnectorId` 联合类型，共 7 个值：
+`src/connectors/types.ts:1-10` 定义 `ConnectorId` 联合类型，共 **9 个值**（按字母序）：
 
-| 连接器 ID | 含义 |
-|-----------|------|
-| `git-repo` | 本地 Git 仓库 |
-| `google` | Google / Gmail |
-| `hackernews` | Hacker News |
-| `notion` | Notion (via MCP) |
-| `slack` | Slack |
-| `web-search` | Web 搜索 (Tavily) |
-| `x` | X / Twitter |
+| 连接器 ID | mode | 含义 |
+|-----------|------|------|
+| `custom-mcp` | personal | 通用只读 MCP 知识源（用户自配 MCP server） |
+| `git-repo` | personal | 本地 Git 仓库 |
+| `google` | personal | Google / Gmail |
+| `hackernews` | personal | Hacker News |
+| `langsmith` | code | LangSmith trace 运行时证据 |
+| `notion` | personal | Notion（经 MCP） |
+| `slack` | personal | Slack |
+| `web-search` | personal | Web 搜索（Tavily） |
+| `x` | personal | X / Twitter |
 
-`registry.ts:10-18` 将同一组 ID 以 `CONNECTOR_IDS` 常量数组导出，标记为 `as const satisfies readonly ConnectorId[]`，确保编译时与 `ConnectorId` 类型同步。
+`src/connectors/registry.ts:12-22` 将同一组 ID 以 `CONNECTOR_IDS` 常量数组导出（顺序为 custom-mcp、git-repo、notion、x、google、web-search、hackernews、langsmith、slack），标记 `as const satisfies readonly ConnectorId[]`，保证编译期与 `ConnectorId` 类型同步。
 
-`registry.ts:41-43` 提供 `isConnectorId(value)` 类型守卫（type guard），供 `tools.ts:382-389` 中的 `getConnectorId()` 做运行时校验。
+`src/connectors/registry.ts:54-56` 提供 `isConnectorId(value)` 类型守卫（type guard），供 `tools.ts:478-486` 的 `getConnectorId()` 在运行时校验工具入参。
 
 ### 2.2 注册表工厂函数
 
-`src/connectors/registry.ts:20-39` 定义 `createConnectorRegistry()`：
+`src/connectors/registry.ts:24-52` 定义 `createConnectorRegistry()`，返回 `Record<ConnectorId, ConnectorRuntime>`。每次调用都构造一个新对象（工厂模式，非单例）；键名与 `ConnectorId` 精确对应（含连字符的 ID 使用带引号的字符串键）。注册表按 ID 字母序排列条目：
 
 ```ts
-export function createConnectorRegistry(): Record<ConnectorId, ConnectorRuntime> {
-  return {
-    "git-repo": createGitRepoConnector(),
-    google: createGmailConnector(),
-    hackernews: createHackerNewsConnector(),
-    notion: createMcpConnector({ ... }),
-    slack: createSlackConnector(),
-    "web-search": createWebSearchConnector(),
-    x: createXConnector(),
-  };
-}
+return {
+  "custom-mcp": createMcpConnector({ ... }),   // registry.ts:29-36
+  "git-repo": createGitRepoConnector(),        // :37
+  google: createGmailConnector(),              // :38
+  hackernews: createHackerNewsConnector(),     // :39
+  langsmith: createLangSmithConnector(),       // :40
+  notion: createMcpConnector({ ... }),         // :41-47
+  slack: createSlackConnector(),               // :48
+  "web-search": createWebSearchConnector(),    // :49
+  x: createXConnector(),                       // :50
+};
 ```
 
-每次调用都返回一个新的注册表对象（工厂模式，非单例）。键名与 `ConnectorId` 精确对应（`git-repo` 和 `web-search` 因含连字符使用带引号的字符串键，其余用标识符键）。Note：Gmail 连接器的注册键是 `google`，但其实现返回的 `definition.id` 也是 `google`（见 `sources/gmail.ts:67`）。
+### 2.3 工厂参数化实例（factory-parameterized instances）
 
-### 2.3 已配置连接器查询
+9 条注册项中有两条来自**同一个工厂的两份参数化实例**：`createMcpConnector()`（`src/connectors/sources/mcp.ts:26-38`）。工厂入参 `McpConnectorInput` 只挑四个字段——`description`/`displayName`/`id`/`requiredEnv`（`mcp.ts:21-24`）——其余 definition 字段由工厂固定注入：`backend: "mcp-stdio"`（`mcp.ts:29`）、`mode: "personal"`（`mcp.ts:30`）、`supportsAgenticDiscovery: true`（`mcp.ts:31`）。
 
-`src/connectors/registry.ts:49-59` 定义 `getConfiguredConnectorIds()`：
+- **`notion` 实例**（`registry.ts:41-47`）：`requiredEnv: ["OPENWIKI_NOTION_MCP_ACCESS_TOKEN"]`，描述指向托管 Notion MCP server。
+- **`custom-mcp` 实例**（`registry.ts:29-36`）：`requiredEnv: []`——不同 MCP server 需要不同凭证，所以不硬性要求任何环境变量；凭证以**环境变量名**写在 `transport.headers` / `transport.env` 里（`registry.ts:33-34` 注释），运行时才解析（见 02 号文档的 MCP 安全节）。
 
-```ts
-export function getConfiguredConnectorIds(): ConnectorId[] {
-  const registry = createConnectorRegistry();
-  return Object.values(registry)
-    .filter(
-      (connector) =>
-        connector.requiredEnv.length > 0 &&
-        connector.requiredEnv.every((key) => Boolean(process.env[key])),
-    )
-    .map((connector) => connector.id);
-}
-```
+langsmith 则是独立的多文件模块（`src/connectors/sources/langsmith/`），在 `registry.ts:40` 以 `createLangSmithConnector()` 注册。
 
-筛选规则：仅返回 `requiredEnv` 非空且所有必需环境变量均已设置的连接器。无认证需求的连接器（如 `git-repo`、`hackernews`，其 `requiredEnv: []`）不会被计入。该函数被遥测系统（telemetry）用作采纳信号（adoption signal）。
+### 2.4 已配置连接器查询
+
+`src/connectors/registry.ts:62-72` 的 `getConfiguredConnectorIds()` 遍历注册表，仅返回 `requiredEnv` 非空且所有必需环境变量均已设置的连接器 ID。无认证需求的连接器（`requiredEnv: []` 的 `custom-mcp`/`git-repo`/`hackernews`）不会被计入。该函数被遥测系统（telemetry）用作采纳信号（adoption signal）（JSDoc 见 `registry.ts:58-61`）。
 
 ---
 
-## 3. 连接器类型 (Connector Types)
-
-所有类型定义位于 `src/connectors/types.ts`。
+## 3. 类型定义 (Connector Types)
 
 ### 3.1 ConnectorDefinition — 连接器静态定义
 
-`src/connectors/types.ts:13-21`:
+`src/connectors/types.ts:15-23`：
 
 ```ts
 export type ConnectorDefinition = {
@@ -113,6 +116,7 @@ export type ConnectorDefinition = {
   description: string;
   displayName: string;
   id: ConnectorId;
+  mode: "code" | "personal";
   requiredEnv: string[];
   supportsAgenticDiscovery: boolean;
 };
@@ -120,298 +124,269 @@ export type ConnectorDefinition = {
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `backend` | `ConnectorBackend` | 数据访问方式：`direct-api`、`local-git`、`mcp-http`、`mcp-stdio` |
-| `description` | `string` | 人类可读的连接器描述 |
+| `backend` | `ConnectorBackend`（`types.ts:12-13`） | 数据访问方式：`direct-api`、`local-git`、`mcp-http`、`mcp-stdio` |
+| `description` | `string` | 人类可读描述（也会进入 `openwiki_list_connectors` 的工具输出） |
 | `displayName` | `string` | UI 展示名称 |
 | `id` | `ConnectorId` | 全局唯一连接器 ID |
-| `requiredEnv` | `string[]` | 连接器正常运行所需的环境变量名列表，空数组 = 无需认证 |
-| `supportsAgenticDiscovery` | `boolean` | 是否支持 agent 在运行时发现可用能力（MCP 类连接器为 `true`） |
+| `mode` | `"code" \| "personal"` | **配置通路与摄取管线归属**（见 3.2 节） |
+| `requiredEnv` | `string[]` | 所需环境变量名列表；空数组 = 无需认证。只暴露**变量名**，绝不暴露值 |
+| `supportsAgenticDiscovery` | `boolean` | agent 能否在运行时自行发现可用能力（MCP 类与 git-repo 为 `true`） |
 
-### 3.2 ConnectorRuntime — 连接器运行时（生命周期）
+### 3.2 `mode` 字段的语义：code vs personal
 
-`src/connectors/types.ts:40-42`:
+`mode`（`types.ts:20`）是 re-baseline 引入的分流轴，它回答一个问题：**这个连接器的配置住在哪里、由哪条管线触发？**
 
-```ts
-export type ConnectorRuntime = ConnectorDefinition & {
-  ingest: (options?: ConnectorIngestOptions) => Promise<ConnectorIngestResult>;
-};
-```
+| | `mode: "code"` | `mode: "personal"` |
+|---|---|---|
+| 配置位置 | 随仓库提交：`<repoRoot>/openwiki/.langsmith.json`（`src/connectors/sources/langsmith/repo-config.ts:66-68`） | 用户主目录：`~/.openwiki/connectors/<id>/config.json`（`src/config/openwiki-home.ts:57-59`） |
+| 触发管线 | code 模式摄取 `runCodeModeConnectors`（`src/ingestion/code-mode.ts:105-148`） | 个人模式摄取 + agent 工具（`openwiki_ingest_*`） |
+| 仓库存什么 | workspaces/projects 等团队共享配置（密钥只存环境变量**名**） | 用户私有配置与凭证引用 |
+| 当前成员 | `langsmith` | 其余 8 个连接器 |
 
-`ConnectorRuntime` 是 `ConnectorDefinition` 的扩展，添加了 `ingest` 方法。这是连接器的核心生命周期接口：
+**code 模式分流**：`runCodeModeConnectors()` 遍历注册表时用 `if (connector.mode !== "code") { continue; }`（`code-mode.ts:115`）过滤掉全部 personal 连接器，然后对每个 code 连接器调用 `connector.ingest({ repoRoot, windowHours })`（`code-mode.ts:125`）——把仓库根路径与「距上次文档更新的小时窗口」传进去。连接器抛错被 catch 后跳过（`code-mode.ts:126-129`），绝不打断它所服务的更新 run。
 
-- **init**：由各 `create*Connector()` 工厂函数完成，将 `definition` 与 `ingest` 函数合并为 `ConnectorRuntime` 对象。无显式的 init 钩子，初始化即对象创建。
-- **validate**：通过 `requiredEnv` 字段表达。调用方（`tools.ts:211-215` 和 `registry.ts:49-59`）检查所需环境变量是否就绪，而非由连接器自检。
-- **ingest**：实际的摄入操作。接受可选的 `ConnectorIngestOptions`，返回 `ConnectorIngestResult`。每个连接器的 `ingest` 实现独立编写在 `sources/*.ts` 中，遵循统一模式：创建 runId、读取 config/state、执行数据抓取、写入 raw 文件、更新 state。
+**`ConnectorIngestOptions.repoRoot`**（`types.ts:29`）就是为这条通路新增的可选参数：只有 code 连接器消费它。langsmith 的 ingest 开头检查 `options.repoRoot === undefined` 时直接返回 `skipped`（"LangSmith runs in code mode."，`src/connectors/sources/langsmith/index.ts:143-145`）——例如被通用的 `openwiki_ingest_all_connectors` 工具（不传 repoRoot）调用时干净跳过，而不是去读一个它永远不会有 HOME 配置。
 
-### 3.3 ConnectorIngestOptions — 摄入参数
+### 3.3 ConnectorIngestOptions / ConnectorIngestResult
 
-`src/connectors/types.ts:22-28`:
-
-```ts
-export type ConnectorIngestOptions = {
-  connectorConfig?: Record<string, unknown>;
-  instanceId?: string;
-  limit?: number;
-  streams?: string[];
-  windowHours?: number;
-};
-```
+`src/connectors/types.ts:25-32`（摄入参数）：
 
 | 字段 | 说明 |
 |------|------|
-| `connectorConfig` | 运行时可覆盖的连接器配置 |
-| `instanceId` | 多实例场景下的实例标识 |
-| `limit` | 限制返回数据条数 |
-| `streams` | 指定摄入的数据流子集（如 x 连接器的 `["bookmarks", "user_posts"]`） |
-| `windowHours` | 时间窗口（小时），限制摄入最近 N 小时内的数据 |
+| `connectorConfig` | 运行时逐字段覆盖磁盘配置（MCP 连接器的合并逻辑见 `sources/mcp.ts:126-146`） |
+| `instanceId` | 多实例场景的实例标识（langsmith 会记入结果文件，`langsmith/index.ts:231`） |
+| `limit` | 限制处理的数据条数/仓库数 |
+| `repoRoot` | **code 模式专用**：仓库根路径，code 连接器据此读仓库内提交配置 |
+| `streams` | 指定摄入的数据流子集（如 x 的 `["bookmarks"]`） |
+| `windowHours` | 时间窗口（小时），只摄入最近 N 小时的数据 |
 
-### 3.4 ConnectorIngestResult — 摄入结果
+`src/connectors/types.ts:34-42`（摄入结果）：`connectorId`、`message`、`rawFiles`（写入的 raw 文件）、`runId`、`statePath`、`status: "error" | "skipped" | "success"`、`warnings`。
 
-`src/connectors/types.ts:30-38`:
+### 3.4 ConnectorRuntime / ConnectorState
+
+- `ConnectorRuntime`（`types.ts:44-46`）= `ConnectorDefinition & { ingest(options?) => Promise<ConnectorIngestResult> }`。没有显式 init 钩子：各 `create*Connector()` 工厂把 definition 与 `ingest` 函数合成一个对象即完成初始化。`ingest` 实现统一遵循「创建 runId → 读 config/state → 抓数据 → 写 raw → 更新 state」的模式。
+- `ConnectorState`（`types.ts:48-53`）：`lastRunAt`、`latestIds`（按流/仓库记录的最新 ID 水位，git-repo 的增量摄取依赖它，见 02 号文档）、`runs`（运行摘要，头部插入、保留最近 20 条，`io.ts:76-86` 的 `updateStateWithRun()` 在 `:83` 做 `slice(0, 20)`）、`version: 1`。
+- `ConnectorRunSummary`（`types.ts:55-61`）：`at`/`rawFiles`/`runId`/`status`/`warnings`。
+
+### 3.5 McpConnectorConfig / McpReadOnlyOperation
+
+`src/connectors/types.ts:63-76` 定义 MCP 连接器专有配置：`allowedTools`（显式工具白名单）、`enabled`、`mode`（`"mcp-http" | "mcp-stdio"` 覆盖）、`transport`（`type: "http" | "stdio"` + `command`/`args`/`env`/`headers`/`url`）、`readOnlyOperations`。`McpReadOnlyOperation`（`types.ts:78-82`）描述一次预定义只读操作：`type: "resource" | "tool"`、`name`、`args`。
+
+---
+
+## 4. 九个连接器一览 (9 Connectors at a Glance)
+
+| ID | mode | backend | requiredEnv | 一句话职责 |
+|----|------|---------|-------------|-----------|
+| `custom-mcp` | personal | `mcp-stdio` | `[]` | 用户自配的通用只读 MCP 知识源，HTTP/stdio 均可 |
+| `git-repo` | personal | `local-git` | `[]` | 读本地克隆的 Git 仓库，产出紧凑 manifest 供更新 agent 使用 |
+| `google` | personal | `direct-api` | `OPENWIKI_GMAIL_ACCESS_TOKEN`、`OPENWIKI_GMAIL_REFRESH_TOKEN` | 经 Gmail API（OAuth 用户凭证）抓取近期邮件 |
+| `hackernews` | personal | `direct-api` | `[]` | 经公开 HN API 抓取 feeds 与搜索结果 |
+| `langsmith` | **code** | `direct-api` | `OPENWIKI_LANGSMITH_API_KEY` | 经官方 SDK 拉取 LangSmith traces（工具调用/结果/延迟的运行时证据） |
+| `notion` | personal | `mcp-stdio` | `OPENWIKI_NOTION_MCP_ACCESS_TOKEN` | 经托管 Notion MCP server（或自配只读 server）访问 Notion 工作区 |
+| `slack` | personal | `direct-api` | `OPENWIKI_SLACK_USER_TOKEN` | 以用户 token 抓取会话、最近消息与助手搜索上下文 |
+| `web-search` | personal | `direct-api` | `TAVILY_API_KEY` | 经 Tavily 搜索 API 执行 web 搜索 |
+| `x` | personal | `direct-api` | `OPENWIKI_X_ACCESS_TOKEN` | 经 X API v2（OAuth 用户上下文）抓取时间线/提及/列表/书签 |
+
+### 4.1 personal 连接器（8 个）注册面
+
+每个连接器的 `definition` 常量与工厂函数：
+
+| 连接器 | definition 位置 | 工厂 | 备注 |
+|--------|----------------|------|------|
+| git-repo | `sources/git-repo.ts:40-49` | `createGitRepoConnector()` `:51-55` | `supportsAgenticDiscovery: true`（agent 可探索文件系统发现仓库）；按 `connectorConfig.repos` 配置 `{id, path}` 列表 |
+| google | `sources/gmail.ts:65-77` | `createGmailConnector()` `:79-83` | 默认 `maxMessages: 100`、`query: "newer_than:1d"`、格式 `full` |
+| hackernews | `sources/hackernews.ts:82-91` | `createHackerNewsConnector()` `:93-97` | 6 种 feed（ask/best/job/new/show/top）默认只抓 `["top", "new"]`（`DEFAULT_FEEDS`，`hackernews.ts:66`） |
+| notion | `sources/mcp.ts:26-38`（工厂） | `createMcpConnector({...})` `registry.ts:41-47` | 工厂固定 `backend: "mcp-stdio"`、`supportsAgenticDiscovery: true` |
+| slack | `sources/slack.ts:150-159` | `createSlackConnector()` `:161-165` | 三种数据流：`recent_messages`、`my_messages_search`、`assistant_search`（`DEFAULT_STREAMS` `slack.ts:128`） |
+| web-search | `sources/web-search.ts:41-50` | `createWebSearchConnector()` `:52-56` | Tavily：默认 `maxResults: 5`、`searchDepth: "basic"`、`includeAnswer: true` |
+| x | `sources/x.ts:55-64` | `createXConnector()` `:66-70` | 五种流（bookmarks/home_timeline/list_posts/mentions/user_posts，`DEFAULT_STREAMS` `x.ts:47`）；默认 `enabled: false` 需显式启用 |
+| custom-mcp | `sources/mcp.ts:26-38`（工厂） | `createMcpConnector({...})` `registry.ts:29-36` | 与 notion 共享工厂/mcp-client/mcp-runtime；`MCP_CONNECTOR_IDS` 扩为 `{"custom-mcp", "notion"}`（`mcp-runtime.ts:39`） |
+
+注意：Gmail 的注册键与 `definition.id` 都是 `google`（不是 `gmail`）。
+
+**personal 连接器的配置要点**（配置文件本身见 02 号文档 §2.1；此处是各连接器认哪些键）：
+
+| 连接器 | 关键配置键（默认值） | 位置 |
+|--------|---------------------|------|
+| git-repo | `repos: [{id, path}]`——本地仓库清单（无默认，空列表 = skipped） | `GitRepoConfig`（`sources/git-repo.ts:22-27`） |
+| google | `maxMessages: 100`、`query: "newer_than:1d"`、`format: "full"`、`labelIds: []` | `gmail.ts:93-101` |
+| hackernews | `feeds: ["top", "new"]`、`maxItemsPerFeed: 30`、`maxResultsPerQuery: 20`、`queries: []` | `hackernews.ts:104-110` |
+| slack | `conversationScanLimit: 500`、三流 + `conversationTypes`（均有默认） | `slack.ts:170-183` |
+| web-search | `maxResults: 5`、`searchDepth: "basic"`、`includeAnswer: true`、`queries: []` | `web-search.ts:63-77` |
+| x | `enabled: false`（**需显式启用**）、五流各自的分页参数 | `x.ts:73-86` |
+| notion / custom-mcp | `McpConnectorConfig`：`enabled`（默认 false）、`transport`、`readOnlyOperations`（默认 `[]`）、`allowedTools` | `types.ts:63-76`，磁盘默认值在 `sources/mcp.ts:130-136` |
+
+### 4.2 langsmith 连接器概览（code，唯一）
+
+`src/connectors/sources/langsmith/` 是一个 **6 文件 1363 行的多文件模块**（当前实测：`index.ts` 364、`api.ts` 224、`repo-config.ts` 224、`runs.ts` 243、`setup.ts` 126、`types.ts` 182）：
+
+| 文件 | 职责 |
+|------|------|
+| `index.ts` | definition（`langsmith/index.ts:86-95`：`backend: "direct-api"`、`mode: "code"`、`requiredEnv: [OPENWIKI_LANGSMITH_API_KEY]`、`supportsAgenticDiscovery: false`）、ingest 主流程（`:136-253` 逐 workspace/project 拉取） |
+| `api.ts` | 官方 LangSmith SDK 的包装层：字段 select、超时、限流退避 |
+| `repo-config.ts` | 仓库提交配置 `<repoRoot>/openwiki/.langsmith.json` 的读写与双白名单校验 |
+| `runs.ts` | 异常加权采样（anomaly-weighted sampling）与 trace 压缩：error/outlier/baseline 三桶，`selectSampleBuckets`（`runs.ts:31-73`），outlier 不超过非错误池的 1/4 |
+| `setup.ts` | 凭据向导的读写层：`LangSmithRegion = "us" \| "eu" \| "apac"`（`setup.ts:11`）与 apiBaseUrl 互转 |
+| `types.ts` | Trace/TraceRun/SampleStats 等内部类型 |
+
+**固定采样预算**（v1 不可配，`langsmith/index.ts:56-76`）：`MAX_TRACES = 20`（每项目 trace 预算，即 agent 的上下文预算单位）、`ERROR_CAP = 10`（错误优先占用预算）、`OUTLIER_CAP = 5`（其次延迟离群值）、`SAMPLE_LOOKBACK = 50`（一次无过滤 recent 批量，客户端分桶，刻意避免服务端 `error:true` 查询在繁忙项目上扫全史超时）、`MAX_FIELD_CHARS = 2000`（`:81`，自由文本截断）。
+
+**失效开放（fail-open）语义**：缺失密钥的 workspace 是 warning（`index.ts:193-200`）；坏项目名/抓取失败的 project 是 warning（`:216-222`）；单条 trace 拉取失败也是 warning（`:303-309`）——任何一级失败都不抛出、不阻塞其余 workspace/project/trace，更不会打断它所服务的更新 run。每个 trace 是一棵完整调用树，因此预算以「trace 数」计。
+
+> langsmith 的双白名单安全模型、`select` 排除 inputs/outputs、独立退避与 SDK retry 禁用等细节见 `02-connector-config-paths-and-security.md`。
+
+### 4.3 MCP 连接器（notion / custom-mcp）ingest 的三态行为
+
+两个 MCP 连接器共享同一个 `ingestMcpConnector()`（`sources/mcp.ts:40-120`），按磁盘配置走三种结局：
+
+1. **未启用 → skipped**：`config.enabled` 为 false 时返回提示「用 `~/.openwiki/connectors/<id>/config.json` 配置一个 MCP transport」（`mcp.ts:50-60`）。
+2. **配置不完整 → error**：缺 `transport` 或 `readOnlyOperations` 不是数组，返回 error 结果（`mcp.ts:62-72`）。
+3. **配置完整**，再分两路：
+   - **发现模式**：`readOnlyOperations` 为空数组时，不猜任何写操作，改为 live `tools/list` 发现并写 `mcp-tools.json`，状态 `skipped`，附 warning「用这些发现的工具去选只读操作」（`mcp.ts:74-95`）。落盘的 transport 先经 `sanitizeMcpTransport` 打码 header 中的 env 引用（`mcp.ts:81`；实现 `mcp-runtime.ts:132-154`）。
+   - **执行模式**：`readOnlyOperations` 非空时逐条执行（`executeMcpReadOnlyOperations`，`mcp-client.ts:58`），结果写 `mcp-results.json`，状态 `success`（`mcp.ts:97-119`）。
+
+### 4.4 摄取引导（synthesis guidance）对 9 个连接器的覆盖
+
+个人/代码摄取在连接器成功产出后，会按连接器 ID 追加一段合成引导（`createConnectorSynthesisGuidance`，`src/ingestion/ingestion.ts`）：9 个 case 全覆盖——`custom-mcp` 在 `ingestion.ts:379`、`langsmith` 在 `ingestion.ts:403`（要求把 trace dump 聚合为调用次数/延迟/token 总量，区分 Observed/Correlated/Hypothesis 三个置信层级）。新增连接器时这里也要同步加 case。
+
+---
+
+## 5. 连接器工具暴露 (Connector Tools)
+
+### 5.1 入口与 repository 门控
+
+`src/connectors/tools.ts:30-220` 的 `createOpenWikiConnectorTools(outputMode)` 把注册表暴露为 7 个 LangChain `DynamicStructuredTool`。第一件事是**repository 门控**：
 
 ```ts
-export type ConnectorIngestResult = {
-  connectorId: ConnectorId;
-  message: string;
-  rawFiles: string[];
-  runId: string;
-  statePath: string;
-  status: "error" | "skipped" | "success";
-  warnings: string[];
-};
+if (outputMode === "repository") {
+  return [];   // tools.ts:38-40
+}
 ```
 
-### 3.5 ConnectorState — 持久化状态
+连接器工具执行带凭证的外部抓取并向 OpenWiki 主目录写数据，是 personal/local-wiki 的能力；code 模式（repository）run 记录的是代码库本身，绝不能拿到连接器摄取工具——否则它们在缺凭证时抛错、浪费 token 去探索无关数据源（注释 `tools.ts:33-37`，引上游 issue #444）。
 
-`src/connectors/types.ts:44-49`:
+### 5.2 七个工具
 
-```ts
-export type ConnectorState = {
-  lastRunAt?: string;
-  latestIds?: Record<string, string>;
-  runs?: ConnectorRunSummary[];
-  version: 1;
-};
-```
-
-- `lastRunAt`: 上次运行时间（ISO 字符串）
-- `latestIds`: 按流（stream）记录的最新数据 ID，用于增量摄入的水位标记
-- `runs`: 最近的运行摘要列表（每次摄入追加到头部，保留最近 20 条，见 `io.ts:79-86` 的 `updateStateWithRun()`）
-- `version`: 固定为 `1`，用于未来的 state schema 迁移
-
----
-
-## 4. 7 个内置连接器 (7 Built-in Connectors)
-
-### 4.1 git-repo — 本地 Git 仓库
-
-| 属性 | 值 |
-|------|-----|
-| 源文件 | `src/connectors/sources/git-repo.ts` |
-| 注册 ID | `git-repo` |
-| backend | `local-git` |
-| displayName | Local Git repositories |
-| requiredEnv | `[]`（无需认证） |
-| supportsAgenticDiscovery | `true` |
-| 提供数据 | 读取本地克隆的 Git 仓库，生成紧凑的 manifest 文件（分支、HEAD、变更文件列表、最近提交摘要）供文档更新 agent 使用 |
-
-`src/connectors/sources/git-repo.ts:39-47` 定义。读取用户通过 `connectorConfig.repos` 配置的本地仓库路径，执行 `git` 命令收集变更信息。`supportsAgenticDiscovery: true` 表示 agent 可以通过探索文件系统来发现仓库。
-
-### 4.2 google (Gmail) — Gmail 邮件
-
-| 属性 | 值 |
-|------|-----|
-| 源文件 | `src/connectors/sources/gmail.ts` |
-| 注册 ID | `google` |
-| backend | `direct-api` |
-| displayName | Google / Gmail |
-| requiredEnv | `OPENWIKI_GMAIL_ACCESS_TOKEN`、`OPENWIKI_GMAIL_REFRESH_TOKEN` |
-| supportsAgenticDiscovery | `false` |
-| 提供数据 | 通过 Gmail API 抓取最近的邮件消息，使用 OAuth 用户凭证 |
-
-`src/connectors/sources/gmail.ts:62-73` 定义。默认配置：`maxMessages: 100`，查询 `newer_than:1d`，格式 `full`。支持按标签过滤（labelIds）和自定义 Gmail 搜索查询（query）。
-
-### 4.3 hackernews — Hacker News
-
-| 属性 | 值 |
-|------|-----|
-| 源文件 | `src/connectors/sources/hackernews.ts` |
-| 注册 ID | `hackernews` |
-| backend | `direct-api` |
-| displayName | Hacker News |
-| requiredEnv | `[]`（无需认证） |
-| supportsAgenticDiscovery | `false` |
-| 提供数据 | 通过公开的 Hacker News API 抓取 feeds（ask/best/job/new/show/top）和搜索查询结果 |
-
-`src/connectors/sources/hackernews.ts:65-73` 定义。虽然共有 6 种 feed 类型可选（ask/best/job/new/show/top），但默认只抓取 2 种：`top` 和 `new`（`DEFAULT_FEEDS`，见 `hackernews.ts:63`，在 `hackernews.ts:89` 作为配置默认值应用）。每 feed 最多 30 条，搜索结果最多 20 条。
-
-### 4.4 notion (MCP) — Notion via MCP
-
-| 属性 | 值 |
-|------|-----|
-| 源文件 | `src/connectors/sources/mcp.ts` |
-| 注册 ID | `notion` |
-| backend | `mcp-stdio` |
-| displayName | Notion |
-| requiredEnv | `OPENWIKI_NOTION_MCP_ACCESS_TOKEN` |
-| supportsAgenticDiscovery | `true` |
-| 提供数据 | 通过托管的 Notion MCP server（或用户配置的其他只读 MCP server）访问 Notion 工作区内容 |
-
-`src/connectors/registry.ts:28-33` 中通过 `createMcpConnector()` 工厂函数创建。与其他连接器不同，notion 不直接调用第三方 API，而是通过 MCP（Model Context Protocol）协议与 MCP server 通信。`src/connectors/sources/mcp.ts:24-35` 中的 `createMcpConnector()` 将 `backend` 强制设为 `mcp-stdio`，`supportsAgenticDiscovery` 强制设为 `true`。MCP 连接器支持通过 `McpConnectorConfig` 配置 `allowedTools`、`transport`、`readOnlyOperations` 等字段（见 `types.ts:59-78`）。
-
-### 4.5 slack — Slack
-
-| 属性 | 值 |
-|------|-----|
-| 源文件 | `src/connectors/sources/slack.ts` |
-| 注册 ID | `slack` |
-| backend | `direct-api` |
-| displayName | Slack |
-| requiredEnv | `OPENWIKI_SLACK_USER_TOKEN` |
-| supportsAgenticDiscovery | `false` |
-| 提供数据 | 抓取 Slack 会话（conversations）、最近消息和助手搜索上下文（assistant search），使用 Slack 用户 token |
-
-`src/connectors/sources/slack.ts:136-144` 定义。支持三种数据流（streams）：
-- `recent_messages` — 最近会话消息
-- `my_messages_search` — 用户自己发送的消息搜索
-- `assistant_search` — Slack AI 助手搜索上下文
-
-### 4.6 web-search — Web 搜索 (Tavily)
-
-| 属性 | 值 |
-|------|-----|
-| 源文件 | `src/connectors/sources/web-search.ts` |
-| 注册 ID | `web-search` |
-| backend | `direct-api` |
-| displayName | Web Search |
-| requiredEnv | `TAVILY_API_KEY` |
-| supportsAgenticDiscovery | `false` |
-| 提供数据 | 通过 Tavily Search API（`@langchain/tavily` 封装）执行 web 搜索，返回搜索结果和可选的 AI 生成答案 |
-
-`src/connectors/sources/web-search.ts:39-47` 定义。默认配置：`maxResults: 5`，`searchDepth: "basic"`，`topic: "general"`，`includeAnswer: true`。支持按域名包含/排除（includeDomains/excludeDomains）和时间范围过滤（timeRange）。
-
-### 4.7 x — X / Twitter
-
-| 属性 | 值 |
-|------|-----|
-| 源文件 | `src/connectors/sources/x.ts` |
-| 注册 ID | `x` |
-| backend | `direct-api` |
-| displayName | X / Twitter |
-| requiredEnv | `OPENWIKI_X_ACCESS_TOKEN` |
-| supportsAgenticDiscovery | `false` |
-| 提供数据 | 通过 X API v2 抓取用户时间线、提及（mentions）、列表帖子和书签（bookmarks），使用 OAuth 用户上下文 |
-
-`src/connectors/sources/x.ts:49-57` 定义。默认 `enabled: false`（需显式启用）。支持五种数据流（streams）：`bookmarks`、`home_timeline`、`list_posts`、`mentions`、`user_posts`。每个流有 `maxPagesPerStream` 分页控制。
-
----
-
-## 5. 连接器 I/O (Connector I/O)
-
-`src/connectors/io.ts` 提供连接器持久化层的全部读写操作。所有数据存储在 `~/.openwiki/connectors/<connectorId>/` 下。
-
-### 5.1 文件路径约定
-
-路径由 `src/openwiki-home.ts` 中的辅助函数生成：
-
-| 函数 | 路径 | 用途 |
-|------|------|------|
-| `getConnectorConfigPath(id)` | `~/.openwiki/connectors/<id>/config.json` | 连接器配置 |
-| `getConnectorStatePath(id)` | `~/.openwiki/connectors/<id>/state.json` | 连接器运行状态 |
-| `getConnectorRawDir(id)` | `~/.openwiki/connectors/<id>/raw` | 摄入原始数据目录 |
-| `resolveConnectorRawPath(id, rel)` | `~/.openwiki/connectors/<id>/raw/<rel>` | 解析 raw 目录下的相对路径（防止目录穿越） |
-
-### 5.2 读取操作
-
-| 函数 | 签名 | 说明 |
-|------|------|------|
-| `readConnectorConfig` | `(id, defaultConfig) => Promise<T>` | 读取 config.json，不存在则返回默认值 |
-| `readConnectorState` | `(id) => Promise<ConnectorState>` | 读取 state.json，不存在则返回 `{ version: 1 }` |
-
-`src/connectors/io.ts:11-49`。两者都在读取前调用 `ensureConnectorHome(id)` 确保目录存在。文件不存在时（ENOENT）返回默认值而非抛出异常。当 config.json 存在时，`readConnectorConfig` 会将文件内容浅合并（shallow merge）到默认配置之上（`{ ...defaultConfig, ...parsed }`，见 `io.ts:18-23`），即文件中的顶层字段覆盖默认值，未出现的字段保留默认值。
-
-### 5.3 写入操作
-
-| 函数 | 签名 | 说明 |
-|------|------|------|
-| `writeConnectorState` | `(id, state) => Promise<void>` | 写入 state.json，文件权限 600 |
-| `writeRawJson` | `(id, runId, filename, value) => Promise<string>` | 将摄入数据写入 `raw/<runId>/<filename>`，文件权限 600，目录权限 700 |
-
-`src/connectors/io.ts:51-70`。所有写入操作通过内部函数 `writePrivateJson()` (`io.ts:88-100`) 完成：先递归创建父目录（`mode: 0o700`），写入 JSON（`mode: 0o600`），再显式 `chmod` 确保敏感数据（如 token 缓存）不被其他用户读取。
-
-### 5.4 运行 ID 与状态更新
-
-| 函数 | 签名 | 说明 |
-|------|------|------|
-| `createRunId` | `() => string` | 生成 ISO 时间戳格式的运行 ID（如 `2026-07-17T12-00-00-000Z`），将 `:` 和 `.` 替换为 `-` |
-| `updateStateWithRun` | `(state, run) => ConnectorState` | 将新运行摘要插入 state.runs 头部，保留最近 20 条，更新 `lastRunAt` |
-
-`src/connectors/io.ts:72-86`。
-
----
-
-## 6. 连接器工具暴露 (Connector Tools)
-
-`src/connectors/tools.ts` 将连接器注册中心暴露为 agent 可以调用的 LangChain `DynamicStructuredTool` 列表。入口函数是 `createOpenWikiConnectorTools()` (`tools.ts:23`)，返回 7 个工具：
-
-| 工具名 | schema 参数 | 说明 |
+| 工具名 | schema 要点 | 说明 |
 |--------|------------|------|
-| `openwiki_list_connectors` | 无 | 列出所有内置连接器及其 backend、所需环境变量、配置路径、raw 数据路径。**不会返回密钥值（secret values）。** |
-| `openwiki_list_mcp_tools` | `connectorId`（限 `notion`） | 发现已配置 MCP 连接器的 live MCP 工具列表，并将发现结果写入 raw 目录 |
-| `openwiki_call_mcp_tool` | `connectorId`、`toolName`、`args` | 调用 MCP 连接器的一个精确命名的只读工具，将结果写入 raw 目录 |
-| `openwiki_ingest_connector` | `connectorId`、`streams`、`limit`、`windowHours` | 对单个连接器执行确定性摄入（deterministic ingestion），将原始数据和 manifest 写入 raw 目录 |
-| `openwiki_ingest_all_connectors` | 无 | 无条件调用所有连接器的 `ingest()`（`tools.ts:270-281` 遍历注册表，不做筛选）。未配置或未启用的连接器由各自的 `ingest()` 实现自行返回 `skipped` 状态，跳过逻辑不在此聚合工具中。 |
-| `openwiki_list_raw_items` | `connectorId` | 列出指定连接器 raw 目录下的文件，按运行 ID 降序排列，附带 `latestRunId` 和 `latestFiles` |
-| `openwiki_read_raw_item` | `connectorId`、`path`、`maxBytes`（默认 100000） | 读取指定连接器的 raw 文件内容，支持截断（截断上限 500000 bytes），使用 `O_NOFOLLOW` 防止符号链接穿越 |
+| `openwiki_list_connectors` | 无参数（`tools.ts:44-53`） | 列出 9 个连接器的 backend、requiredEnv **状态**（仅布尔，绝不返回密钥值）、config 路径、raw 目录、`authConfigured`/`readyForIngestion`（实现 `listConnectors`，`tools.ts:222-257`） |
+| `openwiki_list_mcp_tools` | `connectorId`，enum `["custom-mcp", "notion"]`（`tools.ts:62`） | 对已启用的 MCP 连接器做 live `tools/list` 发现并写入 raw；实现经 `mcp-runtime.ts` 的 `isMcpConnectorId` 二次校验（`tools.ts:268-274`） |
+| `openwiki_call_mcp_tool` | `connectorId`（enum 同上，`tools.ts:85`）、`toolName`、`args` | 调用一个**已发现**的只读 MCP 工具；`mcp-runtime.ts:88-97` 要求工具名必须出现在 tools/list 结果中且通过只读策略 |
+| `openwiki_ingest_connector` | `connectorId` enum **8 值**（`tools.ts:111-120`：custom-mcp/git-repo/google/hackernews/notion/slack/web-search/x）、`streams`、`limit`、`windowHours` | 单连接器确定性摄入。**enum 不含 `langsmith`**——它是 code 连接器，没有 repoRoot 就只会 skipped，对 agent 无意义 |
+| `openwiki_ingest_all_connectors` | 无参数（`tools.ts:141-150`） | 并发调用注册表里**全部**连接器的 `ingest()`（无预筛），未配置/未启用的由各自实现返回 `skipped`（如 langsmith 无 repoRoot 即 skipped） |
+| `openwiki_list_raw_items` | `connectorId` enum **9 值**（`tools.ts:159-169`，含 `langsmith` `:164`） | 列出 raw 目录文件，按 run 降序，附 `latestRunId`/`latestFiles`（`tools.ts:328-346`） |
+| `openwiki_read_raw_item` | `connectorId` enum 9 值（`tools.ts:188-198`）、`path`、`maxBytes`（默认 100000，`tools.ts:215`） | 读 raw 文件内容，截断上限 500000 字符（`tools.ts:366`） |
 
-### 6.1 工具实现模式
+枚举的设计含义：**`langsmith` 只出现在「读」工具的枚举里，不出现在「触发摄入」工具的枚举里**——拉取由 code 模式管线在 run 前完成，agent 用 `openwiki_list_raw_items` + `openwiki_read_raw_item` 消费现成产物（langsmith 的 guidance 明确要求不要重新摄取，`ingestion.ts:403`）。
 
-所有工具共享统一的实现模式 (`tools.ts:204-479`)：
+### 5.3 聚合摄入的失败隔离
 
-- **输入校验**：通过 `getStringInput()`、`getNumberInput()`、`getRecordInput()`、`getStringArrayInput()` 等辅助函数（`tools.ts:400-449`）从 tool input 中安全提取参数，类型不匹配时抛出明确错误。
-- **connectorId 校验**：`getConnectorId()` (`tools.ts:382-389`) 在提取字符串后调用 `isConnectorId()` 类型守卫验证，无效 ID 直接拒绝。
-- **结果序列化**：所有工具返回 `JSON.stringify(result, null, 2)` 格式的字符串。
-- **目录穿越防护**：`readRawItem()` (`tools.ts:301-331`) 通过 `resolveConnectorRawPath()` 解析路径（该函数有目录穿越检查），并使用 `O_NOFOLLOW` 标志打开文件防止符号链接攻击。
+`ingestAllConnectors()`（`tools.ts:288-309`）用 `Promise.allSettled` 并发运行全部连接器（`:296-298`）：一个连接器抛错（如不可刷新的 token）不会丢弃其他连接器的成功结果；每个 rejection 被转换成 `status: "error"` 的 `ConnectorIngestResult`（`ingestFailureResult`，`tools.ts:311-326`），agent 仍能看到所有已运行连接器的完整结果。
+
+### 5.4 raw 路径安全
+
+`openwiki_read_raw_item` 的纵深防御（`tools.ts:348-377`）：
+
+- `resolveConnectorRawPath()`（`src/config/openwiki-home.ts:103-118`）解析路径并检查结果不越出 raw 目录（防目录穿越，path traversal）；连接器 ID 本身先过 `assertSafeConnectorId` 白名单正则（`openwiki-home.ts:97-101`）。
+- 逐级符号链接检查：`assertRawItemPathHasNoSymlinks` 对 raw 根到目标文件的每一级做 `lstat`（`tools.ts:412-426`），列表入口也先检查 raw 根（`tools.ts:428-441`）。
+- 打开文件带 `O_NOFOLLOW` 标志（`tools.ts:451-456`）。
+
+### 5.5 工具入参校验
+
+所有工具共享同一实现模式：`getConnectorId()`（`tools.ts:478-486`）先取字符串再过 `isConnectorId()` 类型守卫；`getStringInput`/`getNumberInput`/`getRecordInput`/`getStringArrayInput`（`tools.ts:496-546`）做类型不匹配即抛错的显式校验；结果统一 `JSON.stringify(value, null, 2)` 序列化（`tools.ts:548-550`）。
 
 ---
 
-## 7. Source Anchor
+## 6. 连接器 I/O 约定 (Connector I/O)
+
+`src/connectors/io.ts` 提供持久化层，所有 personal 连接器数据存放在 `~/.openwiki/connectors/<id>/`（display 路径常量 `openWikiConnectorsDisplayPath`，`src/config/openwiki-home.ts:48`；实际路径函数 `getConnectorDir/getConnectorConfigPath/getConnectorStatePath/getConnectorRawDir/getConnectorLogsDir`，`openwiki-home.ts:53-71`。注意：这些辅助函数在 re-baseline 后位于 `src/config/openwiki-home.ts`，旧文档写的 `src/openwiki-home.ts` 路径已失效）。
+
+| 函数 | 位置 | 说明 |
+|------|------|------|
+| `readConnectorConfig(id, defaultConfig)` | `io.ts:11-31` | 读 `config.json`，ENOENT 返回默认值；存在则浅合并覆盖默认值（`{...defaultConfig, ...parsed}`） |
+| `readConnectorState(id)` | `io.ts:33-49` | 读 `state.json`，ENOENT 返回 `{ version: 1 }` |
+| `writeConnectorState(id, state)` | `io.ts:51-57` | 写 state（权限 600） |
+| `writeRawJson(id, runId, filename, value)` | `io.ts:59-70` | 写 `raw/<runId>/<filename>`，返回绝对路径 |
+| `createRunId()` | `io.ts:72-74` | ISO 时间戳，`:`/`.` 替换为 `-` |
+| `updateStateWithRun(state, run)` | `io.ts:76-86` | 摘要头部插入、保留 20 条、刷新 `lastRunAt` |
+| `writePrivateJson()`（内部） | `io.ts:88-100` | 递归建目录（0o700）→ 写 JSON（0o600）→ 显式 `chmod 600` |
+
+所有读写入口都先 `ensureConnectorHome(id)`（`openwiki-home.ts:83-95`）确保目录树存在（0o700，Windows 上叠加 `restrictDirToCurrentUser` ACL）。
+
+运行一轮后，`~/.openwiki/connectors/<id>/` 的典型布局：
+
+```
+connectors/<id>/
+├── config.json                  # 用户手编配置（personal 通路）
+├── state.json                   # ConnectorState：lastRunAt / latestIds / runs（≤20 条）
+├── logs/
+└── raw/
+    └── 2026-09-13T08-30-00-000Z/   # createRunId()：ISO 时间戳，:/ . 换成 -
+        └── manifest.json 等        # writeRawJson 写入的产物，agent 经 raw 工具读取
+```
+
+---
+
+## 7. 如何新增一个连接器（改动清单）
+
+新增连接器时，注册表相关的完整改动面（可作为 code review 清单）：
+
+1. **`src/connectors/types.ts`**：`ConnectorId` 联合类型加新值（`types.ts:1-10`）；必要时扩展 `ConnectorIngestOptions`。
+2. **`src/connectors/sources/<id>.ts`**（或目录）：`definition: ConnectorDefinition` 常量（**必须**给 `mode`，types.ts:20 是必填字段）+ `create<X>Connector()` 工厂。
+3. **`src/connectors/registry.ts`**：`CONNECTOR_IDS` 常量数组（`registry.ts:12-22`）与 `createConnectorRegistry()` 返回对象各加一条（`registry.ts:24-52`）。若是 MCP 型，复用 `createMcpConnector({...})` 参数化实例。
+4. **`src/connectors/tools.ts`**：把新 ID 加进相关工具的 schema enum——personal 连接器进 `openwiki_ingest_connector` 的 8 值枚举（`tools.ts:111-120`）；所有连接器进 `openwiki_list_raw_items` / `openwiki_read_raw_item` 的 9 值枚举（`tools.ts:159-169,188-198`）；MCP 型还要进两个 MCP 工具枚举并加入 `MCP_CONNECTOR_IDS`（`mcp-runtime.ts:39`）。
+5. **`src/ingestion/ingestion.ts`**：`createConnectorSynthesisGuidance` 加 case（现有 9 个 case 见 §4.4）——漏掉会导致该连接器产物没有合成引导。
+6. **路径与 I/O 自动获得**：`~/.openwiki/connectors/<id>/` 目录、config/state/raw 读写、raw 工具访问都由 ID 驱动，无需额外注册。
+
+---
+
+## 8. 与其他子系统的边界
+
+- **摄取管线**：personal 连接器由 `10-ingestion-and-personal-mode/` 覆盖的摄取流水线驱动；code 连接器由 `src/ingestion/code-mode.ts` 的 `runCodeModeConnectors` 驱动（分流点 `code-mode.ts:115`）。
+- **MCP 子系统**：`mcp-client.ts`/`mcp-runtime.ts` 的协议细节、分页收集与 env 白名单见 02 号文档与计划中的 MCP 子系统篇。
+- **认证**：Gmail/X 的 token 刷新、MCP header 的 OAuth token 注入属 `09-authentication-and-oauth/`。
+- **调度**：LaunchAgent/定时任务如何触发 `ingest all` 属 `11-scheduling-and-ci/`。
+
+---
+
+## Source Anchor
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/connectors/types.ts:1-8` | `ConnectorId` | 连接器 ID 联合类型，共 7 个枚举值 |
-| `src/connectors/types.ts:10-11` | `ConnectorBackend` | 后端类型：`direct-api`、`local-git`、`mcp-http`、`mcp-stdio` |
-| `src/connectors/types.ts:13-21` | `ConnectorDefinition` | 连接器静态定义：backend、description、displayName、id、requiredEnv、supportsAgenticDiscovery |
-| `src/connectors/types.ts:22-28` | `ConnectorIngestOptions` | 摄入参数：connectorConfig、limit、streams、windowHours 等 |
-| `src/connectors/types.ts:30-38` | `ConnectorIngestResult` | 摄入结果：status、rawFiles、runId、warnings 等 |
-| `src/connectors/types.ts:40-42` | `ConnectorRuntime` | ConnectorDefinition + ingest 方法，连接器运行时接口 |
-| `src/connectors/types.ts:44-49` | `ConnectorState` | 持久化状态：lastRunAt、latestIds、runs（最近 20 条） |
-| `src/connectors/types.ts:59-78` | `McpConnectorConfig`、`McpReadOnlyOperation` | MCP 连接器专有配置类型 |
-| `src/connectors/registry.ts:10-18` | `CONNECTOR_IDS` | 连接器 ID 常量数组 |
-| `src/connectors/registry.ts:20-39` | `createConnectorRegistry` | 注册表工厂函数，返回 `Record<ConnectorId, ConnectorRuntime>` |
-| `src/connectors/registry.ts:41-43` | `isConnectorId` | 类型守卫，运行时校验连接器 ID |
-| `src/connectors/registry.ts:49-59` | `getConfiguredConnectorIds` | 返回已配置（所需环境变量均已设置）的连接器 ID 列表 |
-| `src/connectors/io.ts:11-31` | `readConnectorConfig` | 读取 `config.json`，不存在返回默认值 |
-| `src/connectors/io.ts:33-49` | `readConnectorState` | 读取 `state.json`，不存在返回 `{ version: 1 }` |
-| `src/connectors/io.ts:51-57` | `writeConnectorState` | 写入 `state.json`（权限 600） |
-| `src/connectors/io.ts:59-70` | `writeRawJson` | 将摄入数据写入 `raw/<runId>/<filename>`（权限 600） |
-| `src/connectors/io.ts:72-75` | `createRunId` | 生成 ISO 时间戳运行 ID |
-| `src/connectors/io.ts:77-86` | `updateStateWithRun` | 将运行摘要插入 state.runs 头部，保留最近 20 条 |
-| `src/connectors/io.ts:88-100` | `writePrivateJson` | 内部函数，创建 700 目录，写入 600 JSON 文件 |
-| `src/connectors/tools.ts:23-202` | `createOpenWikiConnectorTools` | 将连接器操作暴露为 7 个 DynamicStructuredTool |
-| `src/connectors/tools.ts:204-239` | `listConnectors` | 内部函数，遍历注册表收集连接器元数据 |
-| `src/connectors/tools.ts:241-248` | `ingestConnector` | 内部函数，按 ID 触发单个连接器摄入 |
-| `src/connectors/tools.ts:270-281` | `ingestAllConnectors` | 内部函数，遍历注册表触发所有连接器摄入 |
-| `src/connectors/tools.ts:301-331` | `readRawItem` | 内部函数，安全读取 raw 文件（O_NOFOLLOW，截断上限 500KB） |
-| `src/connectors/tools.ts:382-389` | `getConnectorId` | 内部函数，提取并校验 connectorId |
-| `src/connectors/sources/git-repo.ts:39-47` | `definition` (git-repo) | backend: local-git，无认证，supportsAgenticDiscovery: true |
-| `src/connectors/sources/gmail.ts:62-73` | `definition` (google) | backend: direct-api，OAuth 认证，提供 Gmail 邮件 |
-| `src/connectors/sources/hackernews.ts:65-73` | `definition` (hackernews) | backend: direct-api，无认证，抓取 HN feeds |
-| `src/connectors/sources/mcp.ts:24-35` | `createMcpConnector` | MCP 连接器工厂，backend: mcp-stdio，supportsAgenticDiscovery: true |
-| `src/connectors/sources/slack.ts:136-144` | `definition` (slack) | backend: direct-api，User Token 认证，抓取 Slack 会话 |
-| `src/connectors/sources/web-search.ts:39-47` | `definition` (web-search) | backend: direct-api，TAVILY_API_KEY 认证，Tavily 搜索 |
-| `src/connectors/sources/x.ts:49-57` | `definition` (x) | backend: direct-api，OAuth 认证，X API v2 抓取 |
-| `src/openwiki-home.ts:14-16` | `getConnectorConfigPath` | 返回 `~/.openwiki/connectors/<id>/config.json` |
-| `src/openwiki-home.ts:18-20` | `getConnectorStatePath` | 返回 `~/.openwiki/connectors/<id>/state.json` |
-| `src/openwiki-home.ts:22-30` | `getConnectorRawDir` | 返回 `~/.openwiki/connectors/<id>/raw` |
-| `src/openwiki-home.ts:58-66` | `resolveConnectorRawPath` | 解析 raw 子路径，防目录穿越 |
+| `src/connectors/types.ts:1-10` | `ConnectorId` | 9 个连接器 ID（含 custom-mcp、langsmith） |
+| `src/connectors/types.ts:12-13` | `ConnectorBackend` | `direct-api`、`local-git`、`mcp-http`、`mcp-stdio` |
+| `src/connectors/types.ts:15-23` | `ConnectorDefinition` | 静态定义；`mode` 字段在 `:20` |
+| `src/connectors/types.ts:25-32` | `ConnectorIngestOptions` | 摄入参数；`repoRoot` 在 `:29` |
+| `src/connectors/types.ts:34-42` | `ConnectorIngestResult` | status/rawFiles/runId/warnings 等 |
+| `src/connectors/types.ts:44-46` | `ConnectorRuntime` | ConnectorDefinition + ingest |
+| `src/connectors/types.ts:48-61` | `ConnectorState`、`ConnectorRunSummary` | state 结构与运行摘要（runs 保留 20 条） |
+| `src/connectors/types.ts:63-82` | `McpConnectorConfig`、`McpReadOnlyOperation` | MCP 专有配置与只读操作 |
+| `src/connectors/registry.ts:12-22` | `CONNECTOR_IDS` | 9 个 ID 常量数组 |
+| `src/connectors/registry.ts:24-52` | `createConnectorRegistry` | 注册表工厂（9 条注册项） |
+| `src/connectors/registry.ts:29-36,41-47` | custom-mcp / notion 实例 | `createMcpConnector` 的两份参数化实例 |
+| `src/connectors/registry.ts:40` | `langsmith` 注册项 | 唯一 code 连接器 |
+| `src/connectors/registry.ts:54-56` | `isConnectorId` | 类型守卫 |
+| `src/connectors/registry.ts:62-72` | `getConfiguredConnectorIds` | 遥测采纳信号：requiredEnv 非空且全部就绪 |
+| `src/connectors/sources/mcp.ts:21-38` | `McpConnectorInput`、`createMcpConnector` | MCP 工厂：固定 backend/mode/supportsAgenticDiscovery |
+| `src/connectors/sources/langsmith/index.ts:86-95` | `definition`（langsmith） | `mode: "code"`、`backend: "direct-api"`、`supportsAgenticDiscovery: false` |
+| `src/connectors/sources/langsmith/index.ts:56-81` | `MAX_TRACES`/`ERROR_CAP`/`OUTLIER_CAP`/`SAMPLE_LOOKBACK`/`MAX_FIELD_CHARS` | 固定采样预算（v1 不可配） |
+| `src/connectors/sources/langsmith/runs.ts:31-73` | `selectSampleBuckets` | 异常加权采样（error→outlier→baseline，outlier ≤ 非错误池 1/4） |
+| `src/connectors/sources/git-repo.ts:40-55` | definition + `createGitRepoConnector` | local-git、无认证、agentic discovery |
+| `src/connectors/sources/gmail.ts:65-83` | definition + `createGmailConnector` | 注册键 `google`；双 token |
+| `src/connectors/sources/hackernews.ts:66,82-97` | `DEFAULT_FEEDS` + definition | 默认 `["top", "new"]` |
+| `src/connectors/sources/slack.ts:128,150-165` | `DEFAULT_STREAMS` + definition | 三流；`OPENWIKI_SLACK_USER_TOKEN` |
+| `src/connectors/sources/web-search.ts:41-56` | definition + `createWebSearchConnector` | `TAVILY_API_KEY` |
+| `src/connectors/sources/x.ts:47,55-70` | `DEFAULT_STREAMS` + definition | 五流；`OPENWIKI_X_ACCESS_TOKEN` |
+| `src/ingestion/code-mode.ts:105-148` | `runCodeModeConnectors` | code 连接器管线；mode 分流 `:115`、`ingest({repoRoot, windowHours})` `:125`、fail-open `:126-129` |
+| `src/ingestion/ingestion.ts:379,403` | `createConnectorSynthesisGuidance` cases | `custom-mcp` / `langsmith` 的合成引导 |
+| `src/connectors/tools.ts:30-40` | `createOpenWikiConnectorTools` 开头 | repository 门控：`outputMode === "repository"` 返回 `[]`（#444） |
+| `src/connectors/tools.ts:44-218` | 7 个 `DynamicStructuredTool` | 工具 schema 与枚举（MCP enum `:62,:85`；ingest enum 8 值 `:111-120`；raw enum 9 值 `:159-169,:188-198`） |
+| `src/connectors/tools.ts:288-326` | `ingestAllConnectors`、`ingestFailureResult` | `Promise.allSettled` 失败隔离 |
+| `src/connectors/tools.ts:348-456` | `readRawItem` 及路径防护 | 目录穿越检查、逐级符号链接检查、`O_NOFOLLOW`、500KB 截断 |
+| `src/connectors/tools.ts:478-486` | `getConnectorId` | 工具入参的 ID 校验 |
+| `src/connectors/mcp-runtime.ts:39-45` | `MCP_CONNECTOR_IDS`、`isMcpConnectorId` | MCP 门控扩为 `{"custom-mcp","notion"}` |
+| `src/connectors/io.ts:11-100` | 读写函数 | config/state/raw 持久化与 600/700 权限 |
+| `src/config/openwiki-home.ts:48` | `openWikiConnectorsDisplayPath` | 连接器目录 display 路径常量 |
+| `src/config/openwiki-home.ts:53-71` | `getConnector*Path/Dir` | personal 配置通路路径函数 |
+| `src/config/openwiki-home.ts:97-118` | `assertSafeConnectorId`、`resolveConnectorRawPath` | ID 白名单与 raw 路径防穿越 |

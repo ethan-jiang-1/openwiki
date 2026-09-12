@@ -1,308 +1,351 @@
 ---
-title: "01 — 交互式凭据配置 (Credential Onboarding)"
+title: "01 — 凭据向导架构 (Credential Onboarding Wizard)"
 doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
-audience: "需要理解 OpenWiki 的凭据引导流程、Ink TUI 交互组件结构、Provider 凭据提示和 env 持久化机制的人"
-purpose: "详细解释 src/credentials.tsx 的凭据引导 UX 流程、Ink 组件树、Provider 凭据差异化处理、凭据持久化和重新配置机制"
-owns: "src/credentials.tsx 的 InitSetup 组件、凭据引导步骤链、provider 凭据提示和 env 持久化"
+updated: "2026-09-13"
+sync_event: "2026-09-13"
+audience: "需要理解 OpenWiki 凭据引导向导的模块拆分、状态机与步骤导航、持久化链路和 Ink 视图分层的人"
+purpose: "解释 src/setup/credentials.tsx 组合根与 credentials/ 8 文件架构、PromptStep 步骤族与两条导航模型、useInitSetup 状态机 hook 的内部结构、凭据持久化链路和视图组装方式"
+owns: "src/setup/credentials.tsx（组合根）与 src/setup/credentials/（use-init-setup.ts、steps.ts、components.tsx、view.tsx、persistence.ts、format.ts、constants.ts、types.ts）的向导状态机、步骤导航与持久化"
 update_when:
-  - "src/credentials.tsx 的步骤链、Provider 配置或凭据持久化逻辑发生变化时"
-  - "新增 Provider 或修改 Provider 凭据结构时"
-  - "修改 LangSmith 或 OAuth 配置步骤时"
+  - "PromptStep 步骤族、脊柱步骤序列（orderedSetupSteps）或跳转链（getNextStepAfter*）变化时"
+  - "useInitSetup 的 effect/键盘路由/完成语义变化时"
+  - "凭据持久化映射（buildCredentialEnvUpdates）新增或删除 key 时"
+  - "Provider 认证方式（authMethod）集合或凭据步骤映射（credentialStep）变化时"
 out_of_scope:
-  - "Provider 模型创建和 API 调用细节（看 05-model-providers/）"
-  - "OAuth 2.0 浏览器 PKCE 流程实现细节（看 07-authentication-and-oauth/）"
-  - "连接器配置向导和 source setup（属于同一个文件的 source-menu / source-auth 步骤，但不在此篇重点范围内）"
-  - "Ingestion 调度设置（看 09-scheduling-and-ci/）"
-  - "PostHog 遥测系统（看本目录的遥测文档）"
+  - "onboarding 配置的 schema、读写与完成判定的完整语义（`src/setup/onboarding.ts`，归 10 区 02 号；本篇只讲向导如何消费它）"
+  - "OAuth 2.0 浏览器 PKCE 流程与 token 刷新实现（看 09 区）"
+  - "Provider 模型创建与 reasoning 注入的调用侧（看 06 区）"
+  - "cron 表达式语法与 LaunchAgent 安装（看 11 区）"
+  - "连接器摄取流水线本身（看 08 区）"
+  - "`.env` 文件格式、串行保存队列与 shell 快照的实现（看本目录 02 号）"
 ---
 
-# 01 -- 交互式凭据配置 (Credential Onboarding)
+# 01 — 凭据向导架构 (Credential Onboarding Wizard)
 
-`src/credentials.tsx`（4337 行）是 OpenWiki 的交互式凭据引导（Credential Onboarding）TUI 组件。它在首次运行 `openwiki run` 或执行 `openwiki auth` 时呈现一个多步骤终端向导，引导用户完成 Provider 选择、API key 输入、模型选择、可选的 LangSmith 链路追踪设置，以及 Wiki 模式和个人数据源配置。
+OpenWiki 首次运行（或显式 `openwiki init`、`openwiki auth`）时呈现的交互式凭据引导（credential onboarding）向导，在 2026-09-13 re-baseline 中完成了一次结构性拆分：原先 4337 行的单文件巨石 `src/credentials.tsx` 已删除，取而代之的是一个 30 行的组合根（composition root）`src/setup/credentials.tsx` 加上 `src/setup/credentials/` 下 8 个职责单一的文件。控制器（controller）与视图（view）彻底分离：状态机（state machine）是一个返回视图属性的 hook，视图只做只读渲染。
 
-## 1. 概览 (Overview)
+> **源码是唯一真相源。** 本文行号对应 `ethan` 分支基线 `e92cc11`，引用前请重读源码核对。
 
-`src/credentials.tsx` 承担三个核心职责：
+## 1. 组合根与 8 文件分工
 
-1. **凭据引导**：逐步收集 Provider API key、Base URL、Region、GCP 项目/位置等配置，并持久化到 `~/.openwiki/.env`
-2. **Wiki 初始化**：在凭据配置完成后，根据运行模式（code / personal）引导用户设置 Wiki 的 scope、goal、数据源和调度计划
-3. **OAuth 登录**：为 `openai-chatgpt` 这类 OAuth Provider 驱动浏览器登录流程
+组合根只有一件事（`src/setup/credentials.tsx:28-30`）：
 
-整个文件的核心是一个 state machine，由 `PromptStep` 联合类型驱动（第 103-129 行），包含 26 个步骤。步骤之间的跳转由 `getInitialStep()` 和一系列 `getNextStepAfter*()` 函数控制。
-
-文件的结构自上而下：
-
-- **类型定义**（第 76-221 行）：`InitSetupResult`、`InitSetupProps`、`PromptStep`、`ModelSelectionOption`、`OnboardingMode` 等
-- **流程辅助函数**（第 371-535 行）：`needsCredentialSetup()`、`needsCredentialStep()`、`hasValidStoredToken()`、`getInitialStep()` 等
-- **`InitSetup` 组件**（第 537-2548 行）：核心 state machine，`useInput` 处理键盘交互，`useEffect` 驱动 OAuth 和初始化
-- **Prompt 组件**（第 2550-3217 行）：根据当前 `step` 渲染对应的交互界面（provider 选择列表、API key 输入框、模型列表等）
-- **SetupStep / SetupPanel 辅助组件**（第 3219-3555 行）：步骤状态指示器和面板装饰
-- **`getInitialStep` 和导航逻辑**（第 3557-3916 行）：步骤跳转链
-- **数据源配置辅助**（第 4195-4333 行）：connector 配置、路径处理等
-
-## 2. 引导流程详解 (The Onboarding Flow)
-
-以下按用户看到的顺序描述整个流程，每个步骤都是 `PromptStep` 的一个取值。
-
-### Step 1: Provider 选择 (Provider Selection)
-
-`step === "provider"`：用户从 12 个 Provider 中选择一个。组件渲染一个可滚动列表（`src/credentials.tsx:2627-2643`），通过 up/down 箭头切换选择，Enter 确认。
-
-```
-SELECTABLE_OPENWIKI_PROVIDERS = [
-  openai, openai-chatgpt, anthropic, gemini, gemini-enterprise,
-  openrouter, openai-compatible, bedrock, fireworks, baseten, nebius, nvidia
-]
+```tsx
+export function InitSetup(props: InitSetupProps) {
+  return <InitSetupView {...useInitSetup(props)} />;
+}
 ```
 
-列表中标注了默认 Provider（`openai`），以及每个 Provider 的显示名称（如 "Anthropic"、"Gemini (AI Studio)"、"AWS Bedrock" 等）。
+`useInitSetup` 拥有全部状态、副作用与键盘路由，把接线完毕的展示属性一次性交给 `InitSetupView` 渲染。旧 import 面保持稳定：`needsCredentialSetup`、`getInitialStep`、`nextSetupStep` 等纯函数经组合根 re-export（`src/setup/credentials.tsx:5-18`），CLI 侧仍从 `setup/credentials.js` 单点导入（`src/cli/app/app.tsx:39`）。
 
-### Step 2: API Key / 凭据输入 (Credential Entry)
+8 个文件的分工（行数为基线实测）：
 
-根据所选 Provider 的认证方式（authMethod），进入不同的子步骤：
+| 文件 | 行数 | 职责 | 关键符号 |
+|------|------|------|---------|
+| `use-init-setup.ts` | 2642 | 状态机 hook：状态、effect、键盘路由、提交与完成 | `useInitSetup`（`:143`） |
+| `steps.ts` | 1186 | 纯函数导航层：完成判定、脊柱/瀑布导航、选择索引、输入清洗 | `needsCredentialSetup`（`:68`）、`getInitialStep`（`:368`） |
+| `components.tsx` | 1304 | 展示组件：按步骤渲染的 `Prompt` 与输入/列表/面板原语 | `Prompt`（`:74`）、`BorderedInput`（`:1153`） |
+| `view.tsx` | 688 | 视图组装：清单（checklist）、警告与状态面板 | `InitSetupView`（`:242`） |
+| `persistence.ts` | 130 | 纯函数：把会话收集值映射为 `.env` 更新字典 | `buildCredentialEnvUpdates`（`:31`） |
+| `format.ts` | 208 | 格式化与终端副作用：脱敏显示、OSC 52 剪贴板、开浏览器 | `getCredentialSetupDetail`（`:48`）、`copyToClipboard`（`:126`） |
+| `constants.ts` | 276 | 静态选项表：模板、运行模式、LangSmith 区域、数据源、cron 选项 | `ONBOARDING_TEMPLATES`（`:20`）、`SOURCE_OPTIONS`（`:101`） |
+| `types.ts` | 176 | 类型：`PromptStep`、`InitSetupProps/Result`、`CompleteSetupOptions` | `PromptStep`（`:42-74`） |
 
-| 认证方式 | 步骤 | 界面 | 说明 |
-|---------|------|------|------|
-| API-key（默认） | `api-key` | `BorderedInput` 被遮罩的输入框，前缀显示对应的 env key（如 `OPENAI_API_KEY=`） | 粘贴 API key，Enter 保存 |
-| API-key + secret key | `api-key` + `secret-key` | 两个连续的 `BorderedInput` | 仅 AWS Bedrock（access key + secret key） |
-| OAuth | `oauth-login` | `OAuthLoginPrompt` 组件 | 自动打开浏览器进行 ChatGPT 登录 |
-| Keyless（ADC） | `gcp-project` | 明文输入框 | 仅 Gemini Enterprise（Vertex AI），需要 GCP project ID |
+拆分的动机写在两个文件的注释里：`useInitSetup` 把「难以做单元测试的 Ink 键盘流程」隔离在单文件中并被排除出覆盖率统计（`use-init-setup.ts:136-142`）；`InitSetupViewProps` 的每个字段都是只读渲染输入，「视图不调用任何 setter 或 handler」（`view.tsx:61-65`）。与之配套，`steps.ts` 与 `persistence.ts` 是无 IO 的纯函数（pure function）层——`buildCredentialEnvUpdates` 注入 `NodeJS.ProcessEnv` 以便测试伪造（`persistence.ts:26-30`）。
 
-对于 `gemini-enterprise`（`src/constants.ts:129`），没有 `apiKeyEnvKey` -- 它通过 Google Application Default Credentials (ADC) 认证，只需要 GCP project + location。
+## 2. 入口：谁在什么时候打开向导
 
-对于 `openai-compatible`（`src/constants.ts:265-271`），额外要求一个 `base-url` 步骤，因为它没有默认 endpoint。
+向导的唯一渲染点是 TUI 根组件（`src/cli/app/app.tsx:745-749`）：`allowModeSelection={false}`、`walkAllSteps={isInitCommand}`。是否渲染由两个判定驱动：
 
-### Step 3: GCP 配置（仅 Gemini Enterprise）
+- `needsCredentialSetup(sessionModelId, runMode)`（`src/cli/app/app.tsx:156,175`）——运行前预检；
+- 显式 `openwiki init` 强制完整走查：`walkAllSteps=true`，即使一切已配置也从头走一遍（`app.tsx:172-178` 的 `initWizardConsumed` 保证走查完成后不因回到 idle 而重开）。
 
-如果 Provider 是 `gemini-enterprise`：
+此外，用户显式指定了运行模式的 chat 命令若尚缺凭据，也会先打开向导（`app.tsx:155-161`）。进程级前置是 `loadOpenWikiEnv()`：仅 `commandLoadsEnvironment` 为真的命令才加载 `~/.openwiki/.env`（`src/cli/cli.tsx:63-64`，判定在 `src/cli/commands.ts:1078`）。
 
-- **`gcp-project`**（`src/credentials.tsx:2678-2691`）：输入 Google Cloud 项目 ID（敏感但非机密，明文显示）
-- **`gcp-location`**（`src/credentials.tsx:2694-2710`）：可选，输入 Vertex AI 位置（如 `global`、`europe-west1`），默认为 `global`
+## 3. 步骤族与两条导航模型
 
-### Step 4: 模型选择 (Model Selection)
+### 3.1 PromptStep：32 个步骤
 
-`step === "model"`（`src/credentials.tsx:2742-2786`）：显示 Provider 的预设模型列表，用户用 up/down 箭头选择。列表由 `PROVIDER_CONFIGS[provider].modelOptions` 定义（`src/constants.ts:192-319`）。
+步骤族是字符串联合类型 `PromptStep`（`src/setup/credentials/types.ts:42-74`），共 32 个取值，分三组：
 
-列表最后总有一个 "Custom model ID" 选项（`kind: "custom"`），选择后切换到文本输入模式，用户可以粘贴任意模型 ID（如 Bedrock 模型 ARN、Gemini Enterprise 的第三方 MaaS 模型 ID）。
+| 组 | 步骤 |
+|----|------|
+| 凭据脊柱（13） | `run-mode`、`provider`、`api-key`、`external-cli-auth`、`oauth-login`、`secret-key`、`gcp-project`、`gcp-location`、`base-url`、`region`、`model`、`reasoning-effort`、`langsmith` |
+| wiki 初始化（7） | `code-repo-confirm`、`code-repo-path`、`template`、`wiki-goal`、`global-cron-mode`、`global-cron-custom`、`global-power-mode` |
+| 数据源子流程（12） | `source-menu`、`source-path`、`source-secret`、`source-auth`、`source-description`、`source-description-custom`、`source-langsmith-workspaces`、`source-langsmith-key`、`source-langsmith-projects`、`source-langsmith-region`、`source-confirm-continue`、`final` |
 
-对于没有预设模型列表的 Provider（如 `bedrock`、`openai-compatible`），默认进入自定义输入模式（`shouldStartWithCustomModelInput` 返回 true）。
+### 3.2 模型一：脊柱顺序走查（sequential walk）
 
-### Step 5: LangSmith 配置（可选）
+`orderedSetupSteps(provider, mode, allowModeSelection)`（`src/setup/credentials/steps.ts:201-249`）按当前 provider 与模式给出**全部适用步骤**，包括已被环境满足的步骤——这是 re-baseline 后的关键语义变化：前进不再跳过已配置项，而是一路顺序走查，用户可以回改任何一步。脊柱的构成规则：
 
-`step === "langsmith"`（`src/credentials.tsx:2789-2802`）：可选步骤，允许用户粘贴 LangSmith API key 以开启链路追踪。显示 `BorderedInput` 被遮罩输入框，前缀 `LANGSMITH_API_KEY optional=`。
+1. `allowModeSelection` 时以 `run-mode` 开头（`:208-210`）；
+2. `provider` 之后插入该 provider 的**主凭据步骤** `credentialStep(provider)`（`:214-217`，映射见 §7）；
+3. 按需追加 `secret-key`（bedrock）、`gcp-project`（有 `projectEnvKey` 且主凭据步骤不是它时）、`gcp-location`、`base-url`（openai-compatible）、`region`（bedrock）（`:219-236`）；
+4. 恒以 `model`、`langsmith` 收尾；code 模式再补 `code-repo-confirm`（`:238-246`）。
 
-按 Enter 时如果输入为空则跳过，不保存任何值。
+`nextSetupStep(step, ...)`（`:257-269`）就是「脊柱里的下一步」：`spine[index+1]`，走到末尾返回 `null`。
 
-### Step 6: 后续 Wiki 初始化步骤
+几个代表性 provider 的实际脊柱（由 §7 的 `credentialStep` 映射展开）：
 
-凭据配置完成后，引导流程进入 Wiki 设置阶段 -- 模板选择（`template`）、Wiki scope 编辑（`wiki-goal`）、调度设置（`global-cron-mode`、`global-power-mode`）、数据源配置（`source-menu` 及后续子步骤）等。这些步骤属于 Onboarding 范畴而非纯凭据配置，此处不展开。
+| provider | `orderedSetupSteps` 输出 |
+|----------|--------------------------|
+| `openai` | provider → api-key → model → langsmith |
+| `openai-chatgpt` | provider → oauth-login → model → langsmith |
+| `copilot` | provider → external-cli-auth → model → langsmith |
+| `bedrock` | provider → secret-key → region → model → langsmith（主凭据步骤为 `null`，不插入） |
+| `gemini-enterprise` | provider → gcp-project → gcp-location → model → langsmith |
+| `openai-compatible` | provider → api-key → base-url → model → langsmith |
 
-### 完整步骤链 (Step Chain)
+code 模式的脊柱在 `langsmith` 后再补 `code-repo-confirm`（`steps.ts:244-246`）；personal 模式模板由运行模式固定，脊柱到 `langsmith` 为止，template/wiki-goal/调度/数据源走的是瀑布链尾部（§3.3）。注意脊柱**不含** `reasoning-effort`——该步骤由清单与键盘单独门控（§7），不在顺序走查序列里。
 
-步骤之间的跳转由 `getInitialStep()`（`src/credentials.tsx:3557-3624`）和一系列 `getNextStepAfter*()` 函数控制。链路如下：
+### 3.3 模型二：瀑布式跳过（skip waterfall）
+
+`getNextStepAfterProvider → getNextStepAfterApiKey → getNextStepAfterSecretKey → getNextStepAfterGcpLocation → getNextStepAfterBaseUrl → getNextStepAfterRegion`（`steps.ts:450-595`）是一条逐级委托的瀑布：每一级只在**对应配置缺失**时返回该步骤，否则落向下一条，最终进入 wiki 初始化判定链（`model → langsmith → code-repo-confirm → template → wiki-goal → global-cron-mode → source-menu → null`，`:556-595`）。
+
+两条模型在提交点组合：`nextSetupStep(...) ?? getNextStepAfter*`（`use-init-setup.ts:430-443` 的 OAuth 完成分支、`:1245-1256` 的 provider 提交分支）。语义是：**先沿脊柱顺序走；走完脊柱后，再用瀑布补上仍有缺口的步骤**（典型场景是换 provider 后凭据被清空，`:1219-1229`）。
+
+### 3.4 初始步骤：getInitialStep
+
+`getInitialStep(modelIdOverride, provider, onboardingConfig, mode, allowModeSelection, walkAll)`（`steps.ts:368-448`）决定挂载后落在哪一步：
 
 ```
-run-mode (仅 allowModeSelection=true)
-  → provider
-    → api-key / oauth-login / gcp-project (根据 provider 类型)
-      → secret-key (仅 Bedrock)
-        → gcp-project (仅 gemini-enterprise，如果 api key 步骤跳过了)
-          → gcp-location (仅 gemini-enterprise)
-            → base-url (仅 openai-compatible)
-              → region (仅 Bedrock)
-                → model
-                  → langsmith
-                    → template (仅 personal 模式) / code-repo-confirm (仅 code 模式)
-                      → wiki-goal → ... → final
+walkAll=true                          → 脊柱第一步（:376-380，显式 --init 全量走查）
+allowModeSelection                    → "run-mode"
+!hasValidConfiguredProvider()         → "provider"
+needsAwsCredentialRepair(provider)    → "region"（AWS 凭据对残缺的修复路径，:94-99）
+needsCredentialStep(provider)         → credentialStep(provider)
+needsSecretKeyStep / needsGcpProjectStep / needsBaseUrlStep / needsRegionStep
+modelIdOverride===null 且 OPENWIKI_MODEL_ID 未设 → "model"
+needsLangSmithStep()                  → "langsmith"
+code 模式且 onboarding 未完成          → "code-repo-confirm"
+!getConfigModeId(config)              → "template"
+!config.wikiGoal                      → "wiki-goal"
+personal 且无 ingestionSchedule       → "global-cron-mode"
+onboarding 仍未完成                   → "source-menu"
+否则                                  → null（一切就绪，不进向导）
 ```
 
-每次 Enter 确认一个步骤后，调用对应的 `getNextStepAfter*()` 函数（`src/credentials.tsx:3626-3790`），判断下一个还需要配置的项。
+返回 `null` 时 `useInitSetup` 的初始化 effect 直接回调 `onComplete`，携带 `onboardingCompleted: true` 与一组全 false 的 `saved*` 标志（`use-init-setup.ts:326-346`），跳过向导。
 
-## 3. Ink 组件树 (Ink Component Tree)
+### 3.5 完成判定与 setup/onboarding.ts 的分工
 
-`InitSetup`（`src/credentials.tsx:537-2548`）内部的组件层级：
+`needsCredentialSetup`（`steps.ts:68-92`）＝凭据缺口检查（provider 无效、AWS 修复、主凭据/secret/base-url/region 缺、模型未定、LangSmith 未答）**加上** onboarding 完成判定：code 模式查 `isRepositoryCodeOnboardingCompleteSync(getDefaultCodeRepoRootPath())`，personal 模式查 `isOpenWikiOnboardingCompleteSync()`（`:89-91`）。
+
+后两者属于 `src/setup/onboarding.ts`（482 行）的辖区：配置 schema 与归一化（`:54-67,247`）、`readOpenWikiOnboardingConfig`（`:76`）/`saveOpenWikiOnboardingConfig`（`:100`）、`isOnboardingComplete`（`:172`，＝`completedAt` + `wikiGoal` + (code 模式或 `ingestionSchedule`)）与两个同步完成判定（`:182,199`）。**向导只消费这些谓词与读写函数**（`use-init-setup.ts:47-54` 的 import 即划界）；onboarding 配置本身的字段语义、wiki-goal 持久化到 `INSTRUCTIONS.md` 的细节，归 10 区 02 号文档。
+
+## 4. useInitSetup：状态机 hook
+
+### 4.1 状态带
+
+hook 体的状态声明集中在 `use-init-setup.ts:153-271`，可归为五带：
+
+- **导航**：`step`（`:153`，`null` 表示尚在播种）、`navHistory` 导航历史栈（navigation history，`:154`）、`didInitializeRef` 初始化守卫（`:157`）；
+- **收集值**：`apiKey`/`baseUrl`/`secretKey`/`region`/`gcpProject`/`gcpLocation`/`modelId`/`reasoningEffort`/`langSmithKey`（`:176-185`）与 LangSmith 工作区草稿族（`:188-206`）；
+- **选择索引**：provider/model/run-mode/source/template/cron/power/final 等十余个（`:209-246`）；
+- **流程控制**：`error`/`notice`/`isSaving`（`:256-258`）、`externalCliAuth` 状态机（`:259-262`）、`forceModelStep`（`:270`）；
+- **OAuth**：`oauthTokens`/`loginUrl`/`isLoggingIn`/`loginAttempt`/`loginHandleRef`（`:265-271`）。
+
+### 4.2 三个 effect
+
+1. **初始化**（`:288-387`）：读 onboarding 配置 → （非模式选择时）`hydrateRunModeConfig` 补全 → `getInitialStep` 播种。`didInitializeRef`（`:297-300`）保证每个挂载只播种一次——该 effect 的 deps 含父组件内联回调，父级重渲染会重触发，没有守卫就会把 step 重置回第一步。首步是 `wiki-goal`/`code-repo-confirm` 时顺带预填对应状态（`:362-368`）。
+2. **ChatGPT OAuth**（`:391-480`，deps `[step, loginAttempt]`）：进入 `oauth-login` 即调 `loginWithChatGPT`，URL 回调里 `setLoginUrl` + `openLoginUrl`（`format.ts:132`）；成功后 `nextSetupStep("oauth-login") ?? getNextStepAfterApiKey` 推进或直接 `completeSetup`；失败置 `error`，用户按 Enter 使 `loginAttempt` 递增（`:834-836`）从而重跑本 effect——这就是 OAuth 重试机制的全部实现。
+3. **external-cli 探测**（`:482-520`）：进入 `external-cli-auth` 步骤时 `detectExternalCliCredential` 每 provider 只探测一次（`externalCliProbeProvider` ref，`:262,491`）；未检测到则报告 `gh` CLI 是否可用。Tab 键触发 `launchExternalCliLogin`（`:522-544`，`:856-864` 的按键路由）。
+
+### 4.3 播种与键盘路由
+
+`seedInputForStep(target)`（`:551` 起）在**导航到达**某步骤时预填输入或索引：密钥类步骤从 `getSavedEnvValue(envKey)`（`src/config/env.ts:263`）取**已存配置**而非 `process.env`——后者可能被 shell 导出遮蔽（遮蔽语义见 02 号 §5.3）；密钥在界面上以圆点呈现（`formatSecretInputDisplay`，`format.ts:181`），从不回显原文（`use-init-setup.ts:546-550` 的注释明确此契约）。
+
+`useInput`（`:788-1115`）的路由顺序：
+
+1. **全局守卫**（`:789-796`）：保存中、授权中、（非 oauth 步骤的）登录中、step 未播种时直接忽略；
+2. **Esc 回退**（`:801-812`）：先 `captureInputForStep` 提交当前字段（未确认的编辑得以保留），再从 `navHistory` 弹栈回退——因此回退在分支型数据源子流程里也能沿**实际走过的路径**回溯；栈空时是无操作；
+3. **oauth-login 专用**（`:814-854`）：空输入时按 `c`/`C` 把登录 URL 复制到剪贴板（OSC 52，`format.ts:126`）；Enter 有粘贴内容则 `submitManualLogin`（headless/SSH 环境把重定向 URL 或授权码粘进终端），否则重试登录；
+4. **菜单型步骤**（provider `:866`、model `:879`、reasoning-effort `:892`、run-mode/source/final 等）：交给 `handleMenuInput`（`:1117`）统一处理 up/down 移动与 Enter 提交；
+5. **文本型步骤的默认分支**（`:1100-1115`）：Enter 提交，退格删字，其余经 `sanitizeInputChunk`（`steps.ts:1096`）过滤后追加。
+
+`submit()`（`:1129` 起）按步骤分发提交。最复杂的是 provider 提交（`:1207-1249`）：换 provider 时**清空上一家的全部凭据状态**（`:1219-1229`，注释点明原因——凭据是 per-provider 的，携带旧值会让播种逻辑在新 provider 名下误存旧密钥），并按 `OPENWIKI_PROVIDER` 是否实际变化置 `forceModelStep`（`:1240-1242`）。
+
+### 4.4 导航历史栈：Esc 为什么总是回到「来时的路」
+
+前进与回退是不对称的，靠三块机制拼成：
+
+1. **`setStep` 包装器**（`:168-173`）：所有前进式跳步都经它走——当从非空步骤跳到**不同的**非空步骤时，把出发步骤压入 `navHistory`；`{ back: true }` 选项（只有 Esc 用）跳过压栈。
+2. **`captureInputForStep`**（`:727-786`）：Esc 离开前把**未提交的输入**先落进对应状态（api-key/secret-key/base-url/region/gcp/langsmith 等；`wiki-goal` 的未提交编辑也保留在会话内）——所以 Esc 是「保留草稿的回退」，而不是丢弃。
+3. **Esc 处理**（`:801-812`）：提交草稿 → 弹栈 → `setStep(target, { back: true })` → `seedInputForStep(target)` 重新播种 → 清空 error/notice；栈空时无操作。
+
+这套栈对分支型数据源子流程尤其重要：`source-menu` 下不同数据源走向完全不同的后续步骤，线性「上一步」模型无法描述；按实际走过的路径记录让 Esc 语义在任意分支深度下都正确。
+
+### 4.5 final 步骤与收尾
+
+数据源子流程走完（`source-confirm-continue`）或 wiki-goal 提交后进入 `final`（`:1705,1754,2232`）。`final` 的提交（`:2006` 起）只在 code 模式且用户确实打开过 LangSmith 工作区子菜单时，把工作区集合按「所见即所得」写入 `openwiki/.langsmith.json`——中途放弃的向导绝不改写该文件。随后进入 §5 的完成链。
+
+### 4.6 LangSmith 工作区子流程
+
+code 模板把 `langsmith` 连接器列为推荐数据源（`credentials/constants.ts:26`）。在数据源菜单选中它时不收集密钥（`SOURCE_OPTIONS` 的 langsmith 条目 `secretInputs: []`，`:124-126`——key 已由脊柱上的 `langsmith` 步骤收集，CI 场景另作为 secret 提供），而是打开工作区子菜单（`source-langsmith-workspaces`，`use-init-setup.ts:2341-2347`）：用户对 `LangsmithWorkspaceDraft`（`types.ts:140-145`：region + apiKeyEnv + 会话内 key + projects 列表）做增/改/删。编辑 key 的预填取自 `getSavedEnvValue(draft.apiKeyEnv)`（`:564-573`）——空输入表示「保留已提交的 key」；新工作区的 `apiKeyEnv` 由 langsmith 连接器的 `nextLangSmithApiKeyEnv` 生成（`use-init-setup.ts:33-37` 的 import，命名模式 `OPENWIKI_LANGSMITH_API_KEY[_<区域后缀>]`，详见 08 区）。子菜单一旦打开即置 `langsmithSourcesTouched`（`:2344`），这是 §4.5 WYSIWYG 提交的闸门。
+
+## 5. 完成与持久化链
 
 ```
-InitSetup (root state machine)
-├── SetupHeader                            // 品牌标题 "OpenWiki setup"
-├── SetupStep x N                          // 步骤状态指示器行
-│   ├── [DONE] Provider: openai
-│   ├── [CURRENT] Provider key: paste OPENAI_API_KEY
-│   ├── [PENDING] Model: choose a model
-│   └── [OPTIONAL] LangSmith: optional tracing key
-├── OAuthLoginPrompt (条件渲染)              // step === "oauth-login" 时
-│   └── OAuthAuthorizationLink (条件渲染)
-├── SetupPanel title="Prompt"
-│   └── Prompt (根据 step 渲染)
-│       ├── provider → 可滚动选择列表 + SelectionMarker
-│       ├── api-key / secret-key → BorderedInput (遮罩)
-│       ├── gcp-project / gcp-location / base-url / region → 文本输入行
-│       ├── model → 模型列表 + "Custom model ID" 选项
-│       │            或 → BorderedInput (isCustomModelInput = true)
-│       ├── langsmith → BorderedInput (遮罩，可空)
-│       └── ... 其他 Wiki 初始化步骤
-├── 安全提示文本 ("Secrets are masked and saved only after setup.")
-├── SetupPanel title="Status" (条件渲染)     // notice 消息
-└── SetupPanel title="Error" (条件渲染)      // error 消息
+completeSetup(options)                    use-init-setup.ts:2235
+  ├─ saveCredentialUpdates(options)       use-init-setup.ts:2269
+  │    ├─ buildCredentialEnvUpdates(...)  persistence.ts:31（纯函数，注入 env）
+  │    └─ saveOpenWikiEnv(updates)        src/config/env.ts:305（非空才调用，:2287-2289）
+  └─ onComplete(InitSetupResult)          use-init-setup.ts:2238-2266
 ```
 
-### 关键辅助组件
+`buildCredentialEnvUpdates` 是纯粹的「收集值 → env key」映射（`persistence.ts:31-130`）：每个 `next*` 字段非 null 才写对应 key，未收集的设置原样保留；`OPENWIKI_PROVIDER` 仅在真的变化时写入（`:51-53`），避免重复运行搅动文件；OAuth tokens 经 `codexTokensToEnv` 展开（`:63-65`）；模型与 reasoning 档位各一行（`:107-113`）。LangSmith 有一个刻意的**关闭开关**：key 粘贴为空时不是「跳过」，而是显式写 `LANGCHAIN_TRACING_V2="false"`（`:121-126`）——否则早前保存的 `true` 会让链路追踪在用户已清空 key 后仍然静默开启。
+
+`saveCredentialUpdates` 内部兜住保存异常并转给 `onError`（`:2290-2292`），`isSaving` 状态驱动视图的 Saving 面板。`saveOpenWikiEnv` 本体（串行队列（serial queue）、临时文件原子写（atomic write）、shell 快照避让）属于 `src/config/env.ts` 的机制，见 02 号 §5。
+
+`onComplete` 回调携带的 `InitSetupResult`（`types.ts:9-26`）把「本次会话保存了什么」编码为一组布尔（`savedApiKey`/`savedProvider`/……，在 `completeSetup` 中逐个计算，`use-init-setup.ts:2252-2264`），`onboardingCompleted` 取自 `isOnboardingComplete(onboardingConfig)`（`:2244`）；`shouldContinueToRun: true` 让 CLI 在向导结束后继续执行原命令。
+
+## 6. 视图层：InitSetupView 与组件原语
+
+`InitSetupView`（`view.tsx:242-688`）是纯展示：从上到下依次渲染——
+
+| 区块 | 位置 | 内容 |
+|------|------|------|
+| `SetupHeader` | `view.tsx:344` | 品牌标题（组件在 `components.tsx:981`） |
+| shell 遮蔽警告 | `view.tsx:322-340,346-350` | `getWizardManagedEnvKeys(provider)`（`steps.ts:146-159`）过滤出 shell 中存在的向导管辖 key，与 `getShellEnvValue`（`src/config/env.ts:246`）比对，**只列 key 名，绝不显示值**，提示「运行时 shell 导出优先于已存配置」 |
+| 「Detected from your command」 | `view.tsx:352-370` | 运行模式与（code 模式的）wiki scope 两行既定事实 |
+| 「Set up」清单 | `view.tsx:372-591` | provider/主凭据/secret-key/gcp-project/gcp-location/base-url/region/model/reasoning-effort/langsmith/调度/数据源逐行状态，用 `resolveStepStatus`（`steps.ts:353-366`）判定 `current/done/optional/pending` 四态——**当前步骤优先于 done**，所以回退到已完成步骤时显示光标而非对勾 |
+
+清单各行的 done 判定与 detail 文案：
+
+| 清单行 | 视图位置 | done 条件 | detail 来源 |
+|--------|---------|-----------|------------|
+| Provider | `:375-383` | `hasValidConfiguredProvider() \|\| providerConfirmed` | `getProviderLabel` |
+| 主凭据（AWS/ChatGPT/Provider key 三态合一） | `:384-414` | 会话收集 ∥ `isCredentialConfigured` ∥ tokens | `getCredentialSetupDetail`（`format.ts:48`，含 AWS 凭据链四态文案）；key 在 shell 中时显示「from shell」 |
+| Secret key | `:415-429` | 会话收集 ∥ `isSecretKeyConfigured` | configured/not set |
+| GCP project / location | `:430-461` | 会话收集 ∥ env 已设 | location 未设时显示默认值 `DEFAULT_VERTEX_LOCATION` |
+| Base URL / Region | `:462-489` | 会话收集 ∥ configured | configured/not set |
+| Model | `:490-500` | 会话/override/env 任一 | `getModelSetupDetail` |
+| Reasoning effort | `:501-517` | 会话收集 ∥ `OPENWIKI_REASONING_EFFORT` 已设 | 未设时「provider default」 |
+| LangSmith | `:518` 起 | `needsLangSmithStep` 为假 | signed-in/tracing 文案 |
+| 调度 / Sources（personal） | `:544-591` | `ingestionSchedule` 存在 ∥ 已连接源 >0 | 调度描述 / 「N configured」 |
+| Prompt 面板 | `view.tsx:593-641` | `oauth-login` 步骤替换为 `OAuthLoginPrompt`；其余步骤在 `SetupPanel title="Prompt"`（`:602`）里由 `Prompt` 按 step 分支渲染；未播种时显示「Inspecting OpenWiki setup...」（`:643`） |
+| 辅助行与状态面板 | `view.tsx:648-685` | 「esc to go back」（栈非空时）、密钥遮罩提示、`Status`（`:662`，notice）/`Error`（`:667`，红色）/`Schedule note`（`:672`，黄色）/`Saving`（`:677`）/`Authorization`（`:682`）条件面板 |
+
+`Prompt`（`components.tsx:74-901`）是按 `step` 逐一分支的大组件：`run-mode`（`:145`）与 `provider`（`:167`）是带 `SelectionMarker` 的选择列表（后者由 `SELECTABLE_OPENWIKI_PROVIDERS` 渲染并标注默认项）；`api-key`（`:186`）与 `secret-key`（`:212`）用带 env key 前缀、开启 `secret` 遮罩的 `BorderedInput`；`gcp-project`/`gcp-location`/`base-url`/`region` 是明文回显行（GCP 步骤附 ADC 指引文案，`:236-239`）；`model` 分预设列表与自定义输入两态；`final`（`:878`）是「立即摄取/稍后」二选一。其余原语：
 
 | 组件 | 位置 | 作用 |
 |------|------|------|
-| `SetupStep` | `src/credentials.tsx:3219-3243` | 渲染单行步骤状态：`[CURRENT/DONE/PENDING/OPTIONAL] label... detail` |
-| `SetupPanel` | `src/credentials.tsx:3245-3266` | 单线边框面板，包裹交互内容 |
-| `SelectionMarker` | `src/credentials.tsx:3268-3272` | 列表选中指示器 `>` |
-| `BorderedInput` | `src/credentials.tsx:3377-3418` | 单线边框输入框，支持密码遮罩 |
-| `BorderedMultilineInput` | `src/credentials.tsx:3420-3506` | 多行文本输入框（用于 wiki-goal 编辑） |
-| `OAuthLoginPrompt` | `src/credentials.tsx:3316-3375` | OAuth 浏览器登录提示和状态显示 |
-| `OAuthAuthorizationLink` | `src/credentials.tsx:3290-3313` | 可点击的授权 URL 和剪贴板复制提示 |
+| `ExternalCliAuthPrompt` | `components.tsx:903` | copilot 的 `gh` CLI 登录指引与状态（Tab 触发登录） |
+| `SetupStep` | `components.tsx:1001` | 单行清单状态（`STEP_GLYPH`/`STEP_COLOR`，`credentials/constants.ts:263-276`） |
+| `SetupPanel` | `components.tsx:1021` | 单线边框面板 |
+| `SelectionMarker` | `components.tsx:1044` | 列表选中指示符 |
+| `SourceConnectionStatus` | `components.tsx:1050` | 数据源连接状态行 |
+| `OAuthAuthorizationLink` | `components.tsx:1066` | 可点击授权 URL + 复制状态文案 |
+| `OAuthLoginPrompt` | `components.tsx:1092-1151` | 浏览器登录提示；URL 展示、`c` 复制、粘贴回退输入行、「Login failed. Press Enter to retry.」（`:1147`） |
+| `BorderedInput` | `components.tsx:1153-1197` | 单行边框输入，`secret` 时经 `InputValueWithCursor`（`:1230`）圆点化 |
+| `BorderedMultilineInput` | `components.tsx:1199` | 多行编辑（wiki-goal） |
+| `SegmentedCronInput` | `components.tsx:1265` | cron 五字段（minute/hour/day/month/weekday）分段编辑器 |
 
-## 4. Provider 凭据提示 (Provider Credential Hints)
+静态选项全部收在 `credentials/constants.ts`：`ONBOARDING_TEMPLATES`（`:20-55`，code/personal 两模板及其推荐数据源）、`RUN_MODE_OPTIONS`（`:57-73`）、`LANGSMITH_REGION_OPTIONS`（`:75-99`，US/EU/**APAC** 三区域，APAC 条目 `:88-93`，host `https://apac.api.smith.langchain.com`）、`SOURCE_OPTIONS`（`:101-240`，8 个数据源条目；git-repo/langsmith/notion/custom-mcp 无 secret 输入，google/tavily/x 声明各自的 env key 输入）、以及 cron/final/continue 等小选项表（`:242-256`）。
 
-`getProviderCredentialHint()`（`src/constants.ts:417-429`）为缺少凭据的错误消息提供人性化提示。当前只有 `gemini-enterprise` 返回非 null 值：
+## 7. Provider 凭据差异
 
-```
-gemini-enterprise:
-  "Authenticate to Google Cloud with Application Default Credentials
-   (gcloud auth application-default login) or set
-   GOOGLE_APPLICATION_CREDENTIALS to a service account key file."
-```
+Provider 注册表与四种认证方式（`ProviderAuthMethod = "api-key" | "aws-sdk" | "external-cli" | "oauth"`，`src/config/constants.ts:129-130`）属于 06 区的辖区，向导侧只关心一个映射：`credentialStep(provider)`（`steps.ts:119-137`）——
 
-其他 11 个 Provider 返回 `null`，因为它们的凭据收集是通过 TUI 引导的粘贴 key 流程，不需要额外的外部步骤提示。
+| authMethod | 主凭据步骤 | Provider |
+|-----------|-----------|----------|
+| `oauth` | `oauth-login` | openai-chatgpt（凭据＝有效的未过期存储 token，`hasValidStoredToken`，`steps.ts:271-277`） |
+| `external-cli` | `external-cli-auth` | copilot（`gh` CLI 登录/token） |
+| `api-key` | `api-key` | 其余粘贴 key 的 provider |
+| `aws-sdk` | `null`（不收集） | bedrock——凭据完全交给 AWS SDK 凭据链，向导只做 `secret-key`/`region` 的缺口检查与 `needsAwsCredentialRepair` 修复提示 |
+| （keyless） | `gcp-project` | gemini-enterprise——无 `apiKeyEnvKey`，收集 GCP project + location |
 
-各 Provider 的凭据配置差异来自 `PROVIDER_CONFIGS`（`src/constants.ts:192-319`）中的字段：
+辅助差异点：`reasoning-effort` 是条件步骤，仅当 `getReasoningEffortSelectionOptions`（`steps.ts:166-180`，能力表来自 `src/config/reasoning.ts`）非空时出现在清单与键盘中；LangSmith 追踪 key 在脊柱上的 `langsmith` 步骤收集，而 code 模式的 LangSmith **工作区**配置在数据源子流程（`source-langsmith-*` 四步 + WYSIWYG 提交，§4.4）。缺凭据错误消息的人性化提示仍由 `getProviderCredentialHint`（`src/config/constants.ts:603-631`）提供，现覆盖 gemini-enterprise、全部 `aws-sdk` 与 `external-cli` provider 三类。
 
-| 字段 | 含义 | 影响的 Provider |
-|------|------|----------------|
-| `apiKeyEnvKey` | API key 环境变量名 | 除 gemini-enterprise 外的所有 Provider |
-| `authMethod: "oauth"` | OAuth 登录而非 key 粘贴 | 仅 openai-chatgpt |
-| `requiresBaseUrl: true` | 必须有 Base URL | 仅 openai-compatible |
-| `baseUrlEnvKey` | 可选 Base URL 覆盖 | anthropic, openai-compatible |
-| `requiresRegion: true` | 必须有 Region | 仅 bedrock |
-| `secretKeyEnvKey` | 第二个密钥（secret key） | 仅 bedrock |
-| `projectEnvKey` | GCP 项目 ID | 仅 gemini-enterprise |
-| `locationEnvKey` | GCP 位置 | 仅 gemini-enterprise |
+## 8. 错误状态与重试
 
-## 5. 凭据持久化 (Env Persistence)
+| 错误源 | 处理 |
+|--------|------|
+| OAuth 登录失败 | effect 捕获后 `setError`（`use-init-setup.ts:467-474`）；Enter 重试＝`loginAttempt` 递增（`:834-836`）；粘贴回退＝`submitManualLogin`（`:2567-2584`，经 `loginHandleRef` 的 `submitManual`，句柄未就绪时给出明确报错） |
+| external-cli 登录失败 | `externalCliAuth` 状态机落 `login-failed`（`:522-544`），Tab 可重试 |
+| `.env` 保存失败 | `saveCredentialUpdates` 捕获转 `onError`（`:2290-2292`） |
+| onboarding 配置读写失败 | 初始化 effect 的 catch 转 `onError`（`:371-375`） |
+| 本地目录路径无效 | `validateLocalDirectoryPath` 抛错在 code-repo-path 提交处被捕获置 `error` |
+| 连接器授权失败 | `authorizeSelectedSource`（`:2297-2333`）捕获置 `error`；授权 URL 经 `notice` 呈现（浏览器已开/需从剪贴板打开两种文案） |
 
-凭据持久化由 `saveCredentialUpdates()` 处理（`src/credentials.tsx:1908-1985`），它调用 `saveOpenWikiEnv()`（`src/env.ts:195-221`）。
+`error` 与 `notice` 是两个独立通道，分别渲染为 Error/Status 面板（§6）；任何按键导航都会先清掉旧消息。
 
-### 写入流程
+### 8.1 键盘速查
 
-```
-saveCredentialUpdates(options)
-  → 构建 updates Record<string, string>
-  → saveOpenWikiEnv(updates)
-    → readOpenWikiEnv()  // 读取现有的 ~/.openwiki/.env
-    → 合并 updates 到现有 env
-    → mkdir ~/.openwiki (mode 0o700)
-    → writeFile ~/.openwiki/.env (mode 0o600)
-    → 同时设置 process.env[key] = value
-```
+| 按键 | 生效范围 | 行为 |
+|------|---------|------|
+| up/down | 菜单型步骤 | 移动选择索引（`moveSelectionIndex`，`steps.ts:880`，越界环绕） |
+| Enter | 文本/菜单步骤 | 提交并前进（`submit`，`:1129`） |
+| Enter | `oauth-login`（有粘贴内容） | `submitManualLogin` 提交重定向 URL/授权码 |
+| Enter | `oauth-login`（空输入） | `loginAttempt+1` 重试登录 |
+| `c`/`C` | `oauth-login`（输入为空时） | 复制登录 URL 到剪贴板 |
+| Tab | `external-cli-auth` | 启动 `gh` CLI 登录（`launchExternalCliLogin`） |
+| Esc | 任意非保存步骤 | 提交草稿后沿 `navHistory` 回退一步 |
+| 可打印字符 | 文本步骤 | 经 `sanitizeInputChunk` 过滤后追加（ctrl/meta 修饰的输入被忽略） |
+| backspace/delete | 文本步骤 | 删末字符 |
 
-### 文件格式
+## 9. 旧篇失效论断（2026-07-17 版，勿再引用）
 
-`~/.openwiki/.env` 是标准的 KEY="value" 格式文件（`src/env.ts:397-414`）。`formatEnv()` 按 `MANAGED_ENV_KEYS` 的顺序写入已定义的 key，然后按字母顺序追加未管理的 key。每个值都经过 `formatEnvValue()` 处理：JSON 字符串编码（双引号包裹，反斜杠转义，换行符转义为 `\n`）。
+旧 `01-credential-onboarding.md` 建立在已删除的 4337 行巨石上，以下论断全部失效，重写时不得复现：
 
-### 管理的环境变量
+1. 「`src/credentials.tsx`（4337 行）」「`InitSetup` 位于 `credentials.tsx:537-2548` 的核心 state machine」——文件已删除；现为 30 行组合根 + `credentials/` 8 文件（§1）。
+2. 「`PromptStep` 26 个步骤（`:103-129`）」——现为 32 步，`types.ts:42-74`（§3.1）。
+3. 「`getInitialStep`（`credentials.tsx:3557-3624`）」「`getNextStepAfter*`（`:3626-3790`）」——现分别在 `steps.ts:368-448` 与 `steps.ts:450-595`，且新增了脊柱走查模型 `orderedSetupSteps`/`nextSetupStep`（§3.2）。
+4. 「`saveCredentialUpdates`（`credentials.tsx:1908-1985`）」——现为 `use-init-setup.ts:2269-2295` 的薄封装，映射逻辑抽成纯函数 `buildCredentialEnvUpdates`（`persistence.ts:31`）（§5）。
+5. 「`SetupStep`/`SetupPanel`/`BorderedInput`/`OAuthLoginPrompt` 等位于 `credentials.tsx:32xx-35xx`」——现全部在 `components.tsx`（§6 表）。
+6. 「12 个 Provider」「authMethod 只有 api-key/oauth 两种」——现为 13 providers、四种 authMethod（含 `aws-sdk`、`external-cli`），新增 copilot（§7）。
+7. 「`src/cli.tsx:289`、`src/cli.tsx:692-717` 调用点」——CLI 已拆分，调用点在 `src/cli/app/app.tsx:156,175,745`（§2）。
+8. 「`needsCredentialSetup` 只检查凭据」——现还包含 onboarding 完成判定，code/personal 两模式判定不同（§3.5）。
+9. 「env 持久化由 `src/env.ts` 承担、`MANAGED_ENV_KEYS` 50 个」——路径现为 `src/config/env.ts`，管理 key 65 项，且保存为串行队列 + 原子写（见 02 号 §5）。
+10. 「LangSmith 留空则不保存任何值」——现为显式写 `LANGCHAIN_TRACING_V2="false"` 作为关闭开关（§5）。
 
-`MANAGED_ENV_KEYS`（`src/env.ts:81-132`）列出了 OpenWiki 读取或持久化的所有环境变量（50 个），涵盖：
-
-- 每个 Provider 的 API key（`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY` 等）
-- 每个 Provider 的配置变量（`ANTHROPIC_BASE_URL`、`BEDROCK_AWS_REGION`、`GOOGLE_CLOUD_PROJECT` 等）
-- 全局配置（`OPENWIKI_PROVIDER`、`OPENWIKI_MODEL_ID`、`OPENWIKI_PROVIDER_RETRY_ATTEMPTS`）
-- OAuth token（ChatGPT 的 access/refresh/expires/account/email/plan）
-- 连接器凭据（Notion、Slack、Gmail、X/Twitter）
-- LangChain 配置（`LANGSMITH_API_KEY`、`LANGCHAIN_PROJECT`、`LANGCHAIN_TRACING_V2`）
-
-### 凭据诊断
-
-`getCredentialDiagnostics()`（`src/env.ts:185-193`）读取 `~/.openwiki/.env` 并与 `process.env` 对比，为每个 key 生成 `CredentialDiagnostic`，包含：来源（`process.env` / `~/.openwiki/.env` / 两者都有 / 未设置）、长度、脱敏预览和警告（如 "leading/trailing whitespace"、"contains quote character"、"invalid model ID" 等）。
-
-## 6. 重新配置 (Re-onboarding)
-
-当用户运行 `openwiki auth` 命令或 `openwiki run` 且 `needsCredentialSetup()` 返回 true 时，`InitSetup` 组件会再次渲染。
-
-### 首次运行 vs 重新配置
-
-`getInitialStep()`（`src/credentials.tsx:3557-3624`）通过检测已有配置来跳过已完成的步骤：
-
-```
-getInitialStep():
-  1. hasValidConfiguredProvider()? → 否 → "provider" (或 "run-mode")
-  2. needsCredentialStep()? → 是 → "api-key" / "oauth-login" / "gcp-project"
-  3. needsSecretKeyStep()? → 是 → "secret-key"
-  4. needsGcpProjectStep()? → 是 → "gcp-project"
-  5. needsBaseUrlStep()? → 是 → "base-url"
-  6. needsRegionStep()? → 是 → "region"
-  7. OPENWIKI_MODEL_ID_ENV_KEY 未设置? → 是 → "model"
-  8. LANGSMITH_API_KEY 未设置? → 是 → "langsmith"
-  ...
-  → null (所有配置完整，直接跳过引导)
-```
-
-对于 OAuth Provider（`openai-chatgpt`），`hasValidStoredToken()` 检查已存储的 token 是否过期（`isChatGptTokenExpired`）。如果 token 有效，跳过登录步骤。
-
-### 重新配置的行为
-
-- 已有的 `~/.openwiki/.env` 中的值会被保留（`saveOpenWikiEnv` 使用 merge 语义，不会清空）
-- 用户在 `InitSetup` 中修改 Provider 或 API key 后，新的值会**覆盖**旧值（`updates` 对象的 key 直接覆盖 `currentEnv` 中的同名 key）
-- LangSmith key 如果留空（按 Enter 不输入），不会覆盖已有的 `LANGSMITH_API_KEY`
-- 切换 Provider 时，新的 `OPENWIKI_PROVIDER` 写入 env，但旧 Provider 的 API key 不会被自动删除 -- 它们留在 env 文件中作为无影响的冗余 key
-
-## 7. 错误状态 (Error States)
-
-`InitSetup` 组件通过 `error` 和 `notice` 两个状态来显示异常信息。
-
-### 错误类型和处理
-
-| 错误来源 | 触发场景 | 处理方式 |
-|---------|---------|---------|
-| `loginWithChatGPT` 异常 | OAuth 登录失败（网络、浏览器、token 获取） | 设置 `error`，渲染红色 Error 面板。显示 "Login failed. Press Enter to retry." |
-| `saveOpenWikiEnv` 异常 | 文件写入失败（磁盘满、权限问题） | 设置 `error`，渲染红色 Error 面板 |
-| `readOpenWikiOnboardingConfig` 异常 | 读取 onboarding 配置失败 | 调用 `onError` 回调，向上传播 |
-| 模型 ID 无效 | `isValidModelId()` 返回 false | 不被 credentials.tsx 直接捕获，但 `getModelWarnings()`（`src/env.ts:323-325`）在诊断面板中标记 "invalid model ID" |
-| Provider 无效 | `normalizeProvider()` 返回 null | 同模型 ID 一样，在诊断面板中标记 "invalid provider" |
-| 凭据为空 / 有前后空格 / 包含引号 | 用户输入质量问题 | `getCredentialWarnings()` 生成警告，但不阻止保存 |
-| 目录无效 | `validateLocalDirectoryPath()` 对 non-directory 路径抛出 | 设置 `error` |
-
-### OAuth 重试机制
-
-OAuth 登录步骤（`oauth-login`）有特殊处理：
-
-- 用户按 Enter 重试时，`loginAttempt` 计数器递增，触发 `useEffect` 重新执行 `loginWithChatGPT`
-- 用户可以将浏览器重定向 URL 或 authorization code 粘贴到输入框中（用于 SSH/headless 环境），绕过自动浏览器检测
-
-## 8. Source Anchor
+## Source Anchor
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/credentials.tsx:103-129` | `PromptStep` | 26 个步骤的联合类型 |
-| `src/credentials.tsx:537-2548` | `InitSetup` | 核心 state machine 组件 |
-| `src/credentials.tsx:2550-3217` | `Prompt` | 根据 step 渲染对应 UI 的组件 |
-| `src/credentials.tsx:3557-3624` | `getInitialStep` | 确定初始步骤 |
-| `src/credentials.tsx:3626-3790` | `getNextStepAfter*` | 步骤跳转链 |
-| `src/credentials.tsx:1874-1906` | `completeSetup` | 完成引导，组装结果并回调 |
-| `src/credentials.tsx:1908-1985` | `saveCredentialUpdates` | 保存凭据到 env 文件 |
-| `src/credentials.tsx:371-394` | `needsCredentialSetup` | 判断是否需要凭据引导 |
-| `src/credentials.tsx:3219-3243` | `SetupStep` | 步骤状态指示器组件 |
-| `src/credentials.tsx:3377-3418` | `BorderedInput` | 带边框的输入框组件 |
-| `src/credentials.tsx:3316-3375` | `OAuthLoginPrompt` | OAuth 登录状态提示组件 |
-| `src/credentials.tsx:76-93` | `InitSetupResult` | 引导完成的结果类型 |
-| `src/constants.ts:68-80` | `OpenWikiProvider` | 12 个 Provider 的联合类型 |
-| `src/constants.ts:82-87` | `ProviderAuthMethod` | 认证方式：api-key 或 oauth |
-| `src/constants.ts:122-175` | `ProviderConfig` | Provider 配置项类型定义 |
-| `src/constants.ts:192-319` | `PROVIDER_CONFIGS` | 所有 12 个 Provider 的完整配置 |
-| `src/constants.ts:417-429` | `getProviderCredentialHint` | Provider 凭据提示 |
-| `src/env.ts:57` | `openWikiEnvPath` | `~/.openwiki/.env` 路径 |
-| `src/env.ts:81-132` | `MANAGED_ENV_KEYS` | 所有管理的环境变量 key 列表 |
-| `src/env.ts:169-183` | `loadOpenWikiEnv` | 从 ~/.openwiki/.env 加载环境变量 |
-| `src/env.ts:195-221` | `saveOpenWikiEnv` | 保存环境变量到 ~/.openwiki/.env |
-| `src/env.ts:397-414` | `formatEnv` | 格式化 env map 为文件内容 |
-| `src/cli.tsx:289` | `needsCredentialSetup(sessionModelId, runMode)` | CLI 入口中判断是否需要凭据引导 |
-| `src/cli.tsx:692-717` | `shouldRunInteractiveCredentialSetup` | 决定是否渲染 InitSetup |
+| `src/setup/credentials.tsx:28-30` | `InitSetup` | 组合根：`<InitSetupView {...useInitSetup(props)}/>` |
+| `src/setup/credentials/use-init-setup.ts:143` | `useInitSetup` | 状态机 hook（2642 行） |
+| `src/setup/credentials/use-init-setup.ts:288-387` | 初始化 effect | 播种初始步骤，`didInitializeRef` 守卫 |
+| `src/setup/credentials/use-init-setup.ts:391-480` | OAuth effect | `loginWithChatGPT` 驱动与重试（deps `[step, loginAttempt]`） |
+| `src/setup/credentials/use-init-setup.ts:482-520` | external-cli effect | 凭据探测（每 provider 一次） |
+| `src/setup/credentials/use-init-setup.ts:551` | `seedInputForStep` | 导航到达时的输入/索引播种 |
+| `src/setup/credentials/use-init-setup.ts:788-1115` | `useInput` | 键盘路由：守卫/Esc 栈/oauth 专用/菜单/文本默认分支 |
+| `src/setup/credentials/use-init-setup.ts:1117` | `handleMenuInput` | 菜单步骤统一的移动+提交处理 |
+| `src/setup/credentials/use-init-setup.ts:1129` | `submit` | 按步骤分发的提交入口 |
+| `src/setup/credentials/use-init-setup.ts:1207-1249` | provider 提交 | 换 provider 清空凭据、`forceModelStep` |
+| `src/setup/credentials/use-init-setup.ts:2235-2267` | `completeSetup` | 保存 + 组装 `InitSetupResult` 回调 |
+| `src/setup/credentials/use-init-setup.ts:2269-2295` | `saveCredentialUpdates` | 调 `buildCredentialEnvUpdates` + `saveOpenWikiEnv` |
+| `src/setup/credentials/use-init-setup.ts:2567-2584` | `submitManualLogin` | OAuth 粘贴回退提交 |
+| `src/setup/credentials/steps.ts:68-92` | `needsCredentialSetup` | 凭据 + onboarding 完成预检 |
+| `src/setup/credentials/steps.ts:119-137` | `credentialStep` | 主凭据步骤映射（oauth/external-cli/api-key/gcp） |
+| `src/setup/credentials/steps.ts:146-159` | `getWizardManagedEnvKeys` | 向导管辖 key 清单（遮蔽警告用，仅 key 名） |
+| `src/setup/credentials/steps.ts:201-249` | `orderedSetupSteps` | 脊柱步骤序列（含已满足步骤） |
+| `src/setup/credentials/steps.ts:257-269` | `nextSetupStep` | 脊柱内下一步 |
+| `src/setup/credentials/steps.ts:332-336` | `needsLangSmithStep` | LangSmith 步骤「已答」判定（含跳过记录） |
+| `src/setup/credentials/steps.ts:353-366` | `resolveStepStatus` | 清单行四态判定（current 优先） |
+| `src/setup/credentials/steps.ts:368-448` | `getInitialStep` | 初始步骤瀑布（`walkAll` 短路） |
+| `src/setup/credentials/steps.ts:450-595` | `getNextStepAfter*` | 瀑布式跳过链 |
+| `src/setup/credentials/components.tsx:74` | `Prompt` | 按 step 分支的提示渲染（1304 行文件） |
+| `src/setup/credentials/components.tsx:1092` | `OAuthLoginPrompt` | OAuth 登录提示与粘贴回退 |
+| `src/setup/credentials/components.tsx:1153` | `BorderedInput` | 单行遮罩输入框 |
+| `src/setup/credentials/components.tsx:1265` | `SegmentedCronInput` | cron 五字段分段编辑器 |
+| `src/setup/credentials/view.tsx:66` | `InitSetupViewProps` | 只读渲染输入契约 |
+| `src/setup/credentials/view.tsx:242-688` | `InitSetupView` | 视图组装（清单/警告/面板） |
+| `src/setup/credentials/persistence.ts:31-130` | `buildCredentialEnvUpdates` | 纯函数 env 更新映射（含 LangSmith 关闭开关） |
+| `src/setup/credentials/format.ts:126` | `copyToClipboard` | OSC 52 剪贴板（SSH 可用） |
+| `src/setup/credentials/format.ts:48` | `getCredentialSetupDetail` | 凭据清单行的 detail 文案（AWS 链状态等） |
+| `src/setup/credentials/constants.ts:75-99` | `LANGSMITH_REGION_OPTIONS` | US/EU/APAC 区域选项（APAC `:88-93`） |
+| `src/setup/credentials/types.ts:42-74` | `PromptStep` | 32 步联合类型 |
+| `src/setup/credentials/types.ts:9-26` | `InitSetupResult` | 完成回调结果（`saved*` 标志族） |
+| `src/setup/onboarding.ts:172` | `isOnboardingComplete` | onboarding 完成判定（划界：归 10 区 02 号） |
+| `src/config/constants.ts:129-130` | `ProviderAuthMethod` | 四种认证方式 |
+| `src/config/constants.ts:603-631` | `getProviderCredentialHint` | 缺凭据提示（gemini-enterprise/aws-sdk/external-cli） |
+| `src/config/env.ts:246` | `getShellEnvValue` | shell 快照读取（播种不取被遮蔽值） |
+| `src/config/env.ts:263` | `getSavedEnvValue` | 首次加载时的已存值快照 |
+| `src/config/env.ts:305` | `saveOpenWikiEnv` | `.env` 串行保存（机制见 02 号） |
+| `src/cli/app/app.tsx:156,175` | `needsCredentialSetup` 调用 | 向导打开判定 |
+| `src/cli/app/app.tsx:745-749` | `<InitSetup>` | 唯一渲染点（`walkAllSteps={isInitCommand}`） |
+| `src/cli/cli.tsx:63-64` | `loadOpenWikiEnv` 门 | `commandLoadsEnvironment`（`src/cli/commands.ts:1078`） |

@@ -4,145 +4,177 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
-audience: "需要理解 createModel() 如何为每个 provider 构造不同的 LangChain 客户端的人，或者需要新增模型提供商的人"
-purpose: "逐 provider 分支剖析 createModel() 的客户端构造函数及其配置选项，包括 ChatGPT OAuth 和 Vertex AI 的深水区。提供新增 provider 的步骤清单。"
-owns: "`src/agent/index.ts:560-685` 中的 createModel() 函数，`src/agent/index.ts:687-711` 中的 ensureFreshChatGptTokens()，`src/agent/index.ts:713-809` 中的 getProviderApiKey() / createGeminiEnterpriseModel() / GEMINI_THOUGHT_SIGNATURE_OPTIONS"
+updated: "2026-09-13"
+sync_event: "2026-09-13"
+audience: "需要理解 createModel() 如何为每个 provider 构造不同 LangChain 客户端的人，或需要新增模型提供商/分支的人"
+purpose: "逐分支剖析 createModel()（src/agent/index.ts:1077-1264）的七条分支与兜底 ChatOpenAI、新签名（providerRetryAttempts/maxOutputTokens?/streamIdleTimeout?）、reasoning 预热、Vertex AI 三面路由与 copilot 无分支路径，并给出两个调用点与新增提供商步骤"
+owns: "`src/agent/index.ts:1077-1264` 的 createModel() 七分支；:1266-1445 的辅助函数（ensureFreshChatGptTokens / getProviderApiKey / GEMINI_THOUGHT_SIGNATURE_OPTIONS / resolveAnthropicMaxOutputTokens / createGeminiEnterpriseModel）；:190 与 :570 两个调用点"
 update_when:
-  - "createModel() 中新增或删除某个 provider 分支"
-  - "任何 provider 的客户端构造函数或配置选项发生变化"
-  - "createGeminiEnterpriseModel() 中新增 Vertex surface 分支"
-  - "CODEX_RESPONSES_BASE_URL / CODEX_ORIGINATOR 取值变化"
-  - "GEMINI_THOUGHT_SIGNATURE_OPTIONS 调整"
+  - "createModel() 新增或删除某个 provider 分支"
+  - "任何 provider 的客户端构造函数或配置选项变化"
+  - "createGeminiEnterpriseModel() 的 Vertex surface 路由变化"
+  - "签名参数（providerRetryAttempts/maxOutputTokens/streamIdleTimeout）或 reasoning 预热逻辑变化"
+  - "CODEX_RESPONSES_BASE_URL / CODEX_ORIGINATOR / GEMINI_THOUGHT_SIGNATURE_OPTIONS 调整"
 out_of_scope:
-  - "提供商注册表 PROVIDER_CONFIGS 的字段定义（见 01-provider-configuration.md）"
-  - "provider 解析回退链 resolveConfiguredProvider()（见 01-provider-configuration.md）"
-  - "OAuth PKCE 浏览器登录流程的协议细节（见 07-authentication-and-oauth/）"
-  - "credentials.tsx TUI 中的凭据配置向导（见 10-configuration-and-telemetry/）"
+  - "提供商注册表 PROVIDER_CONFIGS 字段与 13 个提供商配置明细（见 01-provider-configuration.md）"
+  - "提供商回退链 resolveConfiguredProvider()（见 01-provider-configuration.md §6）"
+  - "reasoning 档位、能力表与 transport 的完整体系（src/config/reasoning.ts，06 区 03 篇）"
+  - "ChatGPT OAuth PKCE 浏览器登录流程协议细节（见 09-authentication-and-oauth/）"
 ---
 
 # 02 — 模型创建与提供商分支 (Model Creation and Provider Branches)
 
 ## 1. 概述 (Overview)
 
-`createModel()` (`src/agent/index.ts:560-685`) 是 OpenWiki 运行时的**模型客户端工厂函数（Model Client Factory）**。它不是一个抽象工厂——它是一个 `if`/`switch` 分支链，根据 `OpenWikiProvider` 联合类型的值，为每个 provider 构造不同的 LangChain 客户端实例，注入不同的配置选项。
+`createModel()`（**`src/agent/index.ts:1077-1264`**）是 OpenWiki 运行时的**模型客户端工厂（Model Client Factory）**。它不是抽象工厂——是一条 `if` 分支链，按 `OpenWikiProvider` 的值为六类提供商各自构造专属 LangChain 客户端，其余全部落入共享兜底（fallthrough）分支的 `ChatOpenAI`。
 
-调用链路（Call Chain）：
+当前**七条路径**：
+
+| # | 分支 | 锚 | 客户端 |
+|---|------|----|--------|
+| 1 | `gemini` | :1126-1137 | `ChatGoogle`（AI Studio，`platformType: "gai"`） |
+| 2 | `gemini-enterprise` | :1139-1160 | 委托 `createGeminiEnterpriseModel()`（内部 Vertex 三面路由 :1353-1445） |
+| 3 | `anthropic` | :1162-1175 | `ChatAnthropic` |
+| 4 | `openai-chatgpt` | :1177-1213 | `ChatOpenAI` + Responses API 指向 Codex 后端 |
+| 5 | `openrouter` | :1215-1231 | `ChatOpenRouter` |
+| 6 | `bedrock` | :1233-1241 | `ChatBedrockConverse` |
+| 7 | **兜底** | :1243-1263 | `ChatOpenAI` + `resolveProviderBaseUrl()`：覆盖 `openai`、`copilot`、`baseten`、`fireworks`、`nebius`、`nvidia`、`openai-compatible` |
+
+> **2026-09-13 re-baseline 提示**：`createModel()` 从旧基线的 `src/agent/index.ts:560-685` 迁至 :1077-1264；签名从三元扩为五元（新增 `maxOutputTokens?`/`streamIdleTimeout?`）；插入 reasoning 预热段；辅助函数（`ensureFreshChatGptTokens`/`getProviderApiKey`/`GEMINI_THOUGHT_SIGNATURE_OPTIONS`）行号全部漂移；`copilot` 为新增提供商且**无独立分支**。
+
+### 1.1 调用链路（Call Chain）
 
 ```
-runOpenWikiAgent()                              → src/agent/index.ts:96
-  resolveConfiguredProvider()                   → src/constants.ts
-  ensureProviderCredentials(provider)            → src/agent/index.ts:476
-  ensureFreshChatGptTokens()                    → src/agent/index.ts:697 (仅 openai-chatgpt)
-  resolveModelId(options, provider)             → src/agent/index.ts:534
-  runOpenWikiAgentCore(...)                     → src/agent/index.ts:205
-    createModel(provider, modelId, retries)     → src/agent/index.ts:560 ← 本文档焦点
-    createDeepAgent({ model, ... })             → deepagents SDK
+runOpenWikiAgent()                                   → src/agent/index.ts:154
+  ├─ repository init/update 快速路径                  → :178-230
+  │    resolveRunConfig() → createModel(:190) → runNativeRepositoryGeneration(:202)
+  └─ 其余命令 → runOpenWikiAgentCore(:539)
+       resolveRunConfig() → createModel(:570) → createOpenWikiAgentGraph(:598)
 ```
+
+`resolveRunConfig()`（`src/agent/index.ts:283-372`）先解析出五元组 `{ provider, modelId, providerRetryAttempts, maxOutputTokens, streamIdleTimeout }`（:286-292），并完成全部异步前置：external-cli 凭据注入（:305）、凭据/Base URL/密钥/区域四道门控（:310-319）、ChatGPT token 刷新（:321-325）、模型可用性查询（:329-347）。`createModel()` 因此保持**同步（synchronous）**。
+
+两个调用点都包在 `inStageSync("build", …, { errorClass: "build_error", errorDetail: "model" })` 里（:187-198 与 :567-578）——模型构造失败在遥测中归为 `build_error`/`model`。
 
 关键设计原则（Key Design Principles）：
 
-- **同步（Synchronous）**：`createModel()` 是同步函数。所有异步准备工作（ChatGPT token 刷新）在调用前完成 (`src/agent/index.ts:164-168`)。
-- **按 provider 分支（Provider-Branched）**：每个 provider 独立构造，无分支共享。一个 provider 对应一个 `if` 块。
-- **兜底分支（Fallthrough）**：最后一行 (`src/agent/index.ts:672-684`) 作为共享兜底，用 `ChatOpenAI` + 可选的 `baseURL` 覆盖 `baseten`、`fireworks`、`nebius`、`nvidia`、`openai-compatible` 以及未明确匹配的 provider。
-- **环境变量注入（Env-Var Injection）**：API key、base URL、project、region 全部从环境变量读取（由 `loadOpenWikiEnv()` 提前加载到 `process.env`）。
+- **同步（Synchronous）**：所有异步准备在 `resolveRunConfig` 完成；`createModel()` 内不 await。
+- **按提供商分支（Provider-Branched）**：一个提供商一个 `if` 块；`copilot` 是刻意走兜底的例外（§5）。
+- **兜底分支（Fallthrough Branch）**：OpenAI 兼容 API 的提供商零成本接入。
+- **环境变量注入（Env-Var Injection）**：API key、Base URL、project、region 全部读 `process.env`（由 `loadOpenWikiEnv()` 预载）。
+- **reasoning 预热（§3）**：在构造客户端前解析 `OPENWIKI_REASONING_EFFORT` 并预展开成各 SDK 的选项对象，不匹配直接抛错。
 
-## 2. createModel() 逐 provider 分支 (Provider-by-Provider Breakdown)
+## 2. 新签名与共享配置 (Signature and Shared Options)
 
-函数签名：
+### 2.1 函数签名（:1077-1083）
 
 ```typescript
-function createModel(
+export function createModel(
   provider: OpenWikiProvider,
   modelId: string,
   providerRetryAttempts: number,
+  maxOutputTokens?: number,      // :1081 新增
+  streamIdleTimeout?: number,    // :1082 新增
 )
 ```
 
-所有分支共享一个 retry 配置：
+三个数值实参全部来自 `resolveRunConfig` 的解析（env：`OPENWIKI_PROVIDER_RETRY_ATTEMPTS` 默认 3、`OPENWIKI_MAX_OUTPUT_TOKENS` 族、`OPENWIKI_STREAM_IDLE_TIMEOUT`——解析语义见 01 篇 §11）。
 
-```typescript
-const retryOptions = { maxRetries: providerRetryAttempts };
-```
+### 2.2 共享选项对象（:1084-1100）
 
-`providerRetryAttempts` 来自 `OPENWIKI_PROVIDER_RETRY_ATTEMPTS` env var，默认值为 3 (`src/constants.ts:36`)。
+| 对象 | 锚 | 说明 |
+|------|-----|------|
+| `retryOptions = { maxRetries: providerRetryAttempts }` | :1084 | 所有分支共享 |
+| `configuredMaxOutputTokens` | :1085-1086 | 实参缺省时回退 `resolveConfiguredMaxOutputTokens(provider)`（兜底内部再解析一次 env） |
+| `maxTokensOptions` | :1087-1090 | OpenAI 系字段名 `maxTokens` |
+| `googleMaxOutputTokensOptions` | :1091-1094 | Google 系字段名 `maxOutputTokens` |
+| `streamIdleTimeoutOptions` | :1095-1096 | 仅 bedrock 分支展开（流空闲看门狗，bedrock 专属） |
+| `chatOpenAiUsesResponsesApi` | :1097-1100 | `providerUsesResponsesApi(provider, modelId)`——openai 恒 true；copilot 按 `/^gpt-5/u` 匹配（兜底分支 :1253 使用） |
 
-### 2.1 gemini — AI Studio (src/agent/index.ts:567-576)
+## 3. reasoning 预热 (Reasoning Prewarm, :1101-1124)
 
-个人 API key 直连 Google AI Studio 的 Gemini 端点。
+在进入任何分支之前，工厂先调用 `resolveReasoningConfig(provider, modelId, process.env, { useResponsesApi })`（:1101-1108；实现 `src/config/reasoning.ts:88-130`）解析 `OPENWIKI_REASONING_EFFORT`，并把结果预展开为三组互斥选项（:1113-1124）：
+
+| transport | 选项对象 | 锚 | 注入形态 |
+|-----------|---------|-----|---------|
+| `responses-reasoning` | `responsesReasoningOptions` | :1113-1116 | `reasoning: { effort }`（Responses 载荷；`as never` 兼容转换收敛在构造边界） |
+| `chat-completions-reasoning-effort` | `chatCompletionsReasoningOptions` | :1117-1120 | `modelKwargs: { reasoning_effort }` |
+| `gemini-thinking-level` | `geminiThinkingLevelOptions` | :1121-1124 | `thinkingLevel: effort` |
+
+行为要点（`src/config/reasoning.ts`）：
+
+- env 未设置 → 返回 `undefined`，三组选项均为空对象，零开销（:96-98）。
+- 档位值非法（合法集 `none/low/medium/high/xhigh/max`，:8-15）或该提供商/模型无能力条目（能力表 :48-70：openai 与 openai-chatgpt 的 gpt-5.6-terra/luna/sol、nvidia 的 nemotron-3-super、gemini 的 gemini-3.6-flash）→ **抛错**（:102-127）。
+- `openai-compatible` 走动态判定（:132-147）：需 `OPENWIKI_OPENAI_COMPATIBLE_REASONING_EFFORT_SUPPORTED=true`，transport 按是否 Responses API 二选一。
+- **copilot 在能力表中没有条目**——对 copilot 设置 `OPENWIKI_REASONING_EFFORT` 会直接抛「not supported」。
+
+预展开的意义：分支体内不再出现 reasoning 逻辑，gemini 分支只需展开 `geminiThinkingLevelOptions`，openai-chatgpt 与兜底分支展开 `responsesReasoningOptions`（兜底再叠加 `chatCompletionsReasoningOptions`）。
+
+## 4. 七条路径逐条剖析 (Branch-by-Branch Breakdown)
+
+### 4.1 gemini — AI Studio（:1126-1137）
 
 ```typescript
 return new ChatGoogle({
   apiKey: getProviderApiKey(provider),
   model: modelId,
   platformType: "gai",
-  ...GEMINI_THOUGHT_SIGNATURE_OPTIONS,
+  ...GEMINI_THOUGHT_SIGNATURE_OPTIONS,   // :1132
+  ...geminiThinkingLevelOptions,
+  ...googleMaxOutputTokensOptions,
   ...retryOptions,
 });
 ```
 
-| 配置项 | 值 | 说明 |
-|--------|-----|------|
-| `apiKey` | `process.env[GEMINI_API_KEY_ENV_KEY]` | 来自 `GEMINI_API_KEY` env var |
-| `model` | 传入的 `modelId` | 如 `gemini-3.5-flash` |
-| `platformType` | `"gai"` | Google AI Studio 端点（区别于 `"gcp"` 的 Vertex 端点） |
-| `GEMINI_THOUGHT_SIGNATURE_OPTIONS` | `{ disableStreaming: true, outputVersion: "v0" }` | 见 2.8 节 |
+`platformType: "gai"` 走 AI Studio 端点（区别于 Vertex 的 `"gcp"`）；`GEMINI_THOUGHT_SIGNATURE_OPTIONS` 见 §6.4。导入：`ChatGoogle` from `@langchain/google/node`（`src/agent/index.ts:8`）。
 
-LangChain 导入：`ChatGoogle` from `@langchain/google/node` (`src/agent/index.ts:7`)。
+### 4.2 gemini-enterprise — Vertex AI（:1139-1160，三面路由 :1353-1445）
 
-### 2.2 gemini-enterprise — Vertex AI (src/agent/index.ts:578-598)
+分支体先做两道前置（:1140-1151）：`GOOGLE_CLOUD_PROJECT` 缺失即抛错；`location` 取 `resolveProviderLocation() ?? DEFAULT_VERTEX_LOCATION`（`"global"`）。然后委托 `createGeminiEnterpriseModel()`。
 
-Google Cloud 上托管的 Gemini Enterprise（Vertex AI）。该分支提取 `GOOGLE_CLOUD_PROJECT` 和 location 后委托给 `createGeminiEnterpriseModel()`，而非直接构造客户端。
+`createGeminiEnterpriseModel()`（`src/agent/index.ts:1353-1445`）的核心是 `switch (resolveVertexSurface(modelId))`（:1365）——**同一个 project + location + ADC 凭据，按模型 ID 路由到三种 API surface**（surface 判定 `src/agent/vertex-surface.ts:34-46`：命中 `/(^|\/)(anthropic|claude)/u` → anthropic；命中 ai21/codellama/codestral/deepseek/jamba/llama/meta/mistral/qwen → openai-maas；其余含 Gemma → gemini）：
 
-```typescript
-const projectId = process.env[GOOGLE_CLOUD_PROJECT_ENV_KEY];  // GOOGLE_CLOUD_PROJECT
-const location = resolveProviderLocation(provider) ?? DEFAULT_VERTEX_LOCATION;  // "global"
+**① anthropic surface（:1366-1402）**：JS 生态没有 Claude-on-Vertex 原生聊天模型，用 `ChatAnthropic` 的 `createClient` 钩子桥接 `AnthropicVertex`（@anthropic-ai/vertex-sdk，ADC 认证；:1389-1401）。三个细节：
 
-return createGeminiEnterpriseModel(modelId, projectId, location, retryOptions);
-```
+- 提供 `createClient` 后 `ChatAnthropic` 不再要求 `ANTHROPIC_API_KEY`；
+- 构造被 `withAnthropicAuthEnvNeutralized()`（`src/agent/vertex-surface.ts:112`）包裹——临时中和 env 中的 `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`，防止杂散变量以 Authorization header 覆盖 Google OAuth token；
+- 显式 `dangerouslyAllowBrowser: true`（:1396）：可选的 mermaid 校验路径会进程级安装 jsdom DOM 全局（`src/mermaid/dom-shim.ts`），触发 Anthropic SDK 的浏览器凭据暴露守卫，导致整个 run 在产出任何文档前中止；OpenWiki 永远是 Node CLI/CI 进程，该旗标只转发给 `AnthropicVertex`。
+- `maxTokens` 经 `resolveAnthropicMaxOutputTokens()`（:1367-1370）取值（§6.5）。
 
-| 配置项 | 值 | 说明 |
-|--------|-----|------|
-| `projectId` | `process.env.GOOGLE_CLOUD_PROJECT` | 必需，缺失时抛出错误 |
-| `location` | `GOOGLE_CLOUD_LOCATION` env 覆盖，否则 `DEFAULT_VERTEX_LOCATION` = `"global"` | `resolveProviderLocation()` 在 `src/constants.ts:396-411` |
+**② openai-maas surface（:1404-1418）**：伙伴/开放权重模型（Llama、Mistral、DeepSeek、Qwen 等）走 Vertex 的 OpenAI 兼容端点：`ChatOpenAI` + `vertexOpenAIBaseUrl(projectId, location)`（`src/agent/vertex-surface.ts:81`）+ `createVertexAuthFetch()`（:152，每请求注入 ADC bearer token）；`apiKey` 是占位符 `"vertex-adc"`（`VERTEX_ADC_PLACEHOLDER_KEY`，:1300），每请求被 fetch 包装器覆盖；模型 ID 规范化为 `publisher/model`（`toVertexPublisherModel`，:66）。
 
-`createGeminiEnterpriseModel()` 的内部逻辑见第 4 节。
+**③ 默认 gemini surface（:1420-1443）**：`ChatGoogle` + `platformType: "gcp"` + `GEMINI_THOUGHT_SIGNATURE_OPTIONS`；`apiKey: ""` **刻意置空**（:1435）——node 客户端按 `apiKey ?? GOOGLE_API_KEY` 解析，杂散 `GOOGLE_API_KEY` 会同时发 `X-Goog-Api-Key` 头并翻转进 Vertex Express 模式；空串被 `hasApiKey()` 视为无 key，阻断该回退。认证强制 ADC：`googleAuthOptions: { projectId }` 经 `/node` 入口传入（默认入口把 authOptions 类型标成 `never`）。
 
-### 2.3 anthropic — 直连 Anthropic API (src/agent/index.ts:600-608)
+### 4.3 anthropic — 直连 API（:1162-1175）
 
 ```typescript
 const baseURL = resolveProviderBaseUrl(provider);
+const maxTokens = resolveAnthropicMaxOutputTokens(modelId, configuredMaxOutputTokens);
 return new ChatAnthropic(modelId, {
   apiKey: getProviderApiKey(provider),
   ...(baseURL ? { anthropicApiUrl: baseURL } : {}),
+  ...(maxTokens !== undefined ? { maxTokens } : {}),
   ...retryOptions,
 });
 ```
 
-| 配置项 | 值 | 说明 |
-|--------|-----|------|
-| 第一个参数 | `modelId` | 如 `claude-sonnet-5`，作为 ChatAnthropic 构造函数的第一个位置参数 |
-| `apiKey` | `process.env[ANTHROPIC_API_KEY_ENV_KEY]` | 来自 `ANTHROPIC_API_KEY` |
-| `anthropicApiUrl` | `ANTHROPIC_BASE_URL` env 值（可选） | 自定义端点，仅在 env var 存在且非空时设置。传入 `ChatAnthropic` 的 `anthropicApiUrl` 选项，直接覆盖底层 Anthropic SDK 的 `baseURL`。 |
+`anthropicApiUrl`（非 `baseURL`）是 Anthropic SDK 自己的端点字段名；`ANTHROPIC_BASE_URL` 覆盖经 `resolveProviderBaseUrl` 进入。`maxTokens` 语义见 §6.5——新基线相比旧文新增了这一档。
 
-LangChain 导入：`ChatAnthropic` from `@langchain/anthropic` (`src/agent/index.ts:5`)。
-
-### 2.4 openai-chatgpt — ChatGPT OAuth 登录 (src/agent/index.ts:610-643)
-
-通过 ChatGPT 订阅（非 API key）认证，流量指向 Codex 后端。这是最复杂的分支。
+### 4.4 openai-chatgpt — ChatGPT OAuth → Codex 后端（:1177-1213）
 
 ```typescript
-const tokens = readCodexTokensFromEnv();
-if (!tokens) {
-  throw new Error(CHATGPT_LOGIN_INCOMPLETE_MESSAGE);
-}
+const tokens = readCodexTokensFromEnv();        // :1179（此时必然新鲜，见 §6.1）
+if (!tokens) throw new Error(CHATGPT_LOGIN_INCOMPLETE_MESSAGE);
 
 return new ChatOpenAI({
   apiKey: tokens.access,
   model: modelId,
-  useResponsesApi: true,
-  zdrEnabled: true,
-  streaming: true,
+  useResponsesApi: true,     // POST {baseURL}/responses
+  zdrEnabled: true,          // 强制 store: false（Codex 要求；零数据保留 zero data retention）
+  streaming: true,           // Codex 拒绝非流式（"Stream must be set to true"），
+                             // 包括 DeepAgents agent 节点内部发起的非流式 .invoke()
+  ...maxTokensOptions,
+  ...responsesReasoningOptions,
   ...retryOptions,
   configuration: {
     baseURL: CODEX_RESPONSES_BASE_URL,
@@ -156,104 +188,42 @@ return new ChatOpenAI({
 });
 ```
 
-| 配置项 | 值 | 说明 |
-|--------|-----|------|
-| `apiKey` | `tokens.access` | OAuth 刷新后的 access token，非 API key |
-| `useResponsesApi` | `true` | 路由到 `POST {baseURL}/responses`（而非 `/chat/completions`） |
-| `zdrEnabled` | `true` | 强制 `store: false`，Codex 后端要求此参数 |
-| `streaming` | `true` | **强制 streaming 传输**。Codex 后端拒绝非 streaming 请求（"Stream must be set to true"），因此即使是 DeepAgents 内部的非 streaming `.invoke()` 调用也走 streaming transport |
-| `configuration.baseURL` | `CODEX_RESPONSES_BASE_URL` = `"https://chatgpt.com/backend-api/codex"` | Codex 后端地址 |
-| `configuration.defaultHeaders.chatgpt-account-id` | `tokens.accountId` | 从 access token JWT 解码出的 `chatgpt_account_id` 声明 |
-| `configuration.defaultHeaders.originator` | `CODEX_ORIGINATOR` = `"openwiki"` | 客户端标识 |
-| `configuration.defaultHeaders.OpenAI-Beta` | `"responses=experimental"` | Beta 功能门控 header |
-| `configuration.fetch` | `createCodexFetch(modelId)` | 自定义 fetch 包装器（见第 3 节） |
+常量在 `src/agent/openai-chatgpt-oauth.ts`：`CODEX_RESPONSES_BASE_URL = "https://chatgpt.com/backend-api/codex"`（:31）、`CODEX_ORIGINATOR = "openwiki"`（:34）。`createCodexFetch()`（:48 起）做两件事：system → developer role 替换；`gpt-5.6-luna` 专用协议（`useLunaProtocol` :54——tools/instructions 移入 input 数组（:86 起）、`reasoning: { context: "all_turns" }`（:116）、强制 `parallel_tool_calls: false`（:118）、替换 originator/user-agent 为 `codex_cli_rs` 系并加 Responses Lite 头（:130-140），常量 :36-38）。
 
-Token 刷新在 `createModel()` 调用**之前**完成：
+### 4.5 openrouter（:1215-1231）
 
 ```typescript
-// src/agent/index.ts:164-168
-if (provider === "openai-chatgpt") {
-  await ensureFreshChatGptTokens();
-  emitDebug(options, "chatgpt.token=fresh");
-}
-```
-
-`ensureFreshChatGptTokens()` 的详细流程见第 3 节。
-
-### 2.5 openai — 标准 API key (src/agent/index.ts:672-684 的兜底分支)
-
-`openai` 没有独立的 `if` 块——它走了兜底分支，但 `useResponsesApi` 被显式开启：
-
-```typescript
-const baseURL = resolveProviderBaseUrl(provider);
-return new ChatOpenAI({
-  apiKey: getProviderApiKey(provider),
-  configuration: baseURL ? { baseURL } : undefined,
-  model: modelId,
-  useResponsesApi: provider === "openai",
-  ...retryOptions,
-});
-```
-
-当 `provider === "openai"` 时：
-
-| 配置项 | 值 | 说明 |
-|--------|-----|------|
-| `apiKey` | `process.env.OPENAI_API_KEY` | 标准 OpenAI API key |
-| `model` | 传入的 `modelId` | 如 `gpt-5.6-terra` |
-| `useResponsesApi` | `true` | 走 OpenAI Responses API（而非 Chat Completions） |
-| `configuration.baseURL` | `undefined`（openai 的 `baseURL` 为 `undefined`，`baseUrlEnvKey` 为空） | 使用 SDK 默认端点 `https://api.openai.com/v1` |
-
-### 2.6 openrouter (src/agent/index.ts:646-654)
-
-```typescript
+const providerOnly = resolveOpenRouterProviderOnly();
+const legacyMaxTokens = resolveOpenRouterMaxTokens();
+const effectiveMaxTokens = legacyMaxTokens ?? configuredMaxOutputTokens;
 return new ChatOpenRouter({
   apiKey: process.env[OPENROUTER_API_KEY_ENV_KEY],
   baseURL: OPENROUTER_BASE_URL,
   model: modelId,
+  ...(effectiveMaxTokens !== undefined ? { maxTokens: effectiveMaxTokens } : {}),
+  provider: providerOnly ? { only: providerOnly } : undefined,
   siteName: "OpenWiki",
   ...retryOptions,
 });
 ```
 
-| 配置项 | 值 | 说明 |
-|--------|-----|------|
-| `apiKey` | `process.env.OPENROUTER_API_KEY` | OpenRouter API key |
-| `baseURL` | `OPENROUTER_BASE_URL` = `"https://openrouter.ai/api/v1"` | 硬编码常量 |
-| `model` | 传入的 `modelId` | 如 `anthropic/claude-sonnet-5` |
-| `siteName` | `"OpenWiki"` | HTTP User-Agent 报告中的应用标识 |
+新基线的两处增量：`provider.only` 路由白名单（`OPENWIKI_OPENROUTER_PROVIDER_ONLY`）；输出上限旧专属设置的优先级保持（`resolveConfiguredMaxOutputTokens` 内同样规则，01 篇 §11.1）。导入：`ChatOpenRouter` from `@langchain/openrouter`（:11）。
 
-LangChain 导入：`ChatOpenRouter` from `@langchain/openrouter` (`src/agent/index.ts:10`)。
-
-### 2.7 bedrock (src/agent/index.ts:656-670)
+### 4.6 bedrock（:1233-1241）
 
 ```typescript
-const secretKeyEnvKey = getProviderSecretKeyEnvKey(provider);
 return new ChatBedrockConverse({
-  credentials: {
-    accessKeyId: getProviderApiKey(provider) ?? "",
-    secretAccessKey: secretKeyEnvKey
-      ? (process.env[secretKeyEnvKey] ?? "")
-      : "",
-  },
   model: modelId,
   region: resolveProviderRegion(provider),
+  ...maxTokensOptions,
+  ...streamIdleTimeoutOptions,
   ...retryOptions,
 });
 ```
 
-| 配置项 | 值 | 说明 |
-|--------|-----|------|
-| `credentials.accessKeyId` | `process.env.BEDROCK_AWS_ACCESS_KEY_ID` | AWS Access Key |
-| `credentials.secretAccessKey` | `process.env.BEDROCK_AWS_SECRET_ACCESS_KEY` | AWS Secret Key |
-| `model` | 传入的 `modelId` | 如 `anthropic.claude-sonnet-5-20260101-v1:0` |
-| `region` | `process.env.BEDROCK_AWS_REGION` | 无默认值，未设置时为 `undefined`，由 SDK 回退到 `~/.aws/config` |
+**注意与旧基线的本质差异**：不再手工拼 `credentials: { accessKeyId, secretAccessKey }` 对象——凭据整体委托 AWS SDK 凭据链（含 bearer token/旧式键对的优先级语义，由门控层保证可用性，01 篇 §7.2）。`streamIdleTimeoutOptions` 是 bedrock 独占的流空闲看门狗。导入：`ChatBedrockConverse` from `@langchain/aws`（:7）。
 
-LangChain 导入：`ChatBedrockConverse` from `@langchain/aws` (`src/agent/index.ts:6`)。
-
-### 2.8 兜底分支：baseten / fireworks / nebius / nvidia / openai-compatible (src/agent/index.ts:672-684)
-
-这些 provider 都没有独立的 `if` 块。它们共享兜底的 `ChatOpenAI` 构造，通过 `baseURL` 区分端点：
+### 4.7 兜底分支 — ChatOpenAI + resolveProviderBaseUrl（:1243-1263）
 
 ```typescript
 const baseURL = resolveProviderBaseUrl(provider);
@@ -261,209 +231,58 @@ return new ChatOpenAI({
   apiKey: getProviderApiKey(provider),
   configuration: baseURL ? { baseURL } : undefined,
   model: modelId,
-  useResponsesApi: provider === "openai",  // 仅 openai 为 true
+  useResponsesApi: chatOpenAiUsesResponsesApi,   // :1253
+  ...maxTokensOptions,
+  ...responsesReasoningOptions,
+  ...chatCompletionsReasoningOptions,
+  ...(providerUsesStreaming(provider) ? { streaming: true } : {}),   // :1261
   ...retryOptions,
 });
 ```
 
-| Provider | `apiKey` 来源 | 默认 `baseURL` |
-|----------|--------------|----------------|
-| `baseten` | `BASETEN_API_KEY` | `https://inference.baseten.co/v1` |
-| `fireworks` | `FIREWORKS_API_KEY` | `https://api.fireworks.ai/inference/v1` |
-| `nebius` | `NEBIUS_API_KEY` | `https://api.tokenfactory.nebius.com/v1/` |
-| `nvidia` | `NVIDIA_API_KEY` | `https://integrate.api.nvidia.com/v1` |
-| `openai-compatible` | `OPENAI_COMPATIBLE_API_KEY` | 无默认值，**必须**通过 `OPENAI_COMPATIBLE_BASE_URL` env var 提供 |
+| 成员 | `apiKey` 来源 | 生效 Base URL | `useResponsesApi` | `streaming: true` |
+|------|--------------|---------------|:-----------------:|:-----------------:|
+| `openai` | `OPENAI_API_KEY` | SDK 默认（可被 `OPENAI_BASE_URL` 覆盖） | 恒 true | 否 |
+| `copilot` | `COPILOT_API_KEY`（或 gh CLI 注入） | `https://api.githubcopilot.com` | gpt-5 族 true | **恒 true** |
+| `baseten` | `BASETEN_API_KEY` | `https://inference.baseten.co/v1` | 否 | 否 |
+| `fireworks` | `FIREWORKS_API_KEY` | `https://api.fireworks.ai/inference/v1` | 否 | 否 |
+| `nebius` | `NEBIUS_API_KEY` | `https://api.tokenfactory.nebius.com/v1/` | 否 | 否 |
+| `nvidia` | `NVIDIA_API_KEY` | `https://integrate.api.nvidia.com/v1` | 否 | 否 |
+| `openai-compatible` | `OPENAI_COMPATIBLE_API_KEY` | env 强制提供 | env 开关 | env 开关 |
 
-注意：`nebius` 在源码中被归类到共享兜底分支，虽然它有自己的 baseURL（`NEBIUS_BASE_URL`），但在 `createModel()` 中没有独立的 `if` 块——和 `baseten`、`fireworks`、`nvidia` 一样走同一个 `ChatOpenAI` 构造。
+:1261 的展开式写法有明确注释（:1257-1260）：`streaming: false` 不等于省略键——LangChain 会把它翻成 `disableStreaming`，所以只在该强制流式的提供商（当前仅 copilot，见 `providerUsesStreaming`，01 篇 §10.1）上展开 `{ streaming: true }`。
 
-## 3. ChatGPT OAuth 深水区 (ChatGPT OAuth Deep Dive)
+## 5. copilot：无独立分支的外部认证提供商 (Copilot: the Branchless Provider)
 
-### 3.1 ensureFreshChatGptTokens() 流程 (src/agent/index.ts:697-711)
+copilot 不在七条 `if` 中——它走兜底 `ChatOpenAI`，其全部特殊性都在**工厂之外**的配置与门控层：
 
-```typescript
-async function ensureFreshChatGptTokens(): Promise<void> {
-  const tokens = readCodexTokensFromEnv();
-  if (!tokens) {
-    throw new Error(CHATGPT_LOGIN_INCOMPLETE_MESSAGE);
-  }
-  if (!isChatGptTokenExpired(tokens.expiresAtMs)) {
-    return;  // Token 未过期，直接返回
-  }
-  await saveOpenWikiEnv(
-    codexTokensToEnv(await refreshChatGptTokens(tokens.refresh)),
-  );
-}
-```
+1. **认证**：`authMethod: "external-cli"` + `externalCliAuthAdapter: "github-cli"`。`resolveRunConfig`（:305）在构造模型前调 `resolveExternalCliCredential()`（`src/auth/external-cli-auth.ts:134-156`）执行 `gh auth token` 取会话 token 注入本进程 env（token 不落盘；仅当 `COPILOT_API_KEY` 未显式设置时）；随后 `validateExternalCliCredential()`（:177-188）拒绝 PAT 形态凭据。
+2. **端点**：兜底分支的 `resolveProviderBaseUrl("copilot")` 解析出 `https://api.githubcopilot.com`（`COPILOT_BASE_URL` 可覆盖，01 篇 §8.3）。
+3. **传输**：`providerUsesStreaming("copilot")` 恒 `true`（:498-500），经 :1261 强制 SSE——Copilot API 对非流式请求拒绝或返回空，会导致 repository worker 静默退出。
+4. **API 面**：`responsesApi: /^gpt-5/u` 使 GPT-5 族模型在 :1253 打开 Responses API，Claude/Gemini 族模型走 chat completions。
+5. **reasoning**：能力表无条目，`OPENWIKI_REASONING_EFFORT` 对 copilot 直接抛「not supported」（§3）。
 
-三步逻辑：
-1. 从 `~/.openwiki/.env` 读取持久化的 `CodexTokens`（access token、refresh token、accountId、过期时间、email、planType）
-2. 检查是否在过期阈值内（默认距离过期 60 秒即为"过期"）——若未过期则直接返回
-3. 若已过期，用 refresh token 换取新的 access token，将旋转后的 token 写回 `~/.openwiki/.env`（同时更新 `process.env`）
+## 6. 辅助函数 (Helpers, :1266-1445)
 
-这确保 `createModel()` 保持同步——token 刷新在该函数被调用时已经完成。
-
-### 3.2 CODEX_RESPONSES_BASE_URL (src/agent/openai-chatgpt-oauth.ts:31)
-
-```typescript
-export const CODEX_RESPONSES_BASE_URL = "https://chatgpt.com/backend-api/codex";
-```
-
-这是 ChatGPT/Codex 后端的 Responses API 基础 URL。OpenAI SDK 会在此基础上追加 `/responses`，形成完整地址 `https://chatgpt.com/backend-api/codex/responses`。
-
-### 3.3 Codex 请求头 (src/agent/index.ts:636-641)
-
-三个自定义 header 随每个请求发送：
-
-| Header | 值 | 说明 |
-|--------|-----|------|
-| `chatgpt-account-id` | `tokens.accountId` | ChatGPT 账户 ID，从 access token JWT 的 `https://api.openai.com/auth.chatgpt_account_id` 声明解码 |
-| `originator` | `"openwiki"` (`CODEX_ORIGINATOR`) | 客户端标识 |
-| `OpenAI-Beta` | `"responses=experimental"` | Beta 功能门控 |
-
-### 3.4 createCodexFetch() (src/agent/openai-chatgpt-oauth.ts:48-134)
-
-`createCodexFetch()` 返回一个 `fetch` 包装器，在 HTTP 请求层面做两件事：
-
-1. **system role → developer role 替换**：将请求 payload 中 `role: "system"` 的消息自动替换为 `role: "developer"`。Codex 后端不接受 `system` role。
-
-2. **Luna 模型专用协议**（当 `modelId === "gpt-5.6-luna"` 时）：
-   - 将 `tools` 和 `instructions` 从顶层字段移入 `input` 数组（作为 `type: "additional_tools"` 和 `type: "message"` 的 developer 条目）
-   - 添加 `reasoning: { context: "all_turns" }`
-   - 强制 `parallel_tool_calls: false`
-   - 替换 `originator` 为 `"codex_cli_rs"` (`CODEX_LUNA_ORIGINATOR`)
-   - 替换 `user-agent` 为 `"codex_cli_rs/0.0.0"` (`CODEX_LUNA_USER_AGENT`)
-   - 添加 `x-openai-internal-codex-responses-lite: true` header
-
-### 3.5 token 过期判定 (src/agent/openai-chatgpt-oauth.ts:540-546)
-
-```typescript
-function isChatGptTokenExpired(expiresAtMs: number, now = Date.now(),
-  thresholdMs = CHATGPT_TOKEN_REFRESH_THRESHOLD_MS): boolean {
-  return !Number.isFinite(expiresAtMs) || now >= expiresAtMs - thresholdMs;
-}
-```
-
-`CHATGPT_TOKEN_REFRESH_THRESHOLD_MS` = 60,000 毫秒（60 秒）。在 token 实际过期前 60 秒即视为"过期"，确保持久运行的 agent 不会中途因 token 过期而失败。
-
-## 4. Vertex AI 深水区 (Vertex AI Deep Dive)
-
-### 4.1 createGeminiEnterpriseModel() (src/agent/index.ts:744-809)
-
-`gemini-enterprise` provider 的一个关键特征是：**它不是一个模型——它是一个入口（entrypoint）**。同一个 Google Cloud project + location + ADC 凭据可以访问三种不同的 API surface，具体路由取决于模型 ID：
-
-```typescript
-function createGeminiEnterpriseModel(modelId, projectId, location, retryOptions) {
-  switch (resolveVertexSurface(modelId)) {
-    case "anthropic":    /* ChatAnthropic + AnthropicVertex SDK */
-    case "openai-maas":  /* ChatOpenAI + Vertex OpenAI-compatible endpoint */
-    default:             /* ChatGoogle (native Gemini/Gemma generateContent) */
-  }
-}
-```
-
-### 4.2 resolveVertexSurface() — 模型→Surface 路由 (src/agent/vertex-surface.ts:34-46)
-
-通过对模型 ID 的正则匹配判断应该走哪个 API surface：
-
-```typescript
-const ANTHROPIC_MODEL_PATTERN = /(^|\/)(anthropic|claude)/u;
-const OPENAI_MAAS_MODEL_PATTERN =
-  /(^|\/)(ai21|codellama|codestral|deepseek|jamba|llama|meta|mistral|qwen)/u;
-
-function resolveVertexSurface(modelId: string): VertexSurface {
-  if (ANTHROPIC_MODEL_PATTERN.test(id)) return "anthropic";
-  if (OPENAI_MAAS_MODEL_PATTERN.test(id)) return "openai-maas";
-  return "gemini";  // 默认：包括 Gemma
-}
-```
-
-三个 surface：
-- `"anthropic"`: Claude 模型（包括 `claude-sonnet-5`、`publishers/anthropic/models/claude-...` 等形式）
-- `"openai-maas"`: 合作伙伴/开放权重模型（Llama、Mistral、DeepSeek、Qwen 等），通过 OpenAI 兼容端点暴露
-- `"gemini"`: Google 自有 Gemini/Gemma 模型，通过原生 `generateContent` API
-
-### 4.3 Anthropic Surface 分支 (src/agent/index.ts:758-768)
-
-将 `ChatAnthropic` 的 `createClient` 钩子重定向到 Anthropic Vertex SDK：
-
-```typescript
-return new ChatAnthropic(stripPublisherPath(modelId), {
-  createClient: () =>
-    withAnthropicAuthEnvNeutralized(() =>
-      new AnthropicVertex({ projectId, region: location })
-    ),
-  ...retryOptions,
-});
-```
-
-| 配置项 | 说明 |
-|--------|------|
-| 第一个参数 | `stripPublisherPath(modelId)` — 将 `publishers/anthropic/models/claude-sonnet-5` 提取为裸 ID `claude-sonnet-5`，因为 Anthropic Vertex SDK 需要裸模型 ID |
-| `createClient` | 工厂函数，返回 `AnthropicVertex` 实例。提供此钩子后 `ChatAnthropic` 不再要求 `ANTHROPIC_API_KEY` |
-| `AnthropicVertex` | `@anthropic-ai/vertex-sdk` 的客户端，通过 Google ADC 认证（非 API key） |
-
-`withAnthropicAuthEnvNeutralized()` (`src/agent/vertex-surface.ts:112-132`) 的用途：在构造 `AnthropicVertex` 期间，临时删除 `process.env` 中的 `ANTHROPIC_API_KEY` 和 `ANTHROPIC_AUTH_TOKEN`。原因：`AnthropicVertex` 继承自 Anthropic SDK 基类，基类会从环境中读取这些变量并作为 `Authorization` header 发送，这**会覆盖 Google OAuth token**，导致 Vertex 返回 `ACCESS_TOKEN_TYPE_UNSUPPORTED` 错误。删除→构造→恢复的模式确保构造是同步且无竞态的。
-
-### 4.4 OpenAI MaaS Surface 分支 (src/agent/index.ts:775-783)
-
-合作伙伴/开放权重模型通过 Vertex 的 OpenAI 兼容端点访问：
-
-```typescript
-return new ChatOpenAI({
-  apiKey: VERTEX_ADC_PLACEHOLDER_KEY,
-  configuration: {
-    baseURL: vertexOpenAIBaseUrl(projectId, location),
-    fetch: createVertexAuthFetch(),
-  },
-  model: toVertexPublisherModel(modelId),
-  ...retryOptions,
-});
-```
-
-| 配置项 | 值 | 说明 |
-|--------|-----|------|
-| `apiKey` | `"vertex-adc"` (`VERTEX_ADC_PLACEHOLDER_KEY`) | 占位符密钥——实际的 `Authorization: Bearer` header 由 `createVertexAuthFetch()` 在每个请求中注入 |
-| `configuration.baseURL` | `vertexOpenAIBaseUrl(projectId, location)` | 构建 Vertex OpenAI 兼容端点 URL |
-| `configuration.fetch` | `createVertexAuthFetch()` | fetch 包装器，每请求注入 Google ADC bearer token |
-| `model` | `toVertexPublisherModel(modelId)` | 规范化模型 ID 为 `publisher/model` 格式 |
-
-`vertexOpenAIBaseUrl()` (`src/agent/vertex-surface.ts:81-91`) 构建基础 URL：
+### 6.1 ensureFreshChatGptTokens()（:1276-1290）
 
 ```
-https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/endpoints/openapi
+读 CodexTokens → 缺失抛 CHATGPT_LOGIN_INCOMPLETE_MESSAGE(:1266-1267)
+→ 未过期（阈值 CHATGPT_TOKEN_REFRESH_THRESHOLD_MS = 60s，openai-chatgpt-oauth.ts:151）直接返回
+→ 已过期则 refresh token 换新，saveOpenWikiEnv 写回 ~/.openwiki/.env（同步更新 process.env）
 ```
 
-特殊处理：当 `location === "global"` 时，host 为 `aiplatform.googleapis.com`（不加 `global-` 前缀），路径中保留 `locations/global`。
+**调用时机在 `resolveRunConfig`（`src/agent/index.ts:321-325`），仅 openai-chatgpt**——刷新完成后才构造模型，`createModel` 得以保持同步；短生命周期 CLI 进程无需后台刷新循环。openai-chatgpt 分支内的 `readCodexTokensFromEnv()`（openai-chatgpt-oauth.ts:195）因此必然拿到新鲜 token。
 
-`createVertexAuthFetch()` (`src/agent/vertex-surface.ts:152-171`) 返回一个 fetch 包装器，每次请求：
-1. 从缓存/自动刷新的 `GoogleAuth` 实例获取 access token
-2. 将 token 注入 `Authorization: Bearer` header
+### 6.2 getProviderApiKey()（:1292-1296）
 
-### 4.5 Gemini/Gemma Native Surface 分支 (src/agent/index.ts:785-807)
+按 `getProviderApiKeyEnvKey(provider)` 读 `process.env`；无 env key 的提供商（gemini-enterprise）返回 `undefined`。
 
-Google 自有模型通过原生 `generateContent` API（`ChatGoogle` 客户端 + `platformType: "gcp"`）：
+### 6.3 VERTEX_ADC_PLACEHOLDER_KEY（:1300）
 
-```typescript
-return new ChatGoogle({
-  model: stripPublisherPath(modelId),
-  platformType: "gcp",
-  ...GEMINI_THOUGHT_SIGNATURE_OPTIONS,
-  apiKey: "",           // 阻止回退到 AI Studio
-  location,
-  googleAuthOptions: { projectId },
-  ...retryOptions,
-});
-```
+`"vertex-adc"`——Vertex MaaS 面的占位 key，真实 Authorization 头由 `createVertexAuthFetch()` 每请求覆盖（§4.2 ②）。
 
-| 配置项 | 值 | 说明 |
-|--------|-----|------|
-| `model` | `stripPublisherPath(modelId)` | 提取裸模型 ID |
-| `platformType` | `"gcp"` | Vertex 端点（区别于 AI Studio 的 `"gai"`） |
-| `apiKey` | `""`（空字符串） | **关键**：阻止 ChatGoogle 回退到 API key 认证。ChatGoogle 内部逻辑是 `apiKey ?? GOOGLE_API_KEY`——如果 env 中有 `GOOGLE_API_KEY`，会同时发送 `X-Goog-Api-Key` header 并切换到 Vertex Express 模式。设为空字符串后 `hasApiKey()` 返回 false，阻止此回退 |
-| `location` | 传入的 `location` | 如 `"global"` |
-| `googleAuthOptions.projectId` | 传入的 `projectId` | 通过 `/node` 入口点类型化传递（默认入口点的 `authOptions` 类型为 `never`） |
-
-### 4.6 GEMINI_THOUGHT_SIGNATURE_OPTIONS (src/agent/index.ts:722-735)
+### 6.4 GEMINI_THOUGHT_SIGNATURE_OPTIONS（:1311-1314）
 
 ```typescript
 const GEMINI_THOUGHT_SIGNATURE_OPTIONS = {
@@ -472,122 +291,97 @@ const GEMINI_THOUGHT_SIGNATURE_OPTIONS = {
 } as const;
 ```
 
-这是 Gemini 3.x 系列的行为修复（Workaround）。问题：LangChain 的 streaming 聚合器 (`core stream.js`) 无条件地把消息重发为 v1 标准 content block，这会丢弃 provider 特有的 `thoughtSignature`。下一轮 multi-turn tool call 因此报错 `"Function call is missing a thought_signature"`。
+Gemini 3.x 的 thought-signature 往返修复（注释 :1302-1310）：LangChain 流式聚合器会把消息重发为 v1 标准 content block，丢掉 provider 特有的 `thoughtSignature`，下一轮 multi-turn tool call 即报「Function call is missing a thought_signature」400。禁用流式后请求走 `invoke()`/`generate()`，配合 `outputVersion: "v0"` 保留原始 content parts（签名完整）。**AI Studio 的 `gemini` 与 enterprise 的 Gemini surface 必须同步应用**，故收敛为单一常量。
 
-解决：禁用 streaming，路由到 `invoke()`/`generate()`，后者遵循 `outputVersion: "v0"` 并保留原始 Gemini content parts（含完整 `thoughtSignature`）。`v0` converter 能正确来回转换这些签名。
+### 6.5 resolveAnthropicMaxOutputTokens()（:1329-1344）
 
-此选项同时应用于 AI Studio 的 `gemini` 和 enterprise 的 Gemini native surface——两个路径必须保持一致。
+显式设置永远优先；否则仅对现代 Claude 族（`/^claude-(?:haiku|sonnet|opus)-(?:4|5)(?:[-.@]|$)/u`，先 `stripPublisherPath` 剥离 publisher 前缀）给默认 16,384（`DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS`，`src/config/constants.ts:75`）——LangChain 1.5.1 对不认识的模型 ID 只回退 4,096；旧式/自定义模型不设限。两个消费点：anthropic 分支（:1164-1167）与 Vertex anthropic surface（:1367-1370）。
 
-## 5. 各 provider 的特别之处 (Provider-Specific Oddities)
+### 6.6 createGeminiEnterpriseModel()（:1353-1445）
+
+三面路由本体，见 §4.2。
+
+## 7. 两个调用点 (Call Sites)
+
+| 调用点 | 位置 | 语境 |
+|--------|------|------|
+| **:190** | `runOpenWikiAgent`（:154）的 repository 快速路径（:178-230） | repository init/update 提前分流：`resolveRunConfig` → `createModel`（:190-196）→ `runNativeRepositoryGeneration`（:202，page-job 生命周期，05 区） |
+| **:570** | `runOpenWikiAgentCore`（:539）的 build 阶段 | chat/local-wiki 及 repository chat 之外的常规路径：`createModel`（:570-576）→ `createOpenWikiAgentGraph`（:598） |
+
+两处实参完全一致：`(provider, modelId, providerRetryAttempts, maxOutputTokens, streamIdleTimeout)`，均来自 `resolveRunConfig()` 的返回五元组；均以 `inStageSync("build", …)` 包裹，失败标记 `build_error`/`model`。低层工厂 `createOpenWikiAgent()`（:393）不接受模型构造——它要求调用方**已建好**模型传入（并对 repository init/update 组合抛错 :400-404）。
+
+## 8. 各提供商特别之处速查 (Provider-Specific Oddities)
 
 | Provider | 特殊处理 | 原因 |
 |----------|---------|------|
-| `gemini` / `gemini-enterprise` (Gemini surface) | `disableStreaming: true` + `outputVersion: "v0"` | 保留 `thoughtSignature` 以供 multi-turn tool call 来回 |
+| `gemini` / enterprise-Gemini surface | `GEMINI_THOUGHT_SIGNATURE_OPTIONS` | 保留 thoughtSignature 供 multi-turn 往返（§6.4） |
 | `gemini` | `platformType: "gai"` | AI Studio 端点 |
-| `gemini-enterprise` (Gemini surface) | `apiKey: ""` + `platformType: "gcp"` | 阻止 API key 回退，强制 ADC 认证 |
-| `anthropic` | `anthropicApiUrl` option | 不是标准 `baseURL`——Anthropic SDK 有自己的命名 |
-| `gemini-enterprise` (Anthropic surface) | `withAnthropicAuthEnvNeutralized` | 防止 env 中的 ANTHROPIC_API_KEY 覆盖 Google OAuth token |
-| `openai-chatgpt` | `streaming: true` 强制启用 | Codex 后端拒绝非 streaming 请求 |
-| `openai-chatgpt` | `useResponsesApi: true` + `zdrEnabled: true` | Codex 后端使用 Responses API，要求 `store: false` |
-| `openai-chatgpt` | `createCodexFetch()` 包装 fetch | system→developer role 替换、Luna 专用协议 |
-| `openai-chatgpt` | token 在 `createModel()` 外部异步刷新 | 保持 `createModel()` 同步 |
-| `openai` | `useResponsesApi: true` | 使用 Responses API（非 Chat Completions） |
-| `openrouter` | `ChatOpenRouter` 专用客户端 | 非通用 `ChatOpenAI`——有自己的 SDK |
-| `bedrock` | `ChatBedrockConverse` 专用客户端 | 非通用 `ChatOpenAI`——有自己的 SDK |
-| `bedrock` | 两个 env var 拼成 `credentials` 对象 | access key + secret key 分别来自不同 env var |
-| Vertex MaaS | `VERTEX_ADC_PLACEHOLDER_KEY` = `"vertex-adc"` | 占位 API key——真正的认证由 `createVertexAuthFetch()` 注入的 bearer token 完成 |
+| `gemini-enterprise` | 一入口三 surface | Vertex Model Garden 按模型族换传输（§4.2） |
+| enterprise-Anthropic surface | `withAnthropicAuthEnvNeutralized` + `dangerouslyAllowBrowser` | 防 env 杂散 ANTHROPIC_* 覆盖 OAuth；防 jsdom 误触发浏览器守卫 |
+| enterprise-Gemini surface | `apiKey: ""` | 阻断 GOOGLE_API_KEY → Express 模式回退 |
+| `anthropic` | `anthropicApiUrl` + 现代 Claude 默认 16,384 | SDK 字段名；LangChain 4,096 回退过小 |
+| `openai-chatgpt` | `useResponsesApi` + `zdrEnabled` + `streaming: true` + Codex headers/fetch | Codex 后端三重要求；Luna 专用协议 |
+| `openai-chatgpt` | token 刷新在工厂之外 | 保持 createModel 同步 |
+| `openrouter` | `ChatOpenRouter` + `provider.only` + 旧 max tokens 优先 | 专用 SDK；路由白名单；低余额存量兼容 |
+| `bedrock` | 无 credentials 对象 + `streamIdleTimeoutOptions` | 凭据委托 AWS SDK；看门狗 bedrock 独占 |
+| `copilot` | 无独立分支 | external-cli 认证 + 兜底 ChatOpenAI + 强制流式（§5） |
+| `openai` | 兜底分支内 `useResponsesApi: true` | Responses API 为默认面 |
+| 兜底全体 | `streaming` 展开式注入 | `streaming: false` ≠ 省略键（§4.7） |
 
-## 6. 新增一个 provider (Adding a New Provider)
+## 9. 新增一个提供商 (Adding a New Provider)
 
-在 OpenWiki 中新增一个模型提供商需要触碰两个位置：
+配置侧（env 常量、联合类型、`PROVIDER_CONFIGS`、`SELECTABLE_OPENWIKI_PROVIDERS`、`MANAGED_ENV_KEYS`）的完整清单见 01 篇 §13。模型创建侧只需回答一个问题：**走不走 OpenAI 兼容 API？**
 
-### 6.1 步骤清单
-
-1. **扩展 `OpenWikiProvider` 联合类型** (`src/constants.ts:68-80`)：
-   在联合类型中新增你的 provider 标识符字符串。
-
-2. **在 `PROVIDER_CONFIGS` 中新增配置条目** (`src/constants.ts:192-319`)：
-   定义 `ProviderConfig`，至少包含 `apiKeyEnvKey`、`label` 和 `modelOptions`。如果 provider 需要自定义 base URL，设置 `baseURL` 或 `requiresBaseUrl: true` + `baseUrlEnvKey`。
-
-3. **在 `SELECTABLE_OPENWIKI_PROVIDERS` 中添加** (`src/constants.ts:177-190`)：
-   将新的 provider 标识符加入数组。
-
-4. **在 `createModel()` 中新增分支** (`src/agent/index.ts:560-685`)：
-   - 如果使用 OpenAI 兼容 API：**不需要新增分支**——兜底分支的 `ChatOpenAI` + `baseURL` 已经覆盖。只需在 `PROVIDER_CONFIGS` 中配置好 `baseURL` 即可。
-   - 如果使用专用 SDK（如 `ChatOpenRouter`、`ChatBedrockConverse`）：新增一个 `if` 块，在所有兜底分支之前的正确位置插入。
-
-### 6.2 新增 OpenAI 兼容 provider 示例
-
-假设要新增 `mycloud` provider，只需在 `PROVIDER_CONFIGS` 中加一条：
-
-```typescript
-mycloud: {
-  apiKeyEnvKey: "MYCLOUD_API_KEY",
-  baseURL: "https://api.mycloud.ai/v1",
-  label: "MyCloud",
-  modelOptions: [
-    { id: "mycloud/model-a", label: "Model A" },
-  ],
-},
-```
-
-以及将 `"mycloud"` 加入 `OpenWikiProvider` 联合类型和 `SELECTABLE_OPENWIKI_PROVIDERS` 数组。**不需要修改 `createModel()`**——兜底分支自动处理。
-
-### 6.3 新增自有 SDK provider 示例
-
-假设要新增 `yourcloud` provider，需在 `createModel()` 的兜底分支之前插入：
-
-```typescript
-if (provider === "yourcloud") {
-  return new ChatYourCloud({
-    apiKey: getProviderApiKey(provider),
-    model: modelId,
-    ...retryOptions,
-  });
-}
-```
-
-### 6.4 环境变量注册
-
-如果新增了 `apiKeyEnvKey`，确认该 env var 未被 `MANAGED_ENV_KEYS`（`src/env.ts`）过滤掉，确保凭据诊断和 TUI 能正确识别。
+- **OpenAI 兼容 API**（baseten/fireworks/nebius/nvidia/copilot 模式）：**不改 `createModel()`**。在 `PROVIDER_CONFIGS` 配好 `baseURL`（或 `requiresBaseUrl` + `baseUrlEnvKey`）即可被兜底分支覆盖；需要强制流式时在 `providerUsesStreaming()`（`src/config/constants.ts:486-503`）加分支。
+- **专用 SDK**（openrouter/bedrock 模式）：在兜底分支之前插入 `if (provider === "yourcloud") { return new ChatYourCloud({ …, ...retryOptions }); }`，import 加在 `src/agent/index.ts:5-11` 区域。
+- **reasoning 支持**：在 `src/config/reasoning.ts:48-70` 能力表加条目，并确认工厂分支展开对应选项对象（Responses 系展开 `responsesReasoningOptions`，chat-completions 系展开 `chatCompletionsReasoningOptions`）。
+- **外部认证**：参照 copilot——`authMethod: "external-cli"` + 适配器实现进 `src/auth/external-cli-auth.ts` 适配器表，无需工厂分支。
 
 ## Source Anchor
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/agent/index.ts:1-7` | imports: ChatAnthropic, ChatBedrockConverse, ChatGoogle, ChatOpenAI, ChatOpenRouter, AnthropicVertex | 所有 LangChain 客户端和 Vertex SDK 导入 |
-| `src/agent/index.ts:560-685` | `createModel` | 模型客户端工厂函数，按 provider 分支构造不同 LangChain 实例 |
-| `src/agent/index.ts:567-576` | `gemini` branch | ChatGoogle + platformType "gai" + GEMINI_THOUGHT_SIGNATURE_OPTIONS |
-| `src/agent/index.ts:578-598` | `gemini-enterprise` branch | 提取 project/location 后委托给 createGeminiEnterpriseModel |
-| `src/agent/index.ts:600-608` | `anthropic` branch | ChatAnthropic + optional anthropicApiUrl |
-| `src/agent/index.ts:610-643` | `openai-chatgpt` branch | ChatOpenAI + useResponsesApi/zdrEnabled/streaming + Codex headers |
-| `src/agent/index.ts:646-654` | `openrouter` branch | ChatOpenRouter + siteName "OpenWiki" |
-| `src/agent/index.ts:656-670` | `bedrock` branch | ChatBedrockConverse + credentials 对象 |
-| `src/agent/index.ts:672-684` | fallthrough (baseten/fireworks/nebius/nvidia/openai-compatible) | ChatOpenAI + optional baseURL |
-| `src/agent/index.ts:687-711` | `CHATGPT_LOGIN_INCOMPLETE_MESSAGE`, `ensureFreshChatGptTokens` | Token 刷新门控 |
-| `src/agent/index.ts:713-717` | `getProviderApiKey` | 从 env 读取 provider API key 的辅助函数 |
-| `src/agent/index.ts:721` | `VERTEX_ADC_PLACEHOLDER_KEY` | Vertex MaaS 占位 API key |
-| `src/agent/index.ts:722-735` | `GEMINI_THOUGHT_SIGNATURE_OPTIONS` | Gemini 3.x thought-signature 修复 |
-| `src/agent/index.ts:744-809` | `createGeminiEnterpriseModel` | Vertex AI 三面路由（anthropic/openai-maas/gemini） |
-| `src/agent/openai-chatgpt-oauth.ts:31` | `CODEX_RESPONSES_BASE_URL` | Codex 后端 Responses API URL |
-| `src/agent/openai-chatgpt-oauth.ts:34` | `CODEX_ORIGINATOR` | 客户端 originator 标识 |
-| `src/agent/openai-chatgpt-oauth.ts:48-134` | `createCodexFetch` | Codex 请求适配（role 替换 + Luna 协议） |
-| `src/agent/openai-chatgpt-oauth.ts:140` | `CHATGPT_TOKEN_REFRESH_THRESHOLD_MS` | Token 过期阈值（60 秒） |
-| `src/agent/openai-chatgpt-oauth.ts:142-152` | `CodexTokens` | Token 数据结构 |
-| `src/agent/openai-chatgpt-oauth.ts:166-177` | `codexTokensToEnv` | Token→env var 序列化 |
-| `src/agent/openai-chatgpt-oauth.ts:184-203` | `readCodexTokensFromEnv` | 从 env 反序列化 token |
-| `src/agent/openai-chatgpt-oauth.ts:412-518` | `loginWithChatGPT` | PKCE 浏览器登录流程 |
-| `src/agent/openai-chatgpt-oauth.ts:524-534` | `refreshChatGptTokens` | refresh token→access token 交换 |
-| `src/agent/openai-chatgpt-oauth.ts:540-546` | `isChatGptTokenExpired` | Token 过期判定 |
-| `src/agent/vertex-surface.ts:17` | `VertexSurface` | Vertex surface 联合类型 |
-| `src/agent/vertex-surface.ts:34-46` | `resolveVertexSurface` | 模型 ID→surface 路由 |
-| `src/agent/vertex-surface.ts:54-58` | `stripPublisherPath` | 提取裸模型 ID |
-| `src/agent/vertex-surface.ts:66-69` | `toVertexPublisherModel` | 规范化 publisher/model 格式 |
-| `src/agent/vertex-surface.ts:81-91` | `vertexOpenAIBaseUrl` | 构建 Vertex OpenAI 兼容 URL |
-| `src/agent/vertex-surface.ts:112-132` | `withAnthropicAuthEnvNeutralized` | 构造期间清除 ANTHROPIC_API_KEY |
-| `src/agent/vertex-surface.ts:152-171` | `createVertexAuthFetch` | ADC bearer token fetch 注入 |
-| `src/constants.ts:68-80` | `OpenWikiProvider` | 提供商联合类型 |
-| `src/constants.ts:192-319` | `PROVIDER_CONFIGS` | 提供商注册表 |
-| `src/constants.ts:396-411` | `resolveProviderLocation` | 解析 cloud location |
-| `src/constants.ts:437-450` | `resolveProviderBaseUrl` | 解析 provider base URL |
-| `src/constants.ts:25-30` | `GEMINI_API_KEY_ENV_KEY`, `GOOGLE_CLOUD_PROJECT_ENV_KEY`, `GOOGLE_CLOUD_LOCATION_ENV_KEY`, `DEFAULT_VERTEX_LOCATION` | 关键 env 常量 |
+| `src/agent/index.ts:5-11` | AnthropicVertex, ChatAnthropic, ChatBedrockConverse, ChatGoogle, ChatOpenAI, ChatOpenRouter | 客户端与 SDK 导入 |
+| `src/agent/index.ts:154` | `runOpenWikiAgent` | 运行入口（repository 快速路径 :178-230） |
+| `src/agent/index.ts:190-196` | `createModel` 调用点 ① | repository 快速路径（build 阶段，errorClass build_error/model） |
+| `src/agent/index.ts:283-372` | `resolveRunConfig` | 五元组解析与全部异步前置（token 刷新 :321-325） |
+| `src/agent/index.ts:393-404` | `createOpenWikiAgent` | 低层工厂（要求模型已建好） |
+| `src/agent/index.ts:539` | `runOpenWikiAgentCore` | 常规路径 build 阶段 |
+| `src/agent/index.ts:570-576` | `createModel` 调用点 ② | 常规路径 |
+| `src/agent/index.ts:1077-1083` | `createModel` 签名 | providerRetryAttempts + maxOutputTokens? + streamIdleTimeout? |
+| `src/agent/index.ts:1084-1100` | 共享选项对象 | retry/maxTokens 两套字段名/streamIdleTimeout/useResponsesApi 预判 |
+| `src/agent/index.ts:1101-1124` | reasoning 预热 | resolveReasoningConfig + 三 transport 选项展开 |
+| `src/agent/index.ts:1126-1137` | gemini 分支 | ChatGoogle + gai + thought signatures |
+| `src/agent/index.ts:1139-1160` | gemini-enterprise 分支 | project 门控 + location + 委托 |
+| `src/agent/index.ts:1162-1175` | anthropic 分支 | anthropicApiUrl + maxTokens 解析 |
+| `src/agent/index.ts:1177-1213` | openai-chatgpt 分支 | Responses/zdr/streaming + Codex configuration |
+| `src/agent/index.ts:1215-1231` | openrouter 分支 | ChatOpenRouter + provider.only + 旧 max tokens |
+| `src/agent/index.ts:1233-1241` | bedrock 分支 | ChatBedrockConverse（凭据委托 AWS SDK） |
+| `src/agent/index.ts:1243-1263` | 兜底分支 | ChatOpenAI + resolveProviderBaseUrl（openai/copilot/baseten/fireworks/nebius/nvidia/openai-compatible） |
+| `src/agent/index.ts:1266-1267` | `CHATGPT_LOGIN_INCOMPLETE_MESSAGE` | 登录不完整报错文案 |
+| `src/agent/index.ts:1276-1290` | `ensureFreshChatGptTokens` | 启动期一次性 token 刷新 |
+| `src/agent/index.ts:1292-1296` | `getProviderApiKey` | env 读取 API key |
+| `src/agent/index.ts:1300` | `VERTEX_ADC_PLACEHOLDER_KEY` | Vertex MaaS 占位 key |
+| `src/agent/index.ts:1311-1314` | `GEMINI_THOUGHT_SIGNATURE_OPTIONS` | disableStreaming + outputVersion v0 |
+| `src/agent/index.ts:1329-1344` | `resolveAnthropicMaxOutputTokens` | 现代 Claude 默认 16,384 |
+| `src/agent/index.ts:1353-1445` | `createGeminiEnterpriseModel` | Vertex 三面路由（anthropic :1366 / openai-maas :1404 / gemini :1420） |
+| `src/config/constants.ts:75` | `DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS` | 16,384 |
+| `src/config/constants.ts:486-503` | `providerUsesStreaming` | copilot 恒 true |
+| `src/config/constants.ts:255-412` | `PROVIDER_CONFIGS` | 提供商注册表（copilot :280-302，responsesApi :301） |
+| `src/config/reasoning.ts:8-22` | 档位与 transport 类型 | none..max；responses/chat-completions/thinking-level |
+| `src/config/reasoning.ts:48-70` | `REASONING_CAPABILITIES` | 能力表（copilot 无条目） |
+| `src/config/reasoning.ts:88-130` | `resolveReasoningConfig` | 解析 + 不匹配即抛错 |
+| `src/agent/openai-chatgpt-oauth.ts:31,34` | `CODEX_RESPONSES_BASE_URL`, `CODEX_ORIGINATOR` | Codex 端点与客户端标识 |
+| `src/agent/openai-chatgpt-oauth.ts:36-38` | `CODEX_LUNA_*` | Luna 模型专用协议常量 |
+| `src/agent/openai-chatgpt-oauth.ts:48-145` | `createCodexFetch` | role 替换 + Luna 协议 |
+| `src/agent/openai-chatgpt-oauth.ts:151` | `CHATGPT_TOKEN_REFRESH_THRESHOLD_MS` | 60 秒提前过期阈值 |
+| `src/agent/openai-chatgpt-oauth.ts:195` | `readCodexTokensFromEnv` | token 反序列化 |
+| `src/agent/openai-chatgpt-oauth.ts:535,551` | `refreshChatGptTokens`, `isChatGptTokenExpired` | 刷新与过期判定 |
+| `src/agent/vertex-surface.ts:17-25` | `VertexSurface`, 模型族正则 | surface 类型与路由模式 |
+| `src/agent/vertex-surface.ts:34-46` | `resolveVertexSurface` | 模型 ID → surface |
+| `src/agent/vertex-surface.ts:54,66` | `stripPublisherPath`, `toVertexPublisherModel` | 模型 ID 规范化 |
+| `src/agent/vertex-surface.ts:81` | `vertexOpenAIBaseUrl` | Vertex OpenAI 兼容端点 URL |
+| `src/agent/vertex-surface.ts:112` | `withAnthropicAuthEnvNeutralized` | 构造期中和 ANTHROPIC_* env |
+| `src/agent/vertex-surface.ts:152` | `createVertexAuthFetch` | ADC bearer token 注入 |
+| `src/auth/external-cli-auth.ts:134-156` | `resolveExternalCliCredential` | gh token 注入（copilot 前置） |
+| `src/auth/external-cli-auth.ts:177-188` | `validateExternalCliCredential` | PAT 拒绝 |

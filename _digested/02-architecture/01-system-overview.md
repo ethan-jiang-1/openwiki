@@ -1,93 +1,141 @@
 ---
 title: "01 — 系统全景 (System Overview)"
-doc_type: "owner"
+doc_type: "topic"
 status: "current"
 branch: "ethan"
 created: "2026-07-18"
-updated: "2026-07-18"
-audience: "刚接触 OpenWiki 的人——理解它是什么、怎么跑起来的，不需要细节"
-purpose: "用一张图和三段话让读者在 3 分钟内建立对 OpenWiki 整体形状的心智模型，然后带着这个模型去看更深的文档"
-owns: "OpenWiki 的整体概念模型：三个角色（CLI 入口、文档 Agent、模型提供商 + 数据连接器）、两种运行模式、系统边界"
+updated: "2026-09-13"
+sync_event: "2026-09-13"
+audience: "需要一次性建立 OpenWiki 全景心智模型的人"
+purpose: "按 re-baseline 后的 domain 目录结构回答：OpenWiki 由哪些部分组成、一次生成如何流转、模块间依赖原则是什么"
+owns: "OpenWiki 系统级架构地图与端到端数据流"
 update_when:
-  - "系统架构发生概念级变化时（如新增第三种运行模式、角色关系改变）"
-  - "SVG 图表更新时"
+  - "src/ 顶层目录结构变化时"
+  - "生成主流程的阶段划分变化时"
 out_of_scope:
-  - "代码级架构细节（看 02-code-mode.md、03-personal-mode.md、04-agent-internals.md）"
-  - "模块依赖图、数据流、设计决策（看同目录后续文档）"
-  - "CLI 的具体命令和 TUI 实现（看 ../03-cli-and-tui/）"
-  - "模型提供商的具体配置（看 ../05-model-providers/）"
-  - "连接器的具体实现（看 ../06-connectors-and-data-sources/）"
+  - "各子系统的机制细节（见对应主题区）"
+  - "设计决策的取舍论证（见 05-key-design-decisions.md）"
 ---
 
-# 01 — 系统全景 (System Overview)
+# 01 — 系统全景
 
-## 这是什么
+> 本篇对应 upstream 基线 `e92cc11`（2026-09-13 re-baseline，`d4e94ab` → `e92cc11`，253 commits）。基线的「15 层架构」清单已作废——`src/` 已从 52 文件的扁平结构重组为 168 文件的 domain 目录结构。
 
-OpenWiki 是一个运行在终端里的 CLI 工具，它做两件事：
+## 1. 一句话画像
 
-1. **给代码仓库自动生成文档 Wiki**（Code Mode）——扫描你的 Git 仓库，用 AI 理解代码，写出一套结构化的 markdown 文档。
-2. **帮你管理个人知识库**（Personal Mode）——从 Gmail、Slack、Notion、Hacker News 等数据源拉取信息，整理成你自己的"第二大脑"。
+OpenWiki 是一个 CLI 工具：**它让一个被有意约束的 AI Agent，把分散的证据（Git 仓库或个人数据源）整理成一套持续维护、可自校正的 markdown 文档 wiki**。"可自校正"来自证据命题（grounded claims）：写进 wiki 的每条事实命题都带源码证据与版本令牌，源码漂移时能被检测、重定位并显式裁决。
 
-无论哪种模式，核心都是同一个 **文档 Agent（Documentation Agent）** 引擎在驱动。整个系统可以理解为**三个角色、一个引擎**——理解了这个，你就理解了 OpenWiki。
+## 2. Domain 目录地图
 
-## 一张图看懂
+`src/` 按领域分包（各目录的文档见对应主题区）：
 
-![OpenWiki 系统全景](figures/system-overview.svg)
+```
+入口与界面
+  src/cli/            CLI 入口(cli.tsx 111 行) + app/components/input/run-log/diagnostics
+                      + commands(1339)/startup/run-mode/runners/integrations
+生成核心
+  src/generation/     page-job 状态机：begin→planning→generating→finish（.run.json + .page-manifest.json）
+  src/agent/          agent 编排(index.ts 2373) + prompts/ 提示词 + DeepAgents 后端边界
+                      + utils.ts 源指纹 + openwiki-ignore + repository-runner（CLI 侧驱动）
+  src/okf/            OKF v0.2 front matter 校验/修复/投影（sources/verified/generated）
+  src/claims/         grounded claims：证据命题 + repo:// 证据版本令牌 + 稀疏对账
+模型与数据
+  src/config/         常量(constants 1233：13 providers)/env/openwiki-home/reasoning
+  src/model-availability.ts   openai 模型可用性校验
+  src/connectors/     9 个连接器 + http.ts 弹性层 + MCP 客户端子系统 + sources/langsmith/
+  src/auth/           OAuth PKCE + oauth-discovery 校验 + external-cli(gh) + tokens
+  src/ingestion/      摄取编排 + code-mode（增量拉取 + CI 工作流生成）
+运维与消费
+  src/scheduling/     macOS LaunchAgent 管理
+  src/visualize/      原生 wiki 可视化器（回环服务 + force-graph + 静态导出）
+  src/mermaid/        生成页面的 mermaid 围栏校验/降级（finalize 阶段）
+  src/integrations/   Codex/Claude/OpenCode/Cursor 宿主集成（skill 包 + stdio MCP server）
+  src/setup/          凭据向导（组合根 + 8 文件）+ onboarding
+  src/platform/       进程/OS 兜底：fs-errors/utils/diagnostics/language/windows-acl
+  src/telemetry/      错误分类学（errors.ts 714）+ PostHog 发送 + run 级遥测边界
+```
 
-## 三个角色
+依赖原则：**生成核心单向向下**——`okf/`、`claims/` 不反向依赖 `generation/`（生命周期由 generation 拥有，okf/claims 只接收投影与对账数据）；`config/` 只放纯配置数据与解析，进程/OS 兜底一律进 `platform/`；`cli/` 只做编排不藏业务语义。
 
-### CLI 入口——你和 OpenWiki 对话的地方
+## 3. 端到端数据流：一次 repository update
 
-`openwiki` 命令是你唯一需要打的字。它是一个基于 Ink 的终端 UI（Terminal UI），提供交互式菜单、进度条和实时日志。两个命令覆盖全部工作流：
+以 `openwiki --update`（code 模式）为例，从敲命令到 wiki 落盘：
 
-- `openwiki code` — 进入 Code Mode，为当前 Git 仓库生成文档 Wiki。
-- `openwiki`（不带参数）— 进入 Personal Mode，配置数据源、触发数据摄入、生成个人知识库。
+| # | 阶段 | 发生了什么 | 源码入口 | 详见 |
+|---|------|-----------|---------|------|
+| 1 | 命令解析 | `CliCommand` 9-variant 解析、环境加载判定 | `src/cli/commands.ts` | 03 区 02 号 |
+| 2 | 启动判定 | TTY/凭据预检；缺凭据时干净的 no-op update 豁免 | `src/cli/startup.ts:24-147` | 03 区 03 号 |
+| 3 | 模式映射 | `code` → cwd=仓库根、outputMode=`repository` | `src/cli/run-mode.ts:40-55` | 03 区 03 号 |
+| 4 | 运行分流 | repository init/update **不走 DeepAgent**，快速路径直入 page-job 生命周期 | `src/agent/index.ts:178-230` | 04 区 01 号 |
+| 5 | no-op 前置门 | 源指纹未变 + claims 无 issue + 基线全覆盖 + 语言未变 → 干净退出 | `src/generation/repository-run.ts:411-458` | 05 区 02 号 |
+| 6 | begin/resume | `.run.json` 检查点新建或恢复；源指纹漂移则整计划作废重规划 | `src/generation/repository-run.ts:319`（begin） | 05 区 01 号 |
+| 7 | planning | planner agent 经 `submit_plan` 提交有序页任务（page job）队列 | `src/agent/repository-runner.ts`（runPlanningAgent） | 05 区 01 号 |
+| 8 | generating | 每页一个受限 worker（`writableWikiPages` 单页写白名单）研究并写页；**稀疏对账（sparse reconciliation）**裁决本页证据命题（claim） | `src/generation/repository-run.ts`（submitRepositoryPage :1183-1298 九步事务序）；对账协议详见 07 区 01 号 | 05 区 + 07 区 |
+| 9 | 页事务 | 写页→frontmatter 修复→claims 对账→claimsRuntime.finalize→durable 断言→manifest 记录→`.run.json`→改内存 | 同上 | 05 区 01 号 |
+| 10 | 失败处理 | worker 失败 → 快照还原 + 标 skipped，不中断整轮；finish 时统一还原重试 | `src/generation/repository-run.ts:1090-1153` | 05 区 01 号 |
+| 11 | finish | pending=0 → 删废弃页 → **finalize 五步** → 整表替换 manifest → 元数据 complete/interrupted → 删 `.run.json` | `src/generation/repository-run.ts:1498-1585`；五步管线 `src/agent/wiki-finalizer.ts:263-284` | 05 区 03 号 |
+| 12 | 收尾五步 | mermaid 校验降级 → index_sync → link_validation → claims_sources 投影 → generated 溯源（provenance）盖章（最后） | 同上 | 05 区 03 号 + 07 区 03 号 |
 
-没有复杂的子命令树，没有需要记住的配置文件路径。打开终端，敲 `openwiki`，跟着提示走。
+claims 运行时在第 4 步前装配（`src/claims/brains/code/runtime.ts:64` `prepareClaimsRuntime`，仅 repository 模式启用）；OKF 的 `sources`/`verified` 投影在 11-12 步发生，`generated` 章最后盖以免被覆盖（`src/okf/index-sync.ts:243` 的 `okf_version: "0.2"` 根戳也在 index_sync 写入）。
 
-### 文档 Agent——引擎
+**init 的差别**：不走 manifest 增量，而是从零重建——先建 wiki-replacement 备份、状态落盘后才提交备份、失败可回滚（详见 05 区 01 号）。
 
-文档 Agent 是 OpenWiki 的核心。它接收两组输入：**证据（evidence）**——来自 Git 历史、文件内容、代码结构的客观事实，以及**提示词（prompts）**——描述"写出什么样的文档"的指令。在 DeepAgents + LangChain 的基础上，Agent 执行一条条文书记录和修改的工具调用，最终输出结构化的 markdown 文件。
+## 4. 双模式对照
 
-Agent 有几个关键的工程品质：
+| 维度 | Code mode | Personal mode |
+|------|-----------|---------------|
+| 入口 | 裸 `openwiki`（**默认**）/ `openwiki code` / `--init` / `--update` | `openwiki personal` / `openwiki --mode personal` / `openwiki ingest` |
+| 工作目录 | 你的仓库根 | `~/.openwiki/wiki/`（`openWikiLocalWikiDir`） |
+| 输出模式 | `repository` | `local-wiki` |
+| 证据来源 | Git 仓库（源码 + git 历史） | 连接器数据（Gmail/Slack/Notion/langsmith 等 9 个） |
+| 生成管线 | page-job 生命周期（05 区） | DeepAgents 主路径（04 区） |
+| 连接器工具 | **不注入**（tools.ts repository 门控返回空） | 注入（personal 专属能力） |
+| claims | 启用（`prepareClaimsRuntime` repository 门禁） | 不启用（同名概念 "contested claims" 是提示词层争议事实保全，见 10 区） |
+| 定时化 | CI 工作流（11 区 02 号） | LaunchAgent/cron（11 区 01 号） |
 
-- **内容快照去重（Content Snapshot Dedup）**：写入前对比已有内容，避免同义反复。
-- **只写沙箱（Docs-Only Write Sandbox）**：Agent 只能修改 `openwiki/` 目录下的文件，碰不到源码。
-- **SQLite 检查点（Checkpointing）**：运行中途可以恢复，长文档生成任务不会因为断连而白跑。
+模式映射的实现钥匙是 `src/cli/run-mode.ts:40-55`（mode→cwd/outputMode），映射结果决定提示词模板（prompts/code.ts vs personal.ts）、后端边界与生命周期路径。
 
-### 模型提供商 + 数据源连接器——大脑和数据
+## 5. 模块依赖原则
 
-Agent 需要两样东西才能工作：**推理能力**和**输入数据**。
+1. **生命周期单点拥有**：`src/generation/` 拥有 page-job 状态机；CLI（经 `agent/repository-runner.ts`）与宿主集成（`src/integrations/core/session-manager.ts`）是**两个驱动方、一份状态机**。
+2. **可信度层单向**：`okf/`、`claims/` 被 generation 调用，从不反向 import generation；claims 是事实状态所有者，okf 只是投影目标（07 区 03 号）。
+3. **config / platform 分层**：`config/` = 纯配置数据与解析（可测试、无 OS 副作用）；`platform/` = 进程/OS 兜底（fs-errors、windows-acl、语言、诊断清洗）。
+4. **agent 被三层边界约束**：`.openwikiignore` 路径排除、`.claims` 所有权隐藏、shell 白名单——全部在 `src/agent/docs-only-backend.ts` 的 11 个覆写方法里（04 区 04 号）。
+5. **遥测单一边界**：`with-run-telemetry.ts` 包住 setup→connectors→agent（14 区 04 号）；错误统一进分类学（错误类别闭集）。
+6. **安装与被装分离**：`src/integrations/`（客户端集成逻辑）与顶层 `integrations/openwiki/`（被安装的 skill 包资产）是两回事；顶层 `skills/` 又是自研 agent 的捆绑技能（bundled skills），与前者无关（13 区 02 号划界表）。
 
-**模型提供商（Model Providers）** 负责推理。OpenWiki 支持 9+ 家提供商——Anthropic、OpenAI、Gemini、OpenRouter、AWS Bedrock、NVIDIA、Fireworks、Baseten、Vertex AI 等。你选一个、配好 API key，Agent 就有了大脑。提供商之间有统一的创建接口，切换模型不需要改代码逻辑。
+## 6. 主题区导航
 
-**数据源连接器（Data Connectors）** 负责供给数据——只在 Personal Mode 下生效。目前有 7 个连接器：Git Repo、Gmail、Slack、Notion、X/Twitter、Hacker News、Web Search。它们通过 OAuth PKCE 认证和 MCP 协议接入，把外部数据标准化后交给 Agent 处理。
-
-Code Mode 不需要连接器——它直接从本地 Git 仓库提取证据。
-
-## 两种模式一句话
-
-**Code Mode** = 给你手上的 Git 仓库写文档，输出到 `openwiki/` 目录。**Personal Mode** = 把分散在各处的信息整理成一个个人知识库，输出到 `~/.openwiki/wiki/`。同一个引擎，不同的输入，不同的输出目的地。
-
-## 接下来看什么
-
-你不需要按顺序啃完所有文档。根据你想做的事，选一个入口：
-
-| 你想了解... | 看这里 |
-|-------------|--------|
-| Code Mode 的完整流程——从敲命令到 wiki 生成 | `02-code-mode.md` |
-| Personal Mode 怎么摄数据、建知识库 | `03-personal-mode.md` |
-| Agent 内部怎么跑起来的——prompt、流水线、沙箱 | `04-agent-internals.md` |
-| 想找一个具体函数的源码位置 | `../_context/02-entrypoints-at-a-glance.md` |
-
-> 放轻松，这比看起来简单。一个 Agent 引擎，两种运行模式，加上模型和数据两层外挂。剩下的都是细节。
+| 何时读 | 去哪里 |
+|--------|--------|
+| 装不起来、第一次跑 | 01-quickstart/ |
+| 想知道"为什么这样设计" | 02 区 05-key-design-decisions.md |
+| 命令怎么解析、TUI 怎么分层 | 03-cli-and-tui/ |
+| agent 怎么被约束、提示词长什么样 | 04-agent-and-prompting/ |
+| 一轮生成怎么推进/恢复/收尾 | 05-generation-lifecycle/ |
+| 模型怎么接、推理力度（reasoning effort）怎么配 | 06-model-providers/ |
+| wiki 凭什么可信 | 07-claims-and-okf/ |
+| 数据从哪来 | 08-connectors-and-data-sources/、10-ingestion-and-personal-mode/ |
+| 怎么认证 | 09-authentication-and-oauth/ |
+| 怎么定时跑 | 11-scheduling-and-ci/ |
+| 浏览/导出 wiki | 12-visualizer/ |
+| 用 coding agent 驱动 OpenWiki | 13-integrations/ |
+| 配置分层与遥测排错 | 14-configuration-and-telemetry/ |
+| 源码→文档覆盖关系 | `_meta/git-tracking/coverage-map.md` |
 
 ## Source Anchor
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/cli.tsx` | `App` 组件 | CLI 主入口，Ink TUI 根组件 |
-| `src/agent/index.ts` | `createDeepAgent` | Agent 创建入口 |
-| `src/commands.ts` | `CliCommand`、`parseCommand` | 命令解析与路由 |
-| `src/constants.ts` | `resolveConfiguredProvider` | 模型提供商回退链 |
-| `package.json` | — | 项目元数据（version、dependencies） |
+| `src/agent/index.ts:178-230` | run 分流 | repository 快速路径入口 |
+| `src/generation/repository-run.ts:319` | `beginRepositoryRun` | 生命周期开始/恢复 |
+| `src/generation/repository-run.ts:411-458` | no-op 前置门 | update 短路判定 |
+| `src/generation/repository-run.ts:1183-1298` | `submitRepositoryPage` 事务序 | 逐页九步持久化 |
+| `src/generation/repository-run.ts:1498-1585` | finish | 收尾与元数据定稿 |
+| `src/agent/wiki-finalizer.ts:263-284` | finalize 五步 | mermaid→index_sync→link_validation→claims_sources→generated |
+| `src/claims/brains/code/runtime.ts:64` | `prepareClaimsRuntime` | claims 运行时装配（repository 门禁） |
+| `src/okf/index-sync.ts:243` | `okf_version "0.2"` | 确定性 index 根戳 |
+| `src/cli/run-mode.ts:40-55` | cwd/outputMode 映射 | 双模式实现钥匙 |
+| `src/cli/startup.ts:24-147` | 启动判定链 | TTY/凭据/no-op 豁免 |
+| `src/agent/docs-only-backend.ts` | 11 方法覆写 | agent 三层边界 |
+| `src/telemetry/with-run-telemetry.ts` | `withRunTelemetry` | run 级遥测边界 |

@@ -1,7 +1,7 @@
 ---
 title: "10 — 数据摄取与个人模式 (Ingestion and Personal Mode)"
 doc_type: "index"
-status: "draft"
+status: "current"
 branch: "ethan"
 created: "2026-07-17"
 updated: "2026-09-13"
@@ -24,9 +24,9 @@ personal mode 拿外部数据源当证据攒个人 brain wiki（open-questions�
 
 | # | 文档 | 状态 | 说明 |
 |---|------|------|------|
-| 1 | `01-ingestion-pipeline.md` | 待更新 | 路径迁移（`src/ingestion/ingestion.ts` 458 行）、`withRunTelemetry` 边界、单源失败隔离、`contested` 信心标签（4→5 个）、guidance 签名变化 |
-| 2 | `02-onboarding.md` | 计划中 | `setup/onboarding.ts`（482 行）：onboarding.json、INSTRUCTIONS.md、完成判定、custom-mcp 处理 |
-| 3 | `03-code-mode.md` | 计划中 | `runCodeModeConnectors` 增量窗口（`readLastUpdatedAt`）、`createWorkflowProviderEnv`、CI 工作流模板（fetch-depth:0、SHA 锁定）——与 11 区 02 号联动 |
+| 1 | `01-ingestion-pipeline.md` | 已完成| 路径迁移（`src/ingestion/ingestion.ts` 458 行）、`withRunTelemetry` 边界、单源失败隔离、`contested` 信心标签（4→5 个）、guidance 签名变化 |
+| 2 | `02-onboarding.md` | 已完成| `setup/onboarding.ts`（482 行）：onboarding.json、INSTRUCTIONS.md、完成判定、custom-mcp 处理 |
+| 3 | `03-code-mode.md` | 已完成| `runCodeModeConnectors` 增量窗口（`readLastUpdatedAt`）、`createWorkflowProviderEnv`、CI 工作流模板（fetch-depth:0、SHA 锁定）——与 11 区 02 号联动 |
 
 ## 关键源文件
 

@@ -1,7 +1,7 @@
 ---
 title: "06 — 模型提供商 (Model Providers)"
 doc_type: "index"
-status: "draft"
+status: "current"
 branch: "ethan"
 created: "2026-07-17"
 updated: "2026-09-13"
@@ -25,9 +25,9 @@ out_of_scope:
 
 | # | 文档 | 状态 | 说明 |
 |---|------|------|------|
-| 1 | `01-provider-configuration.md` | 待重写 | 13 providers、`PROVIDER_CONFIGS`、回退链、Base URL 表（含 copilot）、`SELECTABLE_PROVIDERS` |
-| 2 | `02-provider-model-creation.md` | 待重写 | `createModel()` 七分支（:1077-1264）、新签名（maxOutputTokens/streamIdleTimeout）、兜底 ChatOpenAI 分支成员 |
-| 3 | `03-reasoning-and-model-availability.md` | 计划中 | `OPENWIKI_REASONING_EFFORT` 档位、三种 transport（responses/chat-completions/thinking-level）、能力表、`/v1/models` 可用性校验 |
+| 1 | `01-provider-configuration.md` | 已完成| 13 providers、`PROVIDER_CONFIGS`、回退链、Base URL 表（含 copilot）、`SELECTABLE_PROVIDERS` |
+| 2 | `02-provider-model-creation.md` | 已完成| `createModel()` 七分支（:1077-1264）、新签名（maxOutputTokens/streamIdleTimeout）、兜底 ChatOpenAI 分支成员 |
+| 3 | `03-reasoning-and-model-availability.md` | 已完成| `OPENWIKI_REASONING_EFFORT` 档位、三种 transport（responses/chat-completions/thinking-level）、能力表、`/v1/models` 可用性校验 |
 
 ## 关键源文件
 
@@ -36,7 +36,7 @@ out_of_scope:
 | `src/config/constants.ts` | 1233 | env key 常量、`PROVIDER_CONFIGS:255`、`resolveConfiguredProvider:837`、`providerUsesStreaming:498` |
 | `src/config/reasoning.ts` | 147 | reasoning 档位、transport 映射、能力表 |
 | `src/agent/index.ts` | 2373 | `createModel()` :1077-1264、reasoning 预热 :1101-1124 |
-| `src/model-availability.ts` | 42 | openai 模型可用性查询（仅默认 baseURL 时） |
+| `src/model-availability.ts` | 85 | openai 模型可用性查询（仅默认 baseURL 时） |
 | `src/auth/external-cli-auth.ts` | 189 | `gh` CLI 认证适配器（copilot 依赖） |
 
 ## 变更提示（2026-09-13 re-baseline）

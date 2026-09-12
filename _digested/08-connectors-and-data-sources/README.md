@@ -25,8 +25,8 @@ out_of_scope:
 
 | # | 文档 | 状态 | 说明 |
 |---|------|------|------|
-| 1 | `01-connector-registry.md` | 待重写 | 9 连接器注册表、`ConnectorDefinition` 字段（含 mode）、工具暴露与 repository 门控（tools.ts:38-40 返回空） |
-| 2 | `02-connector-config-paths-and-security.md` | 计划中（批 4） | 双配置通路（personal `~/.openwiki` vs code repo 提交配置如 `.langsmith.json`）、弹性 HTTP、MCP env 白名单、git-repo previousHead 增量 |
+| 1 | `01-connector-registry.md` | 已完成| 9 连接器注册表、`ConnectorDefinition` 字段（含 mode）、工具暴露与 repository 门控（tools.ts:38-40 返回空） |
+| 2 | `02-connector-config-paths-and-security.md` | 已完成| 双配置通路（personal `~/.openwiki` vs code repo 提交配置如 `.langsmith.json`）、弹性 HTTP、MCP env 白名单、git-repo previousHead 增量 |
 | 3 | `02-connector-lifecycle.md` | 计划中 | 连接器 I/O 与生命周期 |
 | 4 | `03-connector-tools.md` | 计划中 | agent 工具暴露细节（tools.ts 575 行） |
 | 5 | `04-git-repo-connector.md` | 计划中 | 含 previousHead 可达性校验的增量 diff |
@@ -36,7 +36,7 @@ out_of_scope:
 | 9 | `08-web-search-connector.md` | 计划中 | Tavily web search |
 | 10 | `09-x-connector.md` | 计划中 | X/Twitter |
 | 11 | `10-hackernews-connector.md` | 计划中 | Hacker News |
-| 12 | `11-mcp-subsystem.md` | 计划中（提为批 4） | mcp-client.ts（973 行）：分页收集、stdio env 白名单隔离、custom-mcp/notion 共用工厂 |
+| 12 | `11-mcp-subsystem.md` | 已完成| mcp-client.ts（973 行）：分页收集、stdio env 白名单隔离、custom-mcp/notion 共用工厂 |
 
 ## 关键源文件
 
@@ -47,7 +47,7 @@ out_of_scope:
 | `src/connectors/tools.ts` | 575 | 工具暴露 + repository 门控 :30-40 |
 | `src/connectors/http.ts` | 145 | `fetchWithResilience`（30s 超时、429/5xx 退避、Retry-After 上限 20s） |
 | `src/connectors/mcp-client.ts` | 973 | MCP 客户端、分页、`buildChildEnv` 白名单 |
-| `src/connectors/sources/langsmith/` | 1727 | LangSmith trace 连接器（异常加权采样、双白名单） |
+| `src/connectors/sources/langsmith/` | 1363 | LangSmith trace 连接器（异常加权采样、双白名单） |
 
 ## 变更提示（2026-09-13 re-baseline）
 

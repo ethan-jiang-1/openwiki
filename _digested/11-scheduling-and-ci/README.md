@@ -1,7 +1,7 @@
 ---
 title: "11 — 调度与持续集成 (Scheduling and CI)"
 doc_type: "index"
-status: "draft"
+status: "current"
 branch: "ethan"
 created: "2026-07-17"
 updated: "2026-09-13"
@@ -24,9 +24,9 @@ out_of_scope:
 
 | # | 文档 | 状态 | 说明 |
 |---|------|------|------|
-| 1 | `01-macos-launchagents.md` | 待更新 | 路径迁移、`parseLaunchdCalendarInterval` 拒绝 day+weekday 组合（:617-621，launchd AND vs cron OR）、plist `EnvironmentVariables` 注入 `OPENWIKI_CONFIG_DIR` |
-| 2 | `02-ci-workflow-generation.md` | 计划中 | 工作流模板：fetch-depth:0（增量 diff 依赖）、provider 派生 env 块、SHA 锁定 action、continue-on-error + PR 步骤；**fork guard 手工补丁会被模板再生成冲掉的运维陷阱** |
-| 3 | `03-scheduled-openwiki-updates.md` | 计划中 | release 前对 main 的回归更新、`.last-update.json` 时间戳语义、interrupted 状态 |
+| 1 | `01-macos-launchagents.md` | 已完成| 路径迁移、`parseLaunchdCalendarInterval` 拒绝 day+weekday 组合（:617-621，launchd AND vs cron OR）、plist `EnvironmentVariables` 注入 `OPENWIKI_CONFIG_DIR` |
+| 2 | `02-ci-workflow-generation.md` | 已完成| 工作流模板：fetch-depth:0（增量 diff 依赖）、provider 派生 env 块、SHA 锁定 action、continue-on-error + PR 步骤；**fork guard 手工补丁会被模板再生成冲掉的运维陷阱** |
+| 3 | `03-scheduled-openwiki-updates.md` | 已完成| release 前对 main 的回归更新、`.last-update.json` 时间戳语义、interrupted 状态 |
 
 ## 关键源文件
 

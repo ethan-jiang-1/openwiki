@@ -4,71 +4,51 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
-audience: "需要理解 OpenWiki 支持哪些 AI 模型提供商、如何新增提供商、如何解析运行时的实际提供商的人"
-purpose: "完整说明 constants.ts 中的提供商注册表（PROVIDER_CONFIGS）、凭据门控、提供商标识解析链、base URL 解析和重试策略"
-owns: "`src/constants.ts` (609 行) 中的提供商注册、模型列表、凭据检查、提供商标识解析和重试配置；`src/env.ts` 中 MANAGED_ENV_KEYS 与提供商 env key 的关系"
+updated: "2026-09-13"
+sync_event: "2026-09-13"
+audience: "需要理解 OpenWiki 支持哪些 AI 模型提供商、提供商如何声明与解析、凭据如何门控、如何新增提供商的人"
+purpose: "完整说明 src/config/constants.ts 中的提供商注册表（PROVIDER_CONFIGS）、13 个提供商的配置明细、认证方式（含 external-cli）、凭据门控、提供商回退链、Base URL 解析与数值型配置解析"
+owns: "`src/config/constants.ts`（1233 行）中的提供商注册、模型列表、认证方式声明、凭据门控、提供商标识解析和数值配置解析；`src/auth/external-cli-auth.ts` 的 gh CLI 认证适配器在配置层的接缝"
 update_when:
   - "PROVIDER_CONFIGS 新增或删除提供商条目"
-  - "ProviderConfig 类型字段变更"
-  - "resolveConfiguredProvider 解析链逻辑变更"
-  - "resolveProviderBaseUrl / resolveProviderRetryAttempts 行为变更"
+  - "ProviderConfig / ProviderAuthMethod / ExternalCliAuthAdapter 类型字段变更"
+  - "resolveConfiguredProvider 回退链逻辑变更"
+  - "SELECTABLE_OPENWIKI_PROVIDERS 顺序或成员变化"
   - "模型列表（OPENAI_MODEL_OPTIONS、GEMINI_MODELS 等）更新"
 out_of_scope:
-  - "各 provider 的模型创建逻辑（在对应 provider 文档中说明）"
-  - "OAuth 流程细节（见 07-authentication-and-oauth/）"
-  - "交互式凭据配置 TUI（credentials.tsx，见 10-configuration-and-telemetry/）"
-  - "env 文件持久化的读写细节（见 env.ts 专题）"
+  - "各 provider 的模型客户端创建逻辑（createModel()，见同目录 02-provider-model-creation.md）"
+  - "reasoning 档位与能力表（src/config/reasoning.ts，06 区 03 篇）"
+  - "OAuth PKCE 浏览器登录流程细节（见 09-authentication-and-oauth/）"
+  - "凭据配置 TUI 与 env 文件读写的完整机制（见 14-configuration-and-telemetry/）"
 ---
 
 # 01 — 提供商配置与解析 (Provider Configuration and Resolution)
 
 ## 1. 概述 (Overview)
 
-`src/constants.ts` （609 行）是 OpenWiki 的**集中式提供商配置中枢（Centralized Provider Configuration Hub）**。所有支持的 AI 模型提供商都在一个地方声明：它们的标识符、标签、凭据环境变量、默认模型列表、base URL 和认证方式。新增一个提供商只需要在 `PROVIDER_CONFIGS` 中加一条配置记录——无需修改解析链、模型校验或 TUI。
+`src/config/constants.ts`（1233 行）是 OpenWiki 的**集中式提供商配置中枢（Centralized Provider Configuration Hub）**。当前支持 **13 个提供商（provider）**：`anthropic`、`baseten`、`bedrock`、`copilot`（本次基线新增）、`fireworks`、`gemini`、`gemini-enterprise`、`nebius`、`nvidia`、`openai`、`openai-chatgpt`、`openai-compatible`、`openrouter`。所有提供商都在一个地方声明：标识符、标签、凭据环境变量、认证方式、默认模型列表、Base URL 与覆盖变量。新增一个提供商只需要在 `PROVIDER_CONFIGS` 中加一条配置记录——无需修改解析链、模型校验或 TUI。
+
+> **2026-09-13 re-baseline 提示**：本文件由旧基线的 `src/constants.ts`（609 行）迁入 `src/config/constants.ts`（1233 行）；提供商数量 12 → 13（新增 `copilot`）；`ProviderAuthMethod` 从二元（api-key/oauth）扩为四元（api-key/aws-sdk/external-cli/oauth）。旧文中的行号、SELECTABLE 顺序与 Base URL 表全部失效，本文全部按新锚重写。
 
 关键设计决策（Key Design Decisions）：
 
-- **单一注册表（Single Registry）**：所有提供商信息存储在 `PROVIDER_CONFIGS: Record<OpenWikiProvider, ProviderConfig>` 中。TUI、CLI、agent 启动都从同一个数据源读取。
-- **环境变量驱动（Env-Var-Driven）**：运行时提供商选择通过 `OPENWIKI_PROVIDER` 环境变量或自动检测已设置的 API key 来确定。
-- **凭据门控（Credential Gating）**：启动时通过 `getMissingProviderEnvKey()` 检查所需凭据是否就绪，缺失时阻塞并给出明确提示。
-- **可扩展枚举（Extensible Union）**：`OpenWikiProvider` 是字符串联合类型（string union type），新增 provider 只需扩展该类型和 `PROVIDER_CONFIGS`。
+- **单一注册表（Single Registry）**：所有提供商信息存储在 `PROVIDER_CONFIGS: Record<OpenWikiProvider, ProviderConfig>`（`src/config/constants.ts:255`）。TUI、CLI、agent 启动都从同一个数据源读取；`Record<...>` 键类型约束保证每个联合成员必有配置，遗漏即编译错误。
+- **环境变量驱动（Env-Var-Driven）**：运行时提供商通过 `OPENWIKI_PROVIDER` 显式指定，或由回退链（fallback chain，见 §6）自动检测已设置的凭据环境变量确定。
+- **声明式认证方式（Declarative Auth Methods）**：`ProviderAuthMethod`（`src/config/constants.ts:129-130`）为四元联合类型 `"api-key" | "aws-sdk" | "external-cli" | "oauth"`。粘贴式 API key 只是默认情形；`bedrock` 把认证整体委托给 AWS SDK 凭据链，`openai-chatgpt` 走浏览器 OAuth，`copilot` 声明 `authMethod: "external-cli"` 由外部 CLI（`gh`）持有凭据。
+- **凭据门控（Credential Gating）**：启动时 `getMissingProviderEnvKey()`（`src/config/constants.ts:524`）检查所需凭据是否就绪，缺失时阻塞并给出明确提示（见 §7）。
 
-## 2. PROVIDER_CONFIGS: 提供商注册表 (Provider Registry)
+## 2. 提供商标识与认证类型 (Provider Identity and Auth Types)
 
-### 2.1 ProviderConfig 类型定义 (ProviderConfig Type)
+### 2.1 OpenWikiProvider 联合类型
 
-`src/constants.ts:122-175` 定义了每条提供商配置的完整字段：
-
-```typescript
-type ProviderConfig = {
-  apiKeyEnvKey?: string;        // API key 环境变量名
-  authMethod?: ProviderAuthMethod; // 认证方式："api-key" 或 "oauth"
-  baseURL?: string;              // 默认 API endpoint
-  baseUrlEnvKey?: string;        // 可覆盖 baseURL 的环境变量名
-  requiresBaseUrl?: boolean;     // 无默认 endpoint，必须通过 env 提供
-  projectEnvKey?: string;        // 云项目 ID 环境变量（如 GCP project）
-  locationEnvKey?: string;       // 云位置/区域环境变量（如 GCP location）
-  defaultLocation?: string;      // 默认云位置
-  label: string;                 // 面向用户的显示名称
-  modelOptions: ProviderModelOption[]; // 可选模型列表
-  secretKeyEnvKey?: string;     // 第二凭据环境变量（如 AWS secret key）
-  regionEnvKey?: string;         // 区域环境变量（如 AWS region）
-  requiresRegion?: boolean;      // 无默认区域，必须提供
-};
-```
-
-其中 `ProviderAuthMethod` 是 `"api-key" | "oauth"` 的联合类型（`src/constants.ts:87`），`ProviderModelOption` 为 `{ id: string; label: string }` （`src/constants.ts:91-94`）。
-
-### 2.2 OpenWikiProvider 联合类型 (Provider Union Type)
-
-`src/constants.ts:68-80` 定义了所有 12 个支持的提供商标识符：
+`src/config/constants.ts:108-121` 定义全部 13 个提供商标识符（按字母序）：
 
 ```typescript
 export type OpenWikiProvider =
   | "anthropic"
   | "baseten"
   | "bedrock"
+  | "copilot"
   | "fireworks"
   | "gemini"
   | "gemini-enterprise"
@@ -80,588 +60,447 @@ export type OpenWikiProvider =
   | "openrouter";
 ```
 
-可选择的提供商标识符列表 `SELECTABLE_OPENWIKI_PROVIDERS` （`src/constants.ts:177-190`）以 `as const satisfies` 断言确保该数组与 `OpenWikiProvider` 类型保持同步——编译期会检查是否包含了所有联合成员。
+`SelectableOpenWikiProvider = OpenWikiProvider`（`src/config/constants.ts:139`）目前是恒等别名；TUI 选择列表 `SELECTABLE_OPENWIKI_PROVIDERS`（`src/config/constants.ts:239-253`）以 `as const satisfies readonly SelectableOpenWikiProvider[]` 断言保证数组与类型编译期同步。**注意数组顺序不是字母序**，当前为：
 
-### 2.3 所有提供商及其完整配置 (All Providers and Their Configurations)
+```
+openai, openai-chatgpt, anthropic, copilot, gemini, gemini-enterprise,
+openrouter, openai-compatible, bedrock, fireworks, baseten, nebius, nvidia
+```
 
-`PROVIDER_CONFIGS` 定义在 `src/constants.ts:192-319`。以下逐条列出每个提供商的完整配置。
+`copilot` 位于第 4 位（`src/config/constants.ts:243`）。
 
-#### openai
+### 2.2 ProviderAuthMethod 与 ExternalCliAuthAdapter
+
+`ProviderAuthMethod`（`src/config/constants.ts:129-130`）：
+
+| 值 | 含义 | 使用者 |
+|----|------|--------|
+| `"api-key"` | 默认。用户粘贴密钥，持久化到 `*_API_KEY` 环境变量 | openai、anthropic、gemini、openrouter、baseten、fireworks、nebius、nvidia、openai-compatible |
+| `"oauth"` | 浏览器登录流程，持久化短期 access/refresh token | openai-chatgpt |
+| `"aws-sdk"` | 认证委托给 AWS SDK 凭据提供链（credential provider chain） | bedrock |
+| `"external-cli"` | 凭据由外部 CLI 持有并执行交互式登录 | copilot |
+
+`ExternalCliAuthAdapter`（`src/config/constants.ts:137`）当前只有一个成员 `"github-cli"`。提供商配置只声明适配器名；其实现位于声明式注册表之外（`src/auth/external-cli-auth.ts`，见 §7.3）。
+
+## 3. ProviderConfig 类型定义 (ProviderConfig Type)
+
+`src/config/constants.ts:174-237` 定义每条提供商配置的完整字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `apiKeyEnvKey?` | string | API key 环境变量名；也可以是被委托型提供商保留的旧式访问键覆盖（如 bedrock） |
+| `authMethod?` | ProviderAuthMethod | 认证方式；缺省即 `"api-key"`（:186） |
+| `externalCliAuthAdapter?` | ExternalCliAuthAdapter | `authMethod` 为 `"external-cli"` 时使用的适配器（:188） |
+| `baseURL?` | string | 默认 API endpoint |
+| `baseUrlEnvKey?` | string | 覆盖 `baseURL` 的环境变量名（自托管/代理端点）（:194） |
+| `requiresBaseUrl?` | boolean | true 表示无默认 endpoint，必须经 env 提供（:199） |
+| `projectEnvKey?` | string | 云项目 ID 环境变量（:204） |
+| `locationEnvKey?` / `defaultLocation?` | string | 云位置覆盖变量与默认值（:206-210） |
+| `label` | string | 面向用户的显示名称（:211） |
+| `modelOptions` | ProviderModelOption[] | 预置模型列表 `{ id, label }`（:212，类型 :141-144） |
+| `secretKeyEnvKey?` | string | 成对第二凭据（如 AWS secret access key）（:218） |
+| `regionEnvKey?` / `regionFallbackEnvKeys?` / `requiresRegion?` | — | 区域变量、后备区域变量列表、是否强制区域（:223-230） |
+| `responsesApi?` | boolean \| RegExp | 该提供商（或匹配的模型族）是否经 OpenAI Responses API 访问（:236） |
+
+与旧基线相比新增的字段：`externalCliAuthAdapter`、`regionFallbackEnvKeys`、`responsesApi`。`responsesApi` 取 `true`（全部模型）、`RegExp`（按模型 ID 匹配）或缺省（不走 Responses API）三种形态，消费方是 `providerUsesResponsesApi()`（§10.2）。
+
+## 4. PROVIDER_CONFIGS：提供商注册表 (Provider Registry)
+
+`PROVIDER_CONFIGS` 定义在 `src/config/constants.ts:255-412`。以下按注册表内的键序逐条列出。
+
+### 4.1 baseten（:256-265）
+
+| 字段 | 值 |
+|------|-----|
+| `apiKeyEnvKey` | `BASETEN_API_KEY` |
+| `baseURL` | `https://inference.baseten.co/v1` |
+| `baseUrlEnvKey` | `BASETEN_BASE_URL` |
+| `label` | `"Baseten"` |
+| `modelOptions` | `zai-org/GLM-5.2`（GLM 5.2）、`moonshotai/Kimi-K2.7-Code`（Kimi K2.7 Code） |
+
+### 4.2 bedrock（:266-279）
+
+| 字段 | 值 |
+|------|-----|
+| `apiKeyEnvKey` | `BEDROCK_AWS_ACCESS_KEY_ID`（旧式访问键） |
+| `secretKeyEnvKey` | `BEDROCK_AWS_SECRET_ACCESS_KEY` |
+| `authMethod` | `"aws-sdk"` |
+| `regionEnvKey` / `regionFallbackEnvKeys` / `requiresRegion` | `BEDROCK_AWS_REGION` / `[AWS_REGION, AWS_DEFAULT_REGION]` / `true` |
+| `label` | `"AWS Bedrock"` |
+| `modelOptions` | `[]`（模型 ID 因账户/区域而异，直接粘贴，如 `anthropic.claude-sonnet-5-20260101-v1:0`） |
+
+Bedrock 是唯一 `"aws-sdk"` 认证的提供商：标准用法是让 AWS SDK 凭据链（OIDC/Web Identity、IAM 角色、`AWS_PROFILE`/SSO 等）解析凭据；旧式 `BEDROCK_AWS_*` 键对仍被接受（门控语义见 §7.2）。
+
+### 4.3 copilot（:280-302，本次基线新增）
+
+| 字段 | 值 |
+|------|-----|
+| `apiKeyEnvKey` | `COPILOT_API_KEY`（CI/无头环境的回退凭据） |
+| `authMethod` | `"external-cli"` |
+| `baseURL` | `https://api.githubcopilot.com`（:283） |
+| `baseUrlEnvKey` | `COPILOT_BASE_URL`（:284） |
+| `externalCliAuthAdapter` | `"github-cli"`（:285） |
+| `label` | `"GitHub Copilot"` |
+| `responsesApi` | `/^gpt-5/u`（:301） |
+| `modelOptions`（:287-300） | `gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.6-sol`、`gpt-5.5`、`gpt-5.4-mini`、`claude-opus-5`、`claude-opus-4.8`、`claude-sonnet-5`、`claude-sonnet-4.6`、`claude-haiku-4.5`、`claude-fable-5`、`gemini-2.5-pro` |
+
+copilot 一次订阅即可访问 GPT-5、Claude、Gemini 三族模型（经 Copilot API 代理）。要点：
+
+- **认证走 `gh` CLI**：token 不落盘（见 §7.3）；`COPILOT_API_KEY` 仅作为 CI/无头场景的显式回退。
+- **非流式请求被拒**：`providerUsesStreaming()` 对 copilot 恒返回 `true`（§10.1）——源码注释（:491-497）说明 Copilot API 对非 GPT-5 模型（Claude/Gemini 走 chat completions 传输）拒绝或返回空响应，导致 repository worker 静默退出。
+- **`responsesApi: /^gpt-5/u`**：GPT-5 族模型走 Responses API，其余模型走 chat completions。
+
+### 4.4 fireworks（:303-315）
+
+| 字段 | 值 |
+|------|-----|
+| `apiKeyEnvKey` | `FIREWORKS_API_KEY` |
+| `baseURL` / `baseUrlEnvKey` | `https://api.fireworks.ai/inference/v1` / `FIREWORKS_BASE_URL` |
+| `modelOptions` | `accounts/fireworks/models/glm-5p2`（GLM 5.2）、`accounts/fireworks/models/kimi-k2p7-code`（Kimi K2.7 Code） |
+
+### 4.5 nebius（:316-321）
+
+| 字段 | 值 |
+|------|-----|
+| `apiKeyEnvKey` | `NEBIUS_API_KEY` |
+| `baseURL` | `NEBIUS_BASE_URL` = `https://api.tokenfactory.nebius.com/v1/`（常量 :70） |
+| `modelOptions` | `moonshotai/Kimi-K2.6`（Kimi K2.6） |
+
+注意：nebius **没有** `baseUrlEnvKey`——是三个有默认 `baseURL` 但不可用环境变量覆盖端点的提供商之一（另两个：openrouter、以及没有默认值的场景除外，见 §8.4 表）。
+
+### 4.6 nvidia（:322-344）
+
+| 字段 | 值 |
+|------|-----|
+| `apiKeyEnvKey` | `NVIDIA_API_KEY` |
+| `baseURL` / `baseUrlEnvKey` | `https://integrate.api.nvidia.com/v1` / `NVIDIA_BASE_URL` |
+| `label` | `"NVIDIA NIM"` |
+| `modelOptions` | `nvidia/nemotron-3-super-120b-a12b`、`nvidia/nemotron-3-ultra-550b-a55b`、`nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`、`deepseek-ai/deepseek-v4-pro`、`openai/gpt-oss-120b`、`moonshotai/kimi-k2.6` |
+
+### 4.7 openai（:345-351）
 
 | 字段 | 值 |
 |------|-----|
 | `apiKeyEnvKey` | `OPENAI_API_KEY` |
-| `label` | `"OpenAI"` |
-| `modelOptions` | OPENAI_MODEL_OPTIONS（见 3.1 节） |
-| 认证方式 | api-key（默认） |
-| 默认 base URL | SDK 内置（无显式配置） |
+| `baseUrlEnvKey` | `OPENAI_BASE_URL`（无默认 `baseURL`，走 SDK 内置端点） |
+| `responsesApi` | `true` |
+| `modelOptions` | `OPENAI_MODEL_OPTIONS`（§5.1） |
 
-OpenAI 是**默认提供商**（`DEFAULT_PROVIDER = "openai"`，`src/constants.ts:65`）。它使用标准 API key 认证，模型列表与 `openai-chatgpt` 共享（见 `src/constants.ts:96-99` 注释）。
+OpenAI 是**默认提供商**（`DEFAULT_PROVIDER = "openai"`，`src/config/constants.ts:105`）。
 
-#### openai-chatgpt
+### 4.8 openai-chatgpt（:352-357）
 
 | 字段 | 值 |
 |------|-----|
 | `apiKeyEnvKey` | `OPENAI_CHATGPT_ACCESS_TOKEN` |
 | `authMethod` | `"oauth"` |
 | `label` | `"OpenAI (ChatGPT login)"` |
-| `modelOptions` | OPENAI_MODEL_OPTIONS（与 openai 相同） |
+| `modelOptions` | `OPENAI_MODEL_OPTIONS`（与 openai 共享同一常量，保证两者模型列表一致） |
 
-这是唯一使用 `"oauth"` 认证方式的提供商。用户通过浏览器登录 ChatGPT 获取短期 access token 和 refresh token，而非直接粘贴 API key。OAuth 流程还涉及 `OPENAI_CHATGPT_REFRESH_TOKEN`、`OPENAI_CHATGPT_EXPIRES_AT`、`OPENAI_CHATGPT_ACCOUNT_ID`、`OPENAI_CHATGPT_EMAIL`、`OPENAI_CHATGPT_PLAN` 等辅助环境变量（`src/constants.ts:10-17`），这些变量由 OAuth 回调自动填充。
+唯一 `"oauth"` 提供商。浏览器登录后持久化 `OPENAI_CHATGPT_REFRESH_TOKEN`、`OPENAI_CHATGPT_EXPIRES_AT`、`OPENAI_CHATGPT_ACCOUNT_ID`、`OPENAI_CHATGPT_EMAIL`、`OPENAI_CHATGPT_PLAN` 等辅助环境变量（常量 :26-33），由 OAuth 回调自动填充。模型创建端指向 Codex 后端（见 02 篇 §4.4）。
 
-#### openai-compatible
+### 4.9 openai-compatible（:358-364）
 
 | 字段 | 值 |
 |------|-----|
 | `apiKeyEnvKey` | `OPENAI_COMPATIBLE_API_KEY` |
 | `baseUrlEnvKey` | `OPENAI_COMPATIBLE_BASE_URL` |
 | `requiresBaseUrl` | `true` |
-| `label` | `"OpenAI-compatible"` |
-| `modelOptions` | `[]` (空，由用户自行输入) |
+| `modelOptions` | `[]`（用户自行输入模型 ID） |
 
-通用 OpenAI-compatible API 适配器。由于没有预设模型列表和默认 endpoint，用户必须同时提供 base URL 和 API key。`requiresBaseUrl: true` 意味着启动时 `ensureProviderBaseUrl()` 会强制检查 base URL 是否已设置。
+通用 OpenAI 兼容网关适配器，无预设模型、无默认端点：base URL 与 API key 必须同时提供（强制校验见 §7.4 的 `ensureProviderBaseUrl()`）。另有 5 个 openai-compatible 专属行为开关环境变量（streaming、Responses API、reasoning 等），见 §10.3。
 
-#### anthropic
+### 4.10 anthropic（:365-374）
 
 | 字段 | 值 |
 |------|-----|
-| `apiKeyEnvKey` | `ANTHROPIC_API_KEY` |
-| `baseUrlEnvKey` | `ANTHROPIC_BASE_URL` |
-| `label` | `"Anthropic"` |
-| `modelOptions` | Haiku / Sonnet / Opus（见下表） |
+| `apiKeyEnvKey` / `baseUrlEnvKey` | `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`（无默认 `baseURL`） |
+| `modelOptions` | `claude-haiku-4-5`（Haiku）、`claude-sonnet-5`（Sonnet）、`claude-opus-4-8`（Opus） |
 
-模型列表：
-
-| id | label |
-|----|-------|
-| `claude-haiku-4-5` | Haiku |
-| `claude-sonnet-5` | Sonnet |
-| `claude-opus-4-8` | Opus |
-
-`ANTHROPIC_BASE_URL` 环境变量允许覆盖默认 endpoint（用于自托管或代理）。
-
-#### gemini
+### 4.11 gemini（:375-379）
 
 | 字段 | 值 |
 |------|-----|
 | `apiKeyEnvKey` | `GEMINI_API_KEY` |
 | `label` | `"Gemini (AI Studio)"` |
-| `modelOptions` | GEMINI_MODELS（见 3.1 节） |
+| `modelOptions` | `GEMINI_MODELS`（§5.1） |
 
-这是面向个人开发者的 Google AI Studio 入口，使用 Gemini API key 认证。
+个人开发者经 Google AI Studio 的 API key 入口。
 
-#### gemini-enterprise
+### 4.12 gemini-enterprise（:380-397）
 
 | 字段 | 值 |
 |------|-----|
-| `projectEnvKey` | `GOOGLE_CLOUD_PROJECT` |
-| `locationEnvKey` | `GOOGLE_CLOUD_LOCATION` |
-| `defaultLocation` | `"global"` |
+| `projectEnvKey` / `locationEnvKey` / `defaultLocation` | `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` / `"global"`（`DEFAULT_VERTEX_LOCATION`，:64） |
+| `authMethod` | 缺省 `"api-key"`，但**无 `apiKeyEnvKey`**——keyless，凭 Google 应用默认凭据（Application Default Credentials, ADC）+ project + location 认证 |
 | `label` | `"Gemini Enterprise (Vertex AI)"` |
-| `modelOptions` | GEMINI_MODELS + Claude Model Garden IDs（见下表） |
-| `apiKeyEnvKey` | 无（keyless：使用 ADC） |
+| `modelOptions` | `GEMINI_MODELS` + `claude-haiku-4-5@20251001`、`claude-sonnet-5`、`claude-opus-4-8`；其余伙伴/开放权重 Model Garden 模型直接粘贴模型 ID |
 
-这是面向企业的 Vertex AI 入口。它不使用 API key，而是通过 Google Application Default Credentials（ADC）进行认证。`getProviderCredentialHint()` （`src/constants.ts:417-429`）在凭据缺失时会提示用户运行 `gcloud auth application-default login` 或设置 `GOOGLE_APPLICATION_CREDENTIALS`。
+凭据缺失提示由 `getProviderCredentialHint()` 给出（§7.5）：引导 `gcloud auth application-default login` 或设置 `GOOGLE_APPLICATION_CREDENTIALS`。门控检查的是 `projectEnvKey`（§7.2）。
 
-模型列表包含所有 GEMINI_MODELS 外加以下 Claude 模型（通过 Model Garden 路由）：
-
-| id | label |
-|----|-------|
-| `claude-haiku-4-5@20251001` | Claude Haiku |
-| `claude-sonnet-5` | Claude Sonnet |
-| `claude-opus-4-8` | Claude Opus |
-
-#### openrouter
+### 4.13 openrouter（:398-411）
 
 | 字段 | 值 |
 |------|-----|
 | `apiKeyEnvKey` | `OPENROUTER_API_KEY` |
-| `baseURL` | `"https://openrouter.ai/api/v1"` |
-| `label` | `"OpenRouter"` |
-| `modelOptions` | 7 个模型（见下表） |
+| `baseURL` | `OPENROUTER_BASE_URL` = `https://openrouter.ai/api/v1`（常量 :106） |
+| `modelOptions` | `z-ai/glm-5.2`、`openrouter/fusion`、`moonshotai/kimi-k2.7-code`、`anthropic/claude-opus-4-8`、`anthropic/claude-sonnet-5`、`openai/gpt-5.4-mini`、`openai/gpt-5.5` |
 
-`OPENROUTER_BASE_URL` 常量定义在 `src/constants.ts:66`。模型列表：
+### 4.14 凭据需求汇总 (Credential Requirements Summary)
 
-| id | label |
-|----|-------|
-| `z-ai/glm-5.2` | GLM 5.2 |
-| `openrouter/fusion` | OpenRouter Fusion |
-| `moonshotai/kimi-k2.7-code` | Kimi K2.7 Code |
-| `anthropic/claude-opus-4-8` | Claude Opus |
-| `anthropic/claude-sonnet-5` | Claude Sonnet |
-| `openai/gpt-5.4-mini` | GPT 5.4 mini |
-| `openai/gpt-5.5` | GPT 5.5 |
-
-#### bedrock
-
-| 字段 | 值 |
-|------|-----|
-| `apiKeyEnvKey` | `BEDROCK_AWS_ACCESS_KEY_ID` |
-| `secretKeyEnvKey` | `BEDROCK_AWS_SECRET_ACCESS_KEY` |
-| `regionEnvKey` | `BEDROCK_AWS_REGION` |
-| `requiresRegion` | `true` |
-| `label` | `"AWS Bedrock"` |
-| `modelOptions` | `[]` (空，model ID 因账户/区域而异) |
-
-Bedrock 是唯二需要双凭据（access key + secret key）和强制区域的提供商之一。由于可用模型取决于账户的 Bedrock 模型访问权限和区域，因此没有预设列表，用户直接粘贴模型 ID（如 `anthropic.claude-sonnet-5-20260101-v1:0`）。
-
-#### fireworks
-
-| 字段 | 值 |
-|------|-----|
-| `apiKeyEnvKey` | `FIREWORKS_API_KEY` |
-| `baseURL` | `"https://api.fireworks.ai/inference/v1"` |
-| `label` | `"Fireworks"` |
-| `modelOptions` | 2 个模型 |
-
-模型列表：
-
-| id | label |
-|----|-------|
-| `accounts/fireworks/models/glm-5p2` | GLM 5.2 |
-| `accounts/fireworks/models/kimi-k2p7-code` | Kimi K2.7 Code |
-
-#### baseten
-
-| 字段 | 值 |
-|------|-----|
-| `apiKeyEnvKey` | `BASETEN_API_KEY` |
-| `baseURL` | `"https://inference.baseten.co/v1"` |
-| `label` | `"Baseten"` |
-| `modelOptions` | 2 个模型 |
-
-模型列表：
-
-| id | label |
-|----|-------|
-| `zai-org/GLM-5.2` | GLM 5.2 |
-| `moonshotai/Kimi-K2.7-Code` | Kimi K2.7 Code |
-
-#### nvidia
-
-| 字段 | 值 |
-|------|-----|
-| `apiKeyEnvKey` | `NVIDIA_API_KEY` |
-| `baseURL` | `"https://integrate.api.nvidia.com/v1"` |
-| `label` | `"NVIDIA NIM"` |
-| `modelOptions` | 6 个模型 |
-
-模型列表：
-
-| id | label |
-|----|-------|
-| `nvidia/nemotron-3-super-120b-a12b` | Nemotron 3 Super 120B A12B |
-| `nvidia/nemotron-3-ultra-550b-a55b` | Nemotron 3 Ultra 550B A55B |
-| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | Nemotron 3 Nano Omni 30B A3B |
-| `deepseek-ai/deepseek-v4-pro` | DeepSeek V4 Pro |
-| `openai/gpt-oss-120b` | GPT-OSS 120B |
-| `moonshotai/kimi-k2.6` | Kimi K2.6 |
-
-#### nebius
-
-| 字段 | 值 |
-|------|-----|
-| `apiKeyEnvKey` | `NEBIUS_API_KEY` |
-| `baseURL` | `"https://api.tokenfactory.nebius.com/v1/"` |
-| `label` | `"Nebius Token Factory"` |
-| `modelOptions` | 1 个模型 |
-
-模型列表：
-
-| id | label |
-|----|-------|
-| `moonshotai/Kimi-K2.6` | Kimi K2.6 |
-
-`NEBIUS_BASE_URL` 常量定义在 `src/constants.ts:33`。
-
-### 2.4 提供商凭据需求汇总 (Credential Requirements Summary)
-
-| 提供商 | 必需凭据 | 可选/覆盖 | 特殊需求 |
+| 提供商 | 必需凭据（`getMissingProviderEnvKey` 口径） | 可选/覆盖 | 特殊需求 |
 |--------|---------|----------|---------|
-| openai | OPENAI_API_KEY | - | - |
-| openai-chatgpt | OAuth token 组 | - | browser OAuth 流程 |
-| openai-compatible | OPENAI_COMPATIBLE_API_KEY | - | **必须提供** base URL |
-| anthropic | ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | - |
-| gemini | GEMINI_API_KEY | - | - |
-| gemini-enterprise | GOOGLE_CLOUD_PROJECT | GOOGLE_CLOUD_LOCATION | ADC 认证（keyless） |
-| openrouter | OPENROUTER_API_KEY | - | - |
-| bedrock | BEDROCK_AWS_ACCESS_KEY_ID + BEDROCK_AWS_SECRET_ACCESS_KEY | - | **必须提供** region |
-| fireworks | FIREWORKS_API_KEY | - | - |
-| baseten | BASETEN_API_KEY | - | - |
-| nvidia | NVIDIA_API_KEY | - | - |
-| nebius | NEBIUS_API_KEY | - | - |
+| openai | `OPENAI_API_KEY` | `OPENAI_BASE_URL` | — |
+| openai-chatgpt | `OPENAI_CHATGPT_ACCESS_TOKEN`（OAuth 组） | — | 浏览器 OAuth 流程 |
+| anthropic | `ANTHROPIC_API_KEY` | `ANTHROPIC_BASE_URL` | — |
+| copilot | `COPILOT_API_KEY` **或** `gh` CLI 会话 | `COPILOT_BASE_URL` | 需 Copilot-enabled 账号；PAT 被拒 |
+| gemini | `GEMINI_API_KEY` | — | — |
+| gemini-enterprise | `GOOGLE_CLOUD_PROJECT` | `GOOGLE_CLOUD_LOCATION` | ADC 认证（keyless） |
+| openrouter | `OPENROUTER_API_KEY` | — | — |
+| openai-compatible | `OPENAI_COMPATIBLE_API_KEY` | — | **必须提供** base URL |
+| bedrock | AWS 凭据链 / 旧式 `BEDROCK_AWS_*` 键对 | 标准 `AWS_*` 键对 | **必须提供** region |
+| fireworks | `FIREWORKS_API_KEY` | `FIREWORKS_BASE_URL` | — |
+| baseten | `BASETEN_API_KEY` | `BASETEN_BASE_URL` | — |
+| nebius | `NEBIUS_API_KEY` | — | — |
+| nvidia | `NVIDIA_API_KEY` | `NVIDIA_BASE_URL` | — |
 
-## 3. 模型列表 (Model Lists)
+## 5. 模型列表与模型 ID (Model Lists and Model IDs)
 
-### 3.1 共享模型常量 (Shared Model Constants)
+### 5.1 共享模型常量
 
-**OPENAI_MODEL_OPTIONS** （`src/constants.ts:101-107`）：被 `openai` 和 `openai-chatgpt` 两个提供商共享，确保两者始终提供相同的模型列表。
+- **`OPENAI_MODEL_OPTIONS`**（`src/config/constants.ts:151-157`）：`gpt-5.6-terra`（5.6 Terra）、`gpt-5.6-luna`（5.6 Luna）、`gpt-5.6-sol`（5.6 Sol）、`gpt-5.5`（5.5）、`gpt-5.4-mini`（5.4 mini）。被 `openai` 与 `openai-chatgpt` 共享。
+- **`GEMINI_MODELS`**（`src/config/constants.ts:165-172`）：`gemini-3.6-flash`、`gemini-3.5-flash-lite`、`gemini-3.5-flash`、`gemini-3.1-pro`、`gemini-3-flash`、`gemini-3.1-flash-lite`。被 `gemini` 与 `gemini-enterprise` 共享（enterprise 侧追加 Claude Model Garden ID，见 §4.12）。
+- **copilot 的 `modelOptions`** 是独立的 12 条列表（§4.3），不与其他提供商共享。
 
-| id | label |
-|----|-------|
-| `gpt-5.6-terra` | 5.6 Terra |
-| `gpt-5.6-luna` | 5.6 Luna |
-| `gpt-5.6-sol` | 5.6 Sol |
-| `gpt-5.5` | 5.5 |
-| `gpt-5.4-mini` | 5.4 mini |
+### 5.2 默认模型与推荐模型
 
-**GEMINI_MODELS** （`src/constants.ts:115-120`）：被 `gemini` 和 `gemini-enterprise` 两个提供商共享。
+- `DEFAULT_MODEL_ID`（`src/config/constants.ts:414-415`）= 默认提供商（openai）首个模型选项，当前 `gpt-5.6-terra`；`?? "gpt-5.6-terra"` 是 modelOptions 为空时的防御性回退。
+- `SUGGESTED_MODEL_IDS`（:417-419）= 默认提供商全部模型 ID，用于 TUI 推荐。
+- `getDefaultModelId(provider)`（:769-771）返回该提供商 modelOptions 首项，空则回退 `DEFAULT_MODEL_ID`；`getProviderModelOptions()`（:763-767）是列表访问器。
 
-| id | label |
-|----|-------|
-| `gemini-3.5-flash` | Gemini 3.5 Flash |
-| `gemini-3.1-pro` | Gemini 3.1 Pro |
-| `gemini-3-flash` | Gemini 3 Flash |
-| `gemini-3.1-flash-lite` | Gemini 3.1 Flash-Lite |
+### 5.3 模型 ID 校验（:1213-1228）
 
-### 3.2 默认模型和推荐模型 (Default and Suggested Models)
+`normalizeModelId()`（:1213-1215）做 `trim()`；`isValidModelId()`（**`src/config/constants.ts:1217`**）规则：
 
-`DEFAULT_MODEL_ID` （`src/constants.ts:321-322`）取自默认提供商（openai）的第一个模型选项：
+1. trim 后长度 > 0 且 ≤ 120；
+2. 匹配 `/^[@A-Za-z0-9][A-Za-z0-9._:/@+,-]*$/u`——首字符可为 `@`（Cloudflare Workers AI 的 `@cf/...`），后续可含内部 `@`（Vertex AI 的 `claude-sonnet-4-5@20250929` 形态）；
+3. 不包含 `://`（防止 URL 被当作模型 ID）。
 
-```typescript
-export const DEFAULT_MODEL_ID =
-  PROVIDER_CONFIGS[DEFAULT_PROVIDER].modelOptions[0]?.id ?? "gpt-5.6-terra";
+### 5.4 跨提供商模型误配告警
+
+`getProvidersForKnownModelId()`（:780-801）按精确匹配找出哪些**其他**提供商的已知模型列表包含该 ID；`isModelIdForOtherProvider()`（:805-819）判定「属于别家、不属于当前提供商」的明确误配。精确匹配避免了 OpenRouter 命名空间（`anthropic/claude-...`）造成的误报；自定义/未知模型 ID 永远不告警。消费方是 `src/agent/index.ts:1053-1075` 的 `warnOnProviderModelMismatch()`——**非致命**，只发 stderr/事件警告，因为自定义端点可能合法提供该模型。
+
+## 6. 提供商解析：回退链 (Provider Resolution: Fallback Chain)
+
+### 6.1 resolveConfiguredProvider()
+
+`src/config/constants.ts:837-869`。解析优先级从高到低：
+
+1. **显式指定**：`OPENWIKI_PROVIDER`（常量 :65）经 `normalizeProvider()` 规范化后若有效则直接采用；
+2. **凭据检测链**：依次检查以下环境变量，命中即选中对应提供商——
+
+   ```
+   OPENAI_API_KEY            → openai
+   OPENAI_COMPATIBLE_API_KEY → openai-compatible
+   OPENROUTER_API_KEY        → openrouter
+   ANTHROPIC_API_KEY         → anthropic
+   BASETEN_API_KEY           → baseten
+   FIREWORKS_API_KEY         → fireworks
+   NEBIUS_API_KEY            → nebius
+   NVIDIA_API_KEY            → nvidia
+   BEDROCK_AWS_ACCESS_KEY_ID 或 BEDROCK_AWS_SECRET_ACCESS_KEY（非空，hasNonEmptyEnvValue :871-876）→ bedrock
+   ```
+
+3. **默认回退**：`DEFAULT_PROVIDER` = `"openai"`（:105）。
+
+注意：`gemini`、`gemini-enterprise`、`copilot` **不在凭据检测链中**——gemini 通常经 TUI 显式选择；gemini-enterprise 是 keyless（ADC）没有单一 key 可检；copilot 的凭据由 `gh` CLI 持有，须显式指定 `OPENWIKI_PROVIDER=copilot`。
+
+### 6.2 规范化与类型守卫
+
+- `normalizeProvider(value)`（**`src/config/constants.ts:821`**）：`trim().toLowerCase()` 后交给 `isValidProvider()`，无效返回 `null`。
+- `isValidProvider(value)`（:833-835）：类型守卫（type guard），`value in PROVIDER_CONFIGS`。
+
+### 6.3 诊断接入
+
+`src/config/env.ts:543-545` 的 `getProviderWarnings()` 对 `OPENWIKI_PROVIDER` 值调用 `normalizeProvider()`，返回 `null` 时在凭据诊断面板显示 `"invalid provider"`。
+
+## 7. 认证方式与凭据门控 (Auth Methods and Credential Gating)
+
+### 7.1 认证方式访问器
+
+| 函数 | 锚 | 逻辑 |
+|------|----|------|
+| `getProviderAuthMethod()` | `src/config/constants.ts:435-439` | 读 `authMethod`，缺省补 `"api-key"` |
+| `providerUsesOAuth()` | :441-443 | `=== "oauth"` |
+| `providerUsesAwsSdkCredentials()` | :445-449 | `=== "aws-sdk"` |
+| `providerUsesExternalCliAuth()` | :451-455 | `=== "external-cli"` |
+| `getProviderExternalCliAuthAdapter()` | :457-461 | 读适配器名 |
+| `providerRequiresApiKey()` | :463-468 | `authMethod === "api-key" && apiKeyEnvKey !== undefined`——bedrock 有 `apiKeyEnvKey` 但因是 aws-sdk 而返回 false |
+
+### 7.2 getMissingProviderEnvKey() — 凭据就绪检查
+
+`src/config/constants.ts:524-575`。返回第一个必需但未设置的环境变量名，或 `null` 表示就绪。检查顺序：
+
+1. **aws-sdk 特判（:530-564）**：bedrock 走专用路径——
+   - `AWS_BEARER_TOKEN_BEDROCK` 非空 → 直接放行（`@langchain/aws` 给 bearer token 最高优先级）；
+   - 旧式键对 `BEDROCK_AWS_ACCESS_KEY_ID` + `BEDROCK_AWS_SECRET_ACCESS_KEY` 经 `inspectCredentialPair()`（:878-909）检查成对完整性（存在但空白、单边缺失都报缺失方）；
+   - 完整旧式键对 → 放行（避免无关的标准 AWS 变量干扰）；否则再查标准对 `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`，成对完整 → 放行。
+2. **`apiKeyEnvKey`（:566-568）**：适用于 api-key 认证的提供商（含 copilot 的 `COPILOT_API_KEY`——但它可被 CLI 注入，见 §7.3）。
+3. **`projectEnvKey`（:570-572）**：适用于 gemini-enterprise（`GOOGLE_CLOUD_PROJECT`）。
+
+该函数**不检查** secret/region/base URL——分别由 `providerRequiresSecretKey()`（:670-675）、`providerRequiresRegion()`（:691-693）、`providerRequiresBaseUrl()`（:660-662）单独门控（消费点见 §7.4）。
+
+### 7.3 copilot 的外部 CLI 认证（external-cli）
+
+适配器实现全部在 `src/auth/external-cli-auth.ts`（189 行）：
+
+- `buildExternalCliAuthAdapters()`（:49-70）声明 `"github-cli"` 适配器：登录命令 `gh auth login --hostname <host>`，取 token 命令 `gh auth token --hostname <host>`（:64）。
+- `resolveGithubCliHostname()`（:31-48）：hostname 必须与 Base URL 实际指向的租户一致（如 GHE.com 数据驻留主机），从 `COPILOT_BASE_URL` 覆盖值推导 hostname，否则回退 `github.com`。
+- `resolveExternalCliCredential()`（:134-156）：运行前仅当 `COPILOT_API_KEY` 未设置时，调 `detectExternalCliCredential()`（:107-131，执行 `gh auth token`）取会话 token，**只注入本进程 env，绝不写回 OpenWiki 的 .env 文件**——CLI 是凭据的事实源。
+- `validateExternalCliCredential()`（:177-188）：命中 `/^(ghp_|github_pat_)/u` 即抛错——**Copilot API 拒绝个人访问令牌（Personal Access Token, PAT）**，要求 `gh auth login` 的 OAuth 会话 token。
+- `runExternalCliLogin()`（:158-175）与 `isExternalCliAvailable()`（:88-104）供 TUI/凭据向导发起交互登录与可用性探测。
+
+运行时接线在 `resolveRunConfig()`（`src/agent/index.ts:305`，:307-309 校验）：先尝试 CLI 注入，再做 PAT 校验，最后才到凭据门控。
+
+### 7.4 启动门控序列（agent 侧）
+
+`resolveRunConfig()`（`src/agent/index.ts:283-372`）在构建模型前依次执行：
+
+```
+resolveExternalCliCredential(provider)      # :305  external-cli 注入（仅 copilot）
+validateExternalCliCredential(...)          # :307-309  PAT 拒绝（仅 external-cli 且有 key）
+ensureProviderCredentials(provider)         # :310 → index.ts:954-968（调 getMissingProviderEnvKey，
+                                            #   缺失时拼 getProviderCredentialHint 抛错）
+ensureProviderBaseUrl(provider)             # :317 → index.ts:970-988（requiresBaseUrl 强制；
+                                            #   且对最终 base URL 跑 getProviderBaseUrlWarnings）
+ensureProviderSecretKey(provider)           # :318 → index.ts:990-1002（bedrock 旧式键）
+ensureProviderRegion(provider)              # :319 → index.ts:1004-1018（bedrock 区域）
 ```
 
-当前值为 `"gpt-5.6-terra"`（openai 的第一个模型）。`?? "gpt-5.6-terra"` 是防御性回退——当 openai 的 modelOptions 为空数组时使用硬编码默认值。
+### 7.5 凭据提示 getProviderCredentialHint()
 
-`SUGGESTED_MODEL_IDS` （`src/constants.ts:324-326`）是默认提供商所有模型 ID 的数组，用于 TUI 中无特定提供商场景下的推荐模型列表。
+`src/config/constants.ts:603-631`。为凭据在 OpenWiki env 之外的提供商追加人话提示：gemini-enterprise → ADC 登录指引；aws-sdk → AWS 凭据链说明；external-cli + `github-cli` → 「用 Copilot-enabled 账号 `gh auth login`，或为 CI 设置 `COPILOT_API_KEY`」。
 
-每个提供商自己的默认模型通过 `getDefaultModelId(provider)` （`src/constants.ts:519-521`）获取——返回该提供商 modelOptions 数组的第一个元素，若为空则回退到 `DEFAULT_MODEL_ID`。
+## 8. Base URL 解析 (Base URL Resolution)
 
-### 3.3 模型 ID 校验 (Model ID Validation)
+### 8.1 resolveProviderBaseUrl()
 
-**`normalizeModelId(value: string): string`** （`src/constants.ts:594-596`）：对输入字符串做 `trim()` 去除首尾空白。
+`src/config/constants.ts:639-652`。解析顺序：`baseUrlEnvKey` 对应环境变量的非空 trim 值 → `config.baseURL` → `undefined`（调用方回退 SDK 内置端点）。`getProviderBaseUrlEnvKey()`（:654-658）是覆盖变量名访问器。
 
-**`isValidModelId(value: string): boolean`** （`src/constants.ts:598-607`）：校验模型 ID 是否合法。规则为：
+### 8.2 校验
 
-1. trim 后长度 > 0 且 <= 120
-2. 匹配正则 `/^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$/`——以字母或数字开头，后续可含字母、数字、点、下划线、冒号、斜杠、@、+、-
-3. 不包含 `://` 字符串（防止 URL 被当作模型 ID）
+- `isValidBaseUrl()`（**`src/config/constants.ts:714`**）：必须是可解析 URL 且协议为 `http:`/`https:`。
+- `getProviderBaseUrlWarnings()`（:730-743）：在合法基础上，对 openai-compatible 额外检测端点误填——路径以 `/chat/completions` 结尾（`isChatCompletionsEndpointUrl` :752-761）时警告「应填 API 根 URL，而非 chat/completions 端点」。
+- `isValidProviderBaseUrl()`（:745-750）= 警告列表为空。
 
-此函数用于：TUI 中用户手动输入模型 ID 时的即时校验；`getModelWarnings()` （`src/env.ts:323-325`）在凭据诊断面板中标记无效模型 ID。
+### 8.3 各提供商 Base URL 场景（13 行全表）
 
-## 4. 提供商标识解析链 (Provider Resolution Chain)
+| 提供商 | 默认 `baseURL` | env 覆盖 | 必须提供？ |
+|--------|---------------|----------|:---------:|
+| openai | 无（SDK 默认端点） | `OPENAI_BASE_URL` | 否 |
+| openai-chatgpt | 无（`createModel` 硬编码 Codex 后端） | 无 | 否 |
+| anthropic | 无（SDK 默认端点） | `ANTHROPIC_BASE_URL` | 否 |
+| copilot | `https://api.githubcopilot.com` | `COPILOT_BASE_URL` | 否 |
+| gemini | 无（SDK 默认端点） | 无 | 否 |
+| gemini-enterprise | 无（Vertex 按 project+location 构造） | 无 | 否 |
+| openrouter | `https://openrouter.ai/api/v1` | 无 | 否 |
+| openai-compatible | 无 | `OPENAI_COMPATIBLE_BASE_URL` | **是** |
+| bedrock | 无（区域制，非 URL 制） | 无 | 否 |
+| fireworks | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_BASE_URL` | 否 |
+| baseten | `https://inference.baseten.co/v1` | `BASETEN_BASE_URL` | 否 |
+| nebius | `https://api.tokenfactory.nebius.com/v1/` | 无 | 否 |
+| nvidia | `https://integrate.api.nvidia.com/v1` | `NVIDIA_BASE_URL` | 否 |
 
-### 4.1 resolveConfiguredProvider() — 核心解析逻辑
+## 9. 位置与区域解析 (Location and Region Resolution)
 
-`src/constants.ts:539-564`
+- `resolveProviderLocation()`（`src/config/constants.ts:582-597`）：`locationEnvKey`（gemini-enterprise 为 `GOOGLE_CLOUD_LOCATION`）非空 trim 值优先，否则 `defaultLocation`（`"global"`）；无位置概念的提供商返回 `undefined`。
+- `resolveProviderRegion()`（:699-712）：按 `getProviderRegionEnvKeys()`（:683-689，即 `regionEnvKey` + `regionFallbackEnvKeys` 的有序列表）逐个取非空值。bedrock 的列表是 `BEDROCK_AWS_REGION` → `AWS_REGION` → `AWS_DEFAULT_REGION`；全空返回 `undefined`，由 `ensureProviderRegion()`（§7.4）抛错。
 
-```typescript
-export function resolveConfiguredProvider(
-  env: NodeJS.ProcessEnv = process.env,
-): OpenWikiProvider {
-  return (
-    normalizeProvider(env[OPENWIKI_PROVIDER_ENV_KEY]) ??
-    (env[OPENAI_API_KEY_ENV_KEY] ? "openai" :
-     env[OPENAI_COMPATIBLE_API_KEY_ENV_KEY] ? "openai-compatible" :
-     env[OPENROUTER_API_KEY_ENV_KEY] ? "openrouter" :
-     env[ANTHROPIC_API_KEY_ENV_KEY] ? "anthropic" :
-     env[BASETEN_API_KEY_ENV_KEY] ? "baseten" :
-     env[FIREWORKS_API_KEY_ENV_KEY] ? "fireworks" :
-     env[NEBIUS_API_KEY_ENV_KEY] ? "nebius" :
-     env[NVIDIA_API_KEY_ENV_KEY] ? "nvidia" :
-     env[BEDROCK_AWS_ACCESS_KEY_ID_ENV_KEY] ? "bedrock" :
-     DEFAULT_PROVIDER)
-  );
-}
-```
+## 10. 传输层开关 (Transport Switches)
 
-解析优先级（Resolution Priority），从高到低：
+### 10.1 providerUsesStreaming() — 强制流式
 
-1. **显式指定（Explicit）**：`OPENWIKI_PROVIDER` 环境变量的值，经过 `normalizeProvider()` 规范化（trim + 小写 + 有效性检查）
-2. **可用凭据检测（Credential Detection）**：按顺序检查各提供商的 API key 环境变量是否已设置：
-   - OPENAI_API_KEY → `"openai"`
-   - OPENAI_COMPATIBLE_API_KEY → `"openai-compatible"`
-   - OPENROUTER_API_KEY → `"openrouter"`
-   - ANTHROPIC_API_KEY → `"anthropic"`
-   - BASETEN_API_KEY → `"baseten"`
-   - FIREWORKS_API_KEY → `"fireworks"`
-   - NEBIUS_API_KEY → `"nebius"`
-   - NVIDIA_API_KEY → `"nvidia"`
-   - BEDROCK_AWS_ACCESS_KEY_ID → `"bedrock"`
-3. **默认回退（Default Fallback）**：`DEFAULT_PROVIDER` = `"openai"`
+`src/config/constants.ts:486-503`。返回该提供商是否强制 SSE 流式传输：
 
-注意（Notable）：`gemini` 和 `gemini-enterprise` 不在凭据检测链中。`gemini` 因为通常通过 TUI 显式选择；`gemini-enterprise` 使用 ADC 认证（keyless），没有单一的 API key 环境变量可检测。
+- `openai-compatible`：读 `OPENWIKI_OPENAI_COMPATIBLE_STREAMING` 环境开关（`resolveOpenAiCompatibleStreaming` :1077-1084，opt-in——第三方端点的 SSE 不保证穿过代理/负载均衡）。
+- **`copilot` 恒 `true`（:498-500）**：Copilot API 对非流式请求拒绝或返回空内容，会导致 repository worker 不调 `submit_plan`/`submit_page` 就退出；对 GPT-5 的 Responses 路径强制流式冗余但无害，与 openai-chatgpt 的 Codex 后端同一模式。
+- 其余一律 `false`。
 
-### 4.2 提供商标识规范化 (Provider Identifier Normalization)
+消费点在模型工厂兜底分支的展开式注入 `src/agent/index.ts:1261`（见 02 篇 §4.7——用展开而非布尔赋值，因为 `streaming: false` 会被 LangChain 转成 `disableStreaming`）。
 
-**`normalizeProvider(value: string | null | undefined): OpenWikiProvider | null`** （`src/constants.ts:523-533`）：
+### 10.2 providerUsesResponsesApi()
 
-- 对输入做 `trim().toLowerCase()` 规范化
-- 调用 `isValidProvider()` 检查规范化后的值是否为有效提供商标识符
-- 若是则返回规范化后的值，否则返回 `null`
+`src/config/constants.ts:470-484`。判定模型是否经 OpenAI Responses API 访问：`openai` 配置 `responsesApi: true`；`copilot` 配置 `/^gpt-5/u`（仅 GPT-5 族）；其余未配置即 `false`；`openai-compatible` 交给 env 开关（§10.3）。
 
-**`isValidProvider(value: string): value is OpenWikiProvider`** （`src/constants.ts:535-537`）：类型守卫（Type Guard），通过 `value in PROVIDER_CONFIGS` 检查值是否为有效的 provider key。TypeScript 会在该守卫通过后收窄类型为 `OpenWikiProvider`。
+### 10.3 openai-compatible 专属环境开关（:18-25、:1023-1084）
 
-### 4.3 提供商标识诊断 (Provider Diagnostics)
+| 环境变量 | 函数（锚） | 作用 |
+|----------|-----------|------|
+| `OPENWIKI_OPENAI_COMPATIBLE_STREAMING` | `resolveOpenAiCompatibleStreaming` :1077 | 强制 HTTP 层 SSE（见 §10.1） |
+| `OPENWIKI_OPENAI_COMPATIBLE_USE_RESPONSES_API` | `resolveOpenAiCompatibleUseResponsesApi` :1023 | opt-in Responses API |
+| `OPENWIKI_OPENAI_COMPATIBLE_REASONING_EFFORT_SUPPORTED` | `resolveOpenAiCompatibleReasoningEffortSupported` :1032 | 声明支持 reasoning effort |
+| `OPENWIKI_OPENAI_COMPATIBLE_STREAM_MESSAGES` | `resolveOpenAiCompatibleStreamMessages` :1054 | opt-in 恢复 "messages" 流模式（规避 reasoning 前置增量导致的聚合类型错误，issue #659） |
 
-在凭据诊断面板中（`src/env.ts:327-329`），`getProviderWarnings()` 对 `OPENWIKI_PROVIDER` 的值调用 `normalizeProvider()`——返回 `null` 表示配置了无效的 provider 名称，诊断面板显示 `"invalid provider"` 警告。
+HTTP 传输（SSE 与否）与 LangGraph 流模式（"messages"/"updates"）是两个正交的轴，源码注释（:1071-1073）有明确区分。
 
-## 5. 凭据门控 (Credential Gating)
+## 11. 数值型配置解析 (Numeric Settings)
 
-### 5.1 getMissingProviderEnvKey() — 凭据就绪检查
+### 11.1 输出 token 上限
 
-`src/constants.ts:374-389`
+- `resolveMaxOutputTokens()`（:911-937）：解析 `OPENWIKI_MAX_OUTPUT_TOKENS`（:44），正整数校验（`/^[1-9]\d*$/u` + `Number.isSafeInteger`），非法抛错。
+- `resolveOpenRouterMaxTokens()`（:1102-1109）：旧版 OpenRouter 专属 `OPENWIKI_OPENROUTER_MAX_TOKENS`（:39-40）。背景（源码注释 :1086-1090）：不设上限时 OpenRouter 按模型满额输出预算做信用预检，余额不足即 402。
+- `resolveConfiguredMaxOutputTokens(provider)`（:1123-1145）：统一入口——OpenRouter 上旧设置优先（保持存量低余额配置不变）→ 通用设置 → bedrock 落到 `resolveBedrockMaxTokens()`（:1185-1211，默认 `BEDROCK_DEFAULT_MAX_TOKENS = 16000`，:43——不显式设置时 Converse API 只给 4096，会截断长页）。
 
-```typescript
-export function getMissingProviderEnvKey(
-  provider: OpenWikiProvider,
-  env: NodeJS.ProcessEnv = process.env,
-): string | null {
-  const config = getProviderConfig(provider);
+### 11.2 流空闲看门狗
 
-  if (config.apiKeyEnvKey && !env[config.apiKeyEnvKey]) {
-    return config.apiKeyEnvKey;
-  }
+`resolveStreamIdleTimeout()`（:940-969）解析 `OPENWIKI_STREAM_IDLE_TIMEOUT`（:67-68），整数 0..2,147,483,647 毫秒，0 关闭看门狗；`resolveStreamIdleTimeoutForProvider()`（:971-976）**仅对 bedrock** 生效，其余提供商返回 `undefined`。
 
-  if (config.projectEnvKey && !env[config.projectEnvKey]) {
-    return config.projectEnvKey;
-  }
+### 11.3 重试次数
 
-  return null;
-}
-```
+`resolveProviderRetryAttempts()`（:978-1004）：`OPENWIKI_PROVIDER_RETRY_ATTEMPTS`（:71-72）未设置 → 默认 `DEFAULT_PROVIDER_RETRY_ATTEMPTS = 3`（:74）；设置但非正整数 → 抛错。该值作为 `maxRetries` 传入模型构造（见 02 篇 §2）。
 
-返回第一个必需但未设置的环境变量名，或 `null` 表示一切就绪。检查顺序：
+## 12. 环境变量持久化与诊断 (Env Persistence and Diagnostics)
 
-1. `apiKeyEnvKey` 对应的环境变量——适用于大多数通过 API key 认证的提供商
-2. `projectEnvKey` 对应的环境变量——适用于 `gemini-enterprise` 这种 keyless（ADC 认证）提供商
+提供商 env 常量（`src/config/constants.ts:1-104` 声明）与持久化层的接缝在 `src/config/env.ts`：
 
-对于 `gemini-enterprise`，它没有 `apiKeyEnvKey`（为 `undefined`，检查被跳过），但有 `projectEnvKey: "GOOGLE_CLOUD_PROJECT"`。若项目 ID 未设置，返回 `"GOOGLE_CLOUD_PROJECT"`。
+- `openWikiEnvPath` = `~/.openwiki/.env`（`src/config/env.ts:81-82`）；
+- **`MANAGED_ENV_KEYS`**（`src/config/env.ts:102`）：会读写到 `.env` 的环境变量权威列表，所有提供商 env key 都在其中；
+- `CREDENTIAL_DIAGNOSTIC_ENV_KEYS`（:183）与 `DEBUG_ENV_KEYS`（:196）派生自 `MANAGED_ENV_KEYS`，分别用于凭据诊断面板与启动调试日志；
+- `loadOpenWikiEnv()`（:267）启动时加载 `.env`（process.env 已有值优先）；`saveOpenWikiEnv()`（:305）经串行队列（serial queue）写入并同步 process.env；
+- 诊断函数 `getModelWarnings()` / `getProviderWarnings()` / `getRetryAttemptsWarnings()`（:539/:543/:553）分别调用 `isValidModelId` / `normalizeProvider` / `resolveProviderRetryAttempts`。
+- 版本标识 `OPENWIKI_VERSION` 在 `src/config/constants.ts:1233` 由 `src/version.ts` 再导出（运行时从 package.json 派生，不再是硬编码常量）。
 
-需要注意：此函数不检查 `secretKeyEnvKey`、`regionEnvKey` 和 `baseUrlEnvKey`——这些分别在 `providerRequiresSecretKey()`、`providerRequiresRegion()` 和 `providerRequiresBaseUrl()` 中单独处理。
+## 13. 扩展配方：新增一个提供商 (Extension Recipe: Adding a New Provider)
 
-### 5.2 凭据提示 (Credential Hints)
+### Step 1 — 添加 env key 常量
 
-**`getProviderCredentialHint(provider: OpenWikiProvider): string | null`** （`src/constants.ts:417-429`）：为使用非标准凭据的提供商提供人性化提示。目前只有 `gemini-enterprise` 有特殊提示——引导用户运行 `gcloud auth application-default login` 或设置 `GOOGLE_APPLICATION_CREDENTIALS`。其他提供商返回 `null`。
+在 `src/config/constants.ts` 顶部（:5-104 区域）声明 `MY_PROVIDER_API_KEY_ENV_KEY` 等常量。
 
-### 5.3 辅助检查函数 (Helper Check Functions)
+### Step 2 — 扩展 OpenWikiProvider 与注册配置
 
-| 函数 | 行号 | 逻辑 |
-|------|------|------|
-| `providerUsesOAuth(provider)` | `src/constants.ts:348-350` | `getProviderAuthMethod(provider) === "oauth"` |
-| `providerRequiresApiKey(provider)` | `src/constants.ts:352-354` | `config.apiKeyEnvKey !== undefined` |
-| `providerRequiresBaseUrl(provider)` | `src/constants.ts:458-460` | `config.requiresBaseUrl === true` |
-| `providerRequiresSecretKey(provider)` | `src/constants.ts:468-470` | `config.secretKeyEnvKey !== undefined` |
-| `providerRequiresRegion(provider)` | `src/constants.ts:478-480` | `config.requiresRegion === true` |
+- 在 `OpenWikiProvider` 联合类型（:108-121）加新字面量；
+- 在 `PROVIDER_CONFIGS`（:255-412）加完整条目。`Record<OpenWikiProvider, ProviderConfig>` 保证遗漏即编译错误。api-key 型提供商到此即可工作。
 
-这些布尔检查函数用于 TUI 和启动逻辑中，判断是否需要额外提示用户输入。
+### Step 3 — 加入 SELECTABLE_OPENWIKI_PROVIDERS
 
-### 5.4 凭据诊断 (Credential Diagnostics)
+在 `SELECTABLE_OPENWIKI_PROVIDERS`（:239-253）插入新标识符；`satisfies` 断言保证不拼错。
 
-`src/env.ts` 中的 `MANAGED_ENV_KEYS` （`src/env.ts:81-132`）是所有 OpenWiki 会读写到 `~/.openwiki/.env` 的环境变量的权威列表（Single Source of Truth）。所有提供商相关的 env key 常量都出现在这个数组中，派生出：
+### Step 4 — 注册 MANAGED_ENV_KEYS
 
-- `CREDENTIAL_DIAGNOSTIC_ENV_KEYS` （`src/env.ts:147-153`）：用于凭据诊断面板的显示列表（排除 LangChain 项目/追踪设置）
-- `DEBUG_ENV_KEYS` （`src/env.ts:160-163`）：agent 启动时 dump 到调试日志的 key 列表
+在 `src/config/env.ts:102` 的列表中加入新 env key 常量，使凭据可持久化、可诊断。
 
-## 6. Base URL 解析 (Base URL Resolution)
+### Step 5 —（可选）加入回退链
 
-### 6.1 resolveProviderBaseUrl() — 核心解析
+若希望凭据存在时被自动选中，在 `resolveConfiguredProvider()`（:837-869）的嵌套三元链中加检测分支；否则用户需显式 `OPENWIKI_PROVIDER` 或 TUI 选择。copilot 就是「不在链中」的实例。
 
-`src/constants.ts:437-450`
+### Step 6 —（可选）认证方式特殊化
 
-```typescript
-export function resolveProviderBaseUrl(
-  provider: OpenWikiProvider,
-  env: NodeJS.ProcessEnv = process.env,
-): string | undefined {
-  const config = getProviderConfig(provider);
-  const override = config.baseUrlEnvKey ? env[config.baseUrlEnvKey] : undefined;
-  const trimmedOverride = override?.trim();
+- **OpenAI 兼容 API**：无需改 `createModel()`，兜底分支自动覆盖（02 篇 §4.7）；只需配好 `baseURL`/`baseUrlEnvKey`。
+- **专用 SDK**：在 `createModel()`（`src/agent/index.ts:1077-1264`）兜底分支前加 `if` 块（02 篇 §9）。
+- **external-cli 型**（copilot 模式）：设 `authMethod: "external-cli"` + `externalCliAuthAdapter`；适配器实现加进 `src/auth/external-cli-auth.ts` 的适配器表（:49-70），并在 `validateExternalCliCredential()`（:177-188）补该适配器的凭据形态校验。模型创建侧同样无需新分支。
+- **reasoning 支持**：在 `src/config/reasoning.ts:48-70` 的能力表加条目（06 区 03 篇）。
 
-  if (trimmedOverride) {
-    return trimmedOverride;
-  }
-
-  return config.baseURL;
-}
-```
-
-解析顺序：
-
-1. **环境变量覆盖（Env Override）**：若提供商配置了 `baseUrlEnvKey` （如 `ANTHROPIC_BASE_URL` 或 `OPENAI_COMPATIBLE_BASE_URL`）且该环境变量有非空值，返回该值
-2. **配置默认值（Config Default）**：返回 `config.baseURL`（如 OpenRouter 的 `"https://openrouter.ai/api/v1"`）
-3. **返回 undefined**：若两者都没有，返回 `undefined`，由调用方回退到 SDK 自带默认 endpoint
-
-### 6.2 Base URL 校验 (Base URL Validation)
-
-**`isValidBaseUrl(value: string): boolean`** （`src/constants.ts:497-511`）：校验用户输入的 base URL 是否合法——必须是有效的 URL 且协议为 `http:` 或 `https:`。用于 TUI 中用户手动输入时的即时校验。
-
-### 6.3 辅助函数 (Helper Accessors)
-
-| 函数 | 行号 | 功能 |
-|------|------|------|
-| `getProviderBaseUrlEnvKey(provider)` | `src/constants.ts:452-456` | 获取该提供商的 base URL 覆盖环境变量名 |
-| `providerRequiresBaseUrl(provider)` | `src/constants.ts:458-460` | 该提供商是否必须提供 base URL |
-
-### 6.4 各提供商的 Base URL 场景
-
-| 提供商 | 有默认 baseURL？ | 可通过 env 覆盖？ | 必须提供？ |
-|--------|:---:|:---:|:---:|
-| openai | SDK 默认 | 无 | 否 |
-| openai-chatgpt | SDK 默认 | 无 | 否 |
-| openai-compatible | 无 | OPENAI_COMPATIBLE_BASE_URL | **是** |
-| anthropic | SDK 默认 | ANTHROPIC_BASE_URL | 否 |
-| gemini | SDK 默认 | 无 | 否 |
-| gemini-enterprise | SDK 默认 | 无 | 否 |
-| openrouter | https://openrouter.ai/api/v1 | 无 | 否 |
-| bedrock | SDK 默认 | 无 | 否 |
-| fireworks | https://api.fireworks.ai/inference/v1 | 无 | 否 |
-| baseten | https://inference.baseten.co/v1 | 无 | 否 |
-| nvidia | https://integrate.api.nvidia.com/v1 | 无 | 否 |
-| nebius | https://api.tokenfactory.nebius.com/v1/ | 无 | 否 |
-
-## 7. 位置与区域解析 (Location and Region Resolution)
-
-### 7.1 resolveProviderLocation() — 云位置解析
-
-`src/constants.ts:396-411`
-
-用于 `gemini-enterprise` 等有云位置概念的提供商。优先级：
-
-1. 环境变量覆盖（`locationEnvKey` 对应的值，如 `GOOGLE_CLOUD_LOCATION`）
-2. 配置默认值（`config.defaultLocation`，Gemini Enterprise 为 `"global"`）
-3. `undefined`——提供商没有位置概念
-
-### 7.2 resolveProviderRegion() — AWS 区域解析
-
-`src/constants.ts:487-495`
-
-用于 Bedrock 等需要 AWS 区域的提供商。从 `regionEnvKey` （`BEDROCK_AWS_REGION`）读取，trim 后返回。若未设置则返回 `undefined`，由调用方回退到 SDK 的区域解析（如 `~/.aws/config`）。
-
-## 8. 重试配置 (Retry Configuration)
-
-### 8.1 resolveProviderRetryAttempts()
-
-`src/constants.ts:566-592`
-
-```typescript
-export function resolveProviderRetryAttempts(
-  env: NodeJS.ProcessEnv = process.env,
-): number {
-  const rawRetryAttempts = env[OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY];
-
-  if (rawRetryAttempts === undefined) {
-    return DEFAULT_PROVIDER_RETRY_ATTEMPTS; // 3
-  }
-
-  const retryAttempts = rawRetryAttempts.trim();
-
-  if (!/^[1-9]\d*$/u.test(retryAttempts)) {
-    throw new Error(
-      `Invalid ${OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY}. Expected a positive integer.`,
-    );
-  }
-
-  const parsedRetryAttempts = Number(retryAttempts);
-
-  if (!Number.isSafeInteger(parsedRetryAttempts)) {
-    throw new Error(
-      `Invalid ${OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY}. Expected a positive integer.`,
-    );
-  }
-
-  return parsedRetryAttempts;
-}
-```
-
-行为：
-
-- 若 `OPENWIKI_PROVIDER_RETRY_ATTEMPTS` 未设置 → 默认 3 次（`DEFAULT_PROVIDER_RETRY_ATTEMPTS`，`src/constants.ts:36`）
-- 若设置了但格式非法（非正整数）→ 抛出错误
-- 若设置了且通过校验 → 返回解析后的数字
-
-校验通过正则 `/^[1-9]\d*$/u`（正整数，禁止前导零）和 `Number.isSafeInteger()` 双重保证。
-
-常量定义：
-- `OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY = "OPENWIKI_PROVIDER_RETRY_ATTEMPTS"` （`src/constants.ts:34-35`）
-- `DEFAULT_PROVIDER_RETRY_ATTEMPTS = 3` （`src/constants.ts:36`）
-
-## 9. 扩展配方：新增一个提供商 (Extension Recipe: Adding a New Provider)
-
-在整个 OpenWiki 代码库中新增一个模型提供商，需要修改的位置非常集中：
-
-### Step 1: 添加 env key 常量
-
-在 `src/constants.ts` 顶部添加新的 API key 环境变量名常量：
-
-```typescript
-export const MY_PROVIDER_API_KEY_ENV_KEY = "MY_PROVIDER_API_KEY";
-```
-
-### Step 2: 扩展 OpenWikiProvider 联合类型
-
-在 `src/constants.ts:68-80` 的 `OpenWikiProvider` 类型中添加新的字符串字面量：
-
-```typescript
-export type OpenWikiProvider =
-  | "anthropic"
-  // ... 已有条目 ...
-  | "my-provider";  // 新增
-```
-
-### Step 3: 在 PROVIDER_CONFIGS 中注册
-
-在 `src/constants.ts:192-319` 的 `PROVIDER_CONFIGS` 对象中添加新条目：
-
-```typescript
-"my-provider": {
-  apiKeyEnvKey: MY_PROVIDER_API_KEY_ENV_KEY,
-  baseURL: "https://api.my-provider.com/v1",  // 可选
-  label: "My Provider",
-  modelOptions: [
-    { id: "my-model-1", label: "My Model 1" },
-  ],
-},
-```
-
-TypeScript 会强制要求 `Record<OpenWikiProvider, ProviderConfig>` 为每个联合成员提供配置——如果遗漏，编译期就会报错。
-
-### Step 4: 将 env key 加入 MANAGED_ENV_KEYS
-
-在 `src/env.ts:81-132` 的 `MANAGED_ENV_KEYS` 数组中添加新的环境变量名常量，使其能被持久化到 `~/.openwiki/.env` 并在凭据诊断面板中显示。
-
-### Step 5: （可选）加入解析链
-
-如需让新提供商在凭据检测阶段被自动选中，在 `resolveConfiguredProvider()` （`src/constants.ts:539-564`）的嵌套三元链中添加对应的检测分支。否则用户需要通过 `OPENWIKI_PROVIDER` 显式选择，或在 TUI 中选择。
-
-### Step 6: 实现模型创建逻辑
-
-模型创建全部集中在 `src/agent/index.ts` 的 `createModel()` 函数中（`src/agent/index.ts:560-685`），没有独立的 provider 工厂目录：
-
-- **OpenAI 兼容 API 的提供商**：无需修改 `createModel()`——函数末尾的兜底分支（`ChatOpenAI` + `resolveProviderBaseUrl()`）自动覆盖，只需在 `PROVIDER_CONFIGS` 中配置好 `baseURL`（baseten、fireworks、nebius、nvidia 都走这条路径）。
-- **使用专用 SDK 的提供商**（如 `ChatOpenRouter`、`ChatBedrockConverse`）：在 `createModel()` 中兜底分支之前新增一个 `if (provider === "...")` 分支。
-
-详见 `02-provider-model-creation.md` §6。
-
-### 改动总结
-
-| 文件 | 改动内容 | 行号范围 |
-|------|---------|---------|
-| `src/constants.ts` | 添加 env key 常量 | ~1-40 |
-| `src/constants.ts` | 扩展 OpenWikiProvider 类型 | 68-80 |
-| `src/constants.ts` | PROVIDER_CONFIGS 新条目 | 192-319 |
-| `src/constants.ts` | （可选）resolveConfiguredProvider 新分支 | 539-564 |
-| `src/env.ts` | MANAGED_ENV_KEYS 添加新 key | 81-132 |
-| `src/agent/index.ts` | （仅专用 SDK 提供商需要）createModel() 新增分支；OpenAI 兼容提供商由兜底分支覆盖，无需改动 | 560-685 |
-
-核心原则：**ProviderConfig 是单一配置点**——所有 TUI 选项、凭据检查、模型列表和 base URL 解析都从 `PROVIDER_CONFIGS` 读取。新增一个标准 API key 认证的提供商，只需要添加到 `PROVIDER_CONFIGS` 并在 `MANAGED_ENV_KEYS` 中注册其 env key 即可。
-
-## 10. 环境变量持久化 (Env Persistence)
-
-`src/env.ts` 管理所有提供商凭据的持久化。关键概念：
-
-- **`openWikiEnvPath`** = `~/.openwiki/.env` （`src/env.ts:56-57`）
-- **`MANAGED_ENV_KEYS`** （`src/env.ts:81-132`）：权威的 key 列表，控制哪些 env 变量会被持久化到 `.env` 文件、哪些出现在诊断面板和调试日志中
-- **`loadOpenWikiEnv()`** （`src/env.ts:169-183`）：启动时将 `~/.openwiki/.env` 加载到 `process.env`（process.env 中的已有值优先）
-- **`saveOpenWikiEnv(updates)`** （`src/env.ts:195-221`）：将更新写入 `~/.openwiki/.env`（mode 0600），同步更新 `process.env`
-- **`CREDENTIAL_DIAGNOSTIC_ENV_KEYS`** （`src/env.ts:147-153`）：派生自 `MANAGED_ENV_KEYS`，排除 LangChain 项目/追踪设置，用于 TUI 的凭据状态面板
-- **`DEBUG_ENV_KEYS`** （`src/env.ts:160-163`）：派生自 `MANAGED_ENV_KEYS`，加上 `LANGCHAIN_ENDPOINT`，用于 agent 的调试日志行
-
-## 11. 版本标识 (Version Identifier)
-
-`OPENWIKI_VERSION` 常量定义在 `src/constants.ts:609`，当前值为 `"0.2.0"`。用于遥测上报和调试信息中标识 OpenWiki 版本。
+核心原则不变：**ProviderConfig 是单一配置点**——TUI 选项、凭据检查、模型列表、Base URL 解析全部从 `PROVIDER_CONFIGS` 读取。
 
 ---
 
@@ -669,58 +508,47 @@ TypeScript 会强制要求 `Record<OpenWikiProvider, ProviderConfig>` 为每个�
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/constants.ts:1-2` | `OPEN_WIKI_DIR`, `UPDATE_METADATA_PATH` | 目录与元数据路径常量 |
-| `src/constants.ts:3-7` | `BASETEN_API_KEY_ENV_KEY`, `FIREWORKS_API_KEY_ENV_KEY`, `NEBIUS_API_KEY_ENV_KEY`, `NVIDIA_API_KEY_ENV_KEY`, `OPENAI_API_KEY_ENV_KEY` | 各提供商 API key 环境变量名 |
-| `src/constants.ts:8-18` | `OPENAI_COMPATIBLE_API_KEY_ENV_KEY`, `OPENAI_COMPATIBLE_BASE_URL_ENV_KEY`, `OPENAI_CHATGPT_ACCESS_TOKEN_ENV_KEY` 等 | openai-compatible 和 openai-chatgpt OAuth 相关 env key |
-| `src/constants.ts:18-30` | `ANTHROPIC_API_KEY_ENV_KEY`, `ANTHROPIC_BASE_URL_ENV_KEY`, `OPENROUTER_API_KEY_ENV_KEY`, Bedrock 和 Gemini 的 env key | Anthropic、OpenRouter、Bedrock、Gemini 的凭据 env key |
-| `src/constants.ts:30-36` | `DEFAULT_VERTEX_LOCATION`, `OPENWIKI_PROVIDER_ENV_KEY`, `OPENWIKI_MODEL_ID_ENV_KEY`, `NEBIUS_BASE_URL`, `OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY`, `DEFAULT_PROVIDER_RETRY_ATTEMPTS` | 全局配置常量和 Nebius base URL |
-| `src/constants.ts:65` | `DEFAULT_PROVIDER` | 默认提供商 = `"openai"` |
-| `src/constants.ts:66` | `OPENROUTER_BASE_URL` | OpenRouter API endpoint |
-| `src/constants.ts:68-80` | `OpenWikiProvider` | 12 个提供商标识符的联合类型 |
-| `src/constants.ts:87` | `ProviderAuthMethod` | 认证方式类型 `"api-key" \| "oauth"` |
-| `src/constants.ts:91-94` | `ProviderModelOption` | 模型选项类型 `{ id, label }` |
-| `src/constants.ts:101-107` | `OPENAI_MODEL_OPTIONS` | OpenAI 共享模型列表（openai + openai-chatgpt 共用） |
-| `src/constants.ts:115-120` | `GEMINI_MODELS` | Gemini 共享模型列表（gemini + gemini-enterprise 共用） |
-| `src/constants.ts:122-175` | `ProviderConfig` | 提供商配置类型定义（所有字段的文档注释） |
-| `src/constants.ts:177-190` | `SELECTABLE_OPENWIKI_PROVIDERS` | 可选择提供商列表（`as const satisfies` 编译期校验） |
-| `src/constants.ts:192-319` | `PROVIDER_CONFIGS` | **核心注册表**：12 个提供商的完整配置 |
-| `src/constants.ts:321-322` | `DEFAULT_MODEL_ID` | 默认模型 ID（取自 openai 首个模型） |
-| `src/constants.ts:324-326` | `SUGGESTED_MODEL_IDS` | 推荐模型 ID 列表（默认提供商的所有模型） |
-| `src/constants.ts:328-330` | `getProviderConfig()` | 获取提供商的完整 ProviderConfig |
-| `src/constants.ts:332-334` | `getProviderLabel()` | 获取提供商的用户可见标签 |
-| `src/constants.ts:336-340` | `getProviderApiKeyEnvKey()` | 获取提供商的 API key 环境变量名 |
-| `src/constants.ts:342-346` | `getProviderAuthMethod()` | 获取提供商的认证方式（默认 `"api-key"`） |
-| `src/constants.ts:348-350` | `providerUsesOAuth()` | 提供商是否使用 OAuth 认证 |
-| `src/constants.ts:352-354` | `providerRequiresApiKey()` | 提供商是否配置了 apiKeyEnvKey |
-| `src/constants.ts:356-360` | `getProviderProjectEnvKey()` | 获取提供商的云项目 env key |
-| `src/constants.ts:362-365` | `getProviderLocationEnvKey()` | 获取提供商的云位置 env key |
-| `src/constants.ts:374-389` | `getMissingProviderEnvKey()` | **凭据门控**：返回第一个缺失的必需 env key |
-| `src/constants.ts:396-411` | `resolveProviderLocation()` | 解析云位置（env 覆盖 > 默认值） |
-| `src/constants.ts:417-429` | `getProviderCredentialHint()` | gemini-enterprise 的凭据提示（ADC 登录指引） |
-| `src/constants.ts:437-450` | `resolveProviderBaseUrl()` | **Base URL 解析**：env 覆盖 > 配置默认 > undefined |
-| `src/constants.ts:452-456` | `getProviderBaseUrlEnvKey()` | 获取 base URL 覆盖 env key |
-| `src/constants.ts:458-460` | `providerRequiresBaseUrl()` | 提供商是否强制要求 base URL |
-| `src/constants.ts:462-466` | `getProviderSecretKeyEnvKey()` | 获取第二凭据 env key（如 AWS secret key） |
-| `src/constants.ts:468-470` | `providerRequiresSecretKey()` | 提供商是否要求双凭据 |
-| `src/constants.ts:472-476` | `getProviderRegionEnvKey()` | 获取区域 env key |
-| `src/constants.ts:478-480` | `providerRequiresRegion()` | 提供商是否强制要求区域 |
-| `src/constants.ts:487-495` | `resolveProviderRegion()` | 解析区域（从 env 读取，undefined 则回退 SDK） |
-| `src/constants.ts:497-511` | `isValidBaseUrl()` | Base URL 合法性校验（http/https URL） |
-| `src/constants.ts:513-517` | `getProviderModelOptions()` | 获取提供商的模型选项列表 |
-| `src/constants.ts:519-521` | `getDefaultModelId()` | 获取提供商的默认模型 ID |
-| `src/constants.ts:523-533` | `normalizeProvider()` | 提供商标识符规范化（trim + 小写 + 有效性校验） |
-| `src/constants.ts:535-537` | `isValidProvider()` | 类型守卫：值是否为有效的 `OpenWikiProvider` |
-| `src/constants.ts:539-564` | `resolveConfiguredProvider()` | **提供商解析链**：显式指定 > 凭据检测 > 默认回退 |
-| `src/constants.ts:566-592` | `resolveProviderRetryAttempts()` | 解析重试次数（默认 3，非法值抛错） |
-| `src/constants.ts:594-596` | `normalizeModelId()` | 模型 ID 规范化（trim） |
-| `src/constants.ts:598-607` | `isValidModelId()` | 模型 ID 合法性校验（长度、字符集、禁止 URL） |
-| `src/constants.ts:609` | `OPENWIKI_VERSION` | OpenWiki 版本号 `"0.2.0"` |
-| `src/env.ts:56-57` | `openWikiEnvDir`, `openWikiEnvPath` | `~/.openwiki/.env` 路径定义 |
-| `src/env.ts:81-132` | `MANAGED_ENV_KEYS` | 所有持久化 env key 的权威列表（Single Source of Truth） |
-| `src/env.ts:147-153` | `CREDENTIAL_DIAGNOSTIC_ENV_KEYS` | 凭据诊断面板的 key 列表（派生自 MANAGED_ENV_KEYS） |
-| `src/env.ts:160-163` | `DEBUG_ENV_KEYS` | 调试日志 key 列表（派生自 MANAGED_ENV_KEYS） |
-| `src/env.ts:169-183` | `loadOpenWikiEnv()` | 加载 `~/.openwiki/.env` 到 process.env |
-| `src/env.ts:195-221` | `saveOpenWikiEnv()` | 保存更新到 `~/.openwiki/.env`（mode 0600） |
-| `src/env.ts:323-325` | `getModelWarnings()` | 模型 ID 诊断警告（调用 `isValidModelId`） |
-| `src/env.ts:327-329` | `getProviderWarnings()` | 提供商标识诊断警告（调用 `normalizeProvider`） |
-| `src/env.ts:331-341` | `getRetryAttemptsWarnings()` | 重试次数诊断警告（调用 `resolveProviderRetryAttempts`） |
+| `src/config/constants.ts:1-104` | 各 `*_ENV_KEY` 常量 | 提供商与全局配置的 env key 声明区（含 `OPENWIKI_PROVIDER:65`、`DEFAULT_PROVIDER_RETRY_ATTEMPTS:74`、`BEDROCK_DEFAULT_MAX_TOKENS:43`） |
+| `src/config/constants.ts:70` | `NEBIUS_BASE_URL` | Nebius 默认端点 |
+| `src/config/constants.ts:105` | `DEFAULT_PROVIDER` | 默认提供商 = `"openai"` |
+| `src/config/constants.ts:106` | `OPENROUTER_BASE_URL` | OpenRouter API endpoint |
+| `src/config/constants.ts:108-121` | `OpenWikiProvider` | 13 个提供商标识符联合类型（含 copilot:112） |
+| `src/config/constants.ts:129-130` | `ProviderAuthMethod` | 四元认证方式（api-key/aws-sdk/external-cli/oauth） |
+| `src/config/constants.ts:137` | `ExternalCliAuthAdapter` | 外部 CLI 适配器 = `"github-cli"` |
+| `src/config/constants.ts:139` | `SelectableOpenWikiProvider` | 可选择提供商类型别名 |
+| `src/config/constants.ts:151-157` | `OPENAI_MODEL_OPTIONS` | openai + openai-chatgpt 共享模型列表 |
+| `src/config/constants.ts:165-172` | `GEMINI_MODELS` | gemini + gemini-enterprise 共享模型列表 |
+| `src/config/constants.ts:174-237` | `ProviderConfig` | 提供商配置类型（含 externalCliAuthAdapter/responsesApi/regionFallbackEnvKeys） |
+| `src/config/constants.ts:239-253` | `SELECTABLE_OPENWIKI_PROVIDERS` | TUI 选择列表（非字母序，copilot 第 4 位） |
+| `src/config/constants.ts:255-412` | `PROVIDER_CONFIGS` | **核心注册表**：13 个提供商完整配置（copilot :280-302） |
+| `src/config/constants.ts:414-419` | `DEFAULT_MODEL_ID`, `SUGGESTED_MODEL_IDS` | 默认/推荐模型派生 |
+| `src/config/constants.ts:435-468` | `getProviderAuthMethod`, `providerUses*`, `providerRequiresApiKey` | 认证方式访问器 |
+| `src/config/constants.ts:470-484` | `providerUsesResponsesApi` | Responses API 判定（openai 全量 / copilot /^gpt-5/u） |
+| `src/config/constants.ts:486-503` | `providerUsesStreaming` | 强制流式开关（copilot 恒 true :498-500） |
+| `src/config/constants.ts:524-575` | `getMissingProviderEnvKey` | **凭据门控**（aws-sdk 特判 + apiKey + project） |
+| `src/config/constants.ts:582-597` | `resolveProviderLocation` | 云位置解析（env 覆盖 > 默认） |
+| `src/config/constants.ts:603-631` | `getProviderCredentialHint` | 非 env 凭据提供商的人话提示 |
+| `src/config/constants.ts:639-652` | `resolveProviderBaseUrl` | Base URL 解析（env 覆盖 > 默认 > undefined） |
+| `src/config/constants.ts:660-712` | `providerRequiresBaseUrl` / secret / region 系列 | 其余门控谓词与区域解析 |
+| `src/config/constants.ts:714-761` | `isValidBaseUrl`, `getProviderBaseUrlWarnings` | Base URL 校验与 openai-compatible 端点误填警告 |
+| `src/config/constants.ts:763-771` | `getProviderModelOptions`, `getDefaultModelId` | 模型列表访问器 |
+| `src/config/constants.ts:780-819` | `getProvidersForKnownModelId`, `isModelIdForOtherProvider` | 跨提供商模型误配判定 |
+| `src/config/constants.ts:821-835` | `normalizeProvider`, `isValidProvider` | 标识规范化与类型守卫 |
+| `src/config/constants.ts:837-869` | `resolveConfiguredProvider` | **回退链**：显式 > 9 级凭据检测 > 默认 |
+| `src/config/constants.ts:878-909` | `inspectCredentialPair` | 成对凭据完整性检查（bedrock 用） |
+| `src/config/constants.ts:911-1004` | `resolveMaxOutputTokens`, `resolveStreamIdleTimeout*`, `resolveProviderRetryAttempts` | 数值型配置解析 |
+| `src/config/constants.ts:1023-1084` | `resolveOpenAiCompatible*` | openai-compatible 四个行为开关 |
+| `src/config/constants.ts:1102-1211` | `resolveOpenRouterMaxTokens`, `resolveConfiguredMaxOutputTokens`, `resolveBedrockMaxTokens` | 输出上限统一入口与 bedrock 默认 16000 |
+| `src/config/constants.ts:1217-1228` | `isValidModelId` | 模型 ID 校验（长度/字符集/禁 URL） |
+| `src/config/constants.ts:1233` | `OPENWIKI_VERSION` | 由 src/version.ts 再导出 |
+| `src/agent/index.ts:283-372` | `resolveRunConfig` | 启动门控序列与解析结果五元组 |
+| `src/agent/index.ts:954-1018` | `ensureProviderCredentials/BaseUrl/SecretKey/Region` | 四个抛错型门控 |
+| `src/agent/index.ts:1053-1075` | `warnOnProviderModelMismatch` | 跨提供商模型误配非致命告警 |
+| `src/auth/external-cli-auth.ts:31-70` | `resolveGithubCliHostname`, `buildExternalCliAuthAdapters` | gh CLI 适配器声明（token 命令 :64） |
+| `src/auth/external-cli-auth.ts:134-156` | `resolveExternalCliCredential` | 会话 token 注入进程 env，不落盘 |
+| `src/auth/external-cli-auth.ts:177-188` | `validateExternalCliCredential` | 拒绝 PAT（ghp_/github_pat_） |
+| `src/config/env.ts:81-102` | `openWikiEnvPath`, `MANAGED_ENV_KEYS` | .env 路径与持久化权威列表 |
+| `src/config/env.ts:183-196` | `CREDENTIAL_DIAGNOSTIC_ENV_KEYS`, `DEBUG_ENV_KEYS` | 派生诊断/调试列表 |
+| `src/config/env.ts:267,305` | `loadOpenWikiEnv`, `saveOpenWikiEnv` | env 加载与串行队列写入 |
+| `src/config/env.ts:539-559` | `getModelWarnings` 等 | 诊断面板警告（调用本文件校验函数） |
+| `src/config/reasoning.ts:48-70` | `REASONING_CAPABILITIES` | reasoning 能力表（新提供商扩展点，06 区 03 篇详述） |

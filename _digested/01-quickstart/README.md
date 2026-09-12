@@ -22,8 +22,8 @@ out_of_scope:
 
 | # | 文档 | 状态 | 说明 |
 |---|------|------|------|
-| 1 | `01-installation.md` | 计划中 | 安装方式（npm/pnpm）、Node 版本要求、可选 peer 依赖（mermaid+jsdom） |
-| 2 | `02-first-run.md` | 计划中 | `openwiki` 首次运行、init 交互式向导（凭据 → wiki brief → cron，`src/setup/` 体系） |
+| 1 | `01-installation.md` | 已完成| 安装方式（npm/pnpm）、Node 版本要求、可选 peer 依赖（mermaid+jsdom） |
+| 2 | `02-first-run.md` | 已完成| `openwiki` 首次运行、init 交互式向导（凭据 → wiki brief → cron，`src/setup/` 体系） |
 | 3 | `03-model-setup.md` | 计划中 | 选择提供商（13 个）、获取 API key、模型推荐；与 `06-model-providers/` 联动 |
 | 4 | `04-troubleshooting.md` | 计划中 | 常见错误对照遥测错误分类（config_error/provider_error/…，见 `14-configuration-and-telemetry/`） |
 

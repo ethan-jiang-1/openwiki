@@ -35,7 +35,7 @@ OpenWiki 是一个装在终端里的 CLI 工具，只做一件事：**让一个 
 | 模式 | 入口 | 一句话 |
 |------|------|--------|
 | **Code mode**（代码模式） | `openwiki code` / `--init` / `--update` | 拿 Git 仓库当证据，生成/增量更新结构化代码 wiki 到 `openwiki/`，可接 CI 定时刷新 |
-| **Personal mode**（个人模式） | `openwiki`（默认） | 拿 Gmail、Slack、Notion 等外部数据当证据，攒一个"第二大脑"到 `~/.openwiki/wiki/` |
+| **Personal mode**（个人模式） | `openwiki personal` / `openwiki --mode personal` | 拿 Gmail、Slack、Notion 等外部数据当证据，攒一个"第二大脑"到 `~/.openwiki/wiki/`。注意：裸 `openwiki` 默认是 **code 模式**，不是 personal |
 
 图解版完整叙述见 `02-architecture/01-system-overview.md`（待重写）。下面是更硬核的细节画像，供按图索骥，不需要一次读完。
 

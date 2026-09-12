@@ -1,7 +1,7 @@
 ---
 title: "14 — 配置与遥测 (Configuration and Telemetry)"
 doc_type: "index"
-status: "draft"
+status: "current"
 branch: "ethan"
 created: "2026-07-17"
 updated: "2026-09-13"
@@ -24,10 +24,10 @@ out_of_scope:
 
 | # | 文档 | 状态 | 说明 |
 |---|------|------|------|
-| 1 | `01-credential-onboarding.md` | 待重写 | `credentials.tsx` 4337 行巨石 → 30 行组合根 + credentials/ 8 文件（use-init-setup 状态机/steps 导航/components/persistence） |
-| 2 | `02-environment-and-config.md` | 待重写（改名「配置层与平台层」） | config/ vs platform/ 归属规则、`OPENWIKI_CONFIG_DIR` 重定向、env 串行保存队列、windows-acl、version.ts 运行时版本 |
-| 3 | `03-posthog-telemetry.md` | 计划中（提纲重定） | 客户端与 `capture` 真实送达语义、gates `buildChannel`（community/official）、senders 事件族（error_detail/owner/stage/http_status/build_channel/app_version）、tee 文件协议；**旧「批量发送」提纲作废（实为每 run 单事件 + tee）** |
-| 4 | `04-error-classification-taxonomy.md` | 计划中 | errors.ts 分类器：类目闭集（config_error/provider_error/…/aborted）、环安全链展开（深度 32）、origin tag、`deriveOwner`、`withRunTelemetry` 单一边界 |
+| 1 | `01-credential-onboarding.md` | 已完成| `credentials.tsx` 4337 行巨石 → 30 行组合根 + credentials/ 8 文件（use-init-setup 状态机/steps 导航/components/persistence） |
+| 2 | `02-environment-and-config.md` | 已完成| config/ vs platform/ 归属规则、`OPENWIKI_CONFIG_DIR` 重定向、env 串行保存队列、windows-acl、version.ts 运行时版本 |
+| 3 | `03-posthog-telemetry.md` | 已完成| 客户端与 `capture` 真实送达语义、gates `buildChannel`（community/official）、senders 事件族（error_detail/owner/stage/http_status/build_channel/app_version）、tee 文件协议；**旧「批量发送」提纲作废（实为每 run 单事件 + tee）** |
+| 4 | `04-error-classification-taxonomy.md` | 已完成| errors.ts 分类器：类目闭集（config_error/provider_error/…/aborted）、环安全链展开（深度 32）、origin tag、`deriveOwner`、`withRunTelemetry` 单一边界 |
 
 ## 关键源文件
 

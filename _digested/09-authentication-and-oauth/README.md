@@ -24,8 +24,8 @@ out_of_scope:
 
 | # | 文档 | 状态 | 说明 |
 |---|------|------|------|
-| 1 | `01-oauth-pkce-flow.md` | 待更新 | PKCE 主流程仍成立；4 处失效修正：Windows rundll32、discovery 迁移+校验（oauth-discovery.ts）、回调 404 第四分支、行号重锚 |
-| 2 | `02-external-cli-auth.md` | 计划中 | `gh auth token` 适配器、token 仅注入进程 env 不落盘、Copilot PAT 拒绝、与 06 区 copilot provider 联动 |
+| 1 | `01-oauth-pkce-flow.md` | 已完成| PKCE 主流程仍成立；4 处失效修正：Windows rundll32、discovery 迁移+校验（oauth-discovery.ts）、回调 404 第四分支、行号重锚 |
+| 2 | `02-external-cli-auth.md` | 已完成| `gh auth token` 适配器、token 仅注入进程 env 不落盘、Copilot PAT 拒绝、与 06 区 copilot provider 联动 |
 | 3 | `03-token-management.md` | 计划中 | tokens.ts：存储、刷新（刷新路径同走发现校验）、过期 |
 | 4 | `04-auth-configuration.md` | 计划中 | configure.ts 认证配置生成 |
 | 5 | `05-ngrok-tunnel.md` | 计划中 | ngrok HTTPS 隧道（323 行，基本未变） |

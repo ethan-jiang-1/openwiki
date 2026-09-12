@@ -4,34 +4,35 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
+updated: "2026-09-13"
+sync_event: "2026-09-13"
 audience: "需要理解 OpenWiki 如何在 macOS 上通过 LaunchAgent 实现定时 wiki 更新的人"
-purpose: "详细解释 schedules.ts 中 LaunchAgent 的完整生命周期管理、cron 表达式解析、plist 生成、launchctl 集成和电源调度"
-owns: "src/schedules.ts（918 行）— 所有 LaunchAgent CRUD、cron 解析（cron-parser / cronstrue）、plist 模板、launchctl 引导、pmset 电源调度"
+purpose: "详细解释 scheduling/schedules.ts 中 LaunchAgent 的完整生命周期管理、cron 表达式解析、plist 生成、launchctl 集成和电源调度"
+owns: "src/scheduling/schedules.ts（955 行）— 所有 LaunchAgent CRUD、cron 解析（cron-parser / cronstrue）、plist 模板（含 EnvironmentVariables 注入）、launchctl 引导、pmset 电源调度"
 update_when:
   - "LaunchAgent 的创建、列出、暂停、恢复、删除逻辑发生变化时"
-  - "cron 表达式解析或 plist 模板发生变化时"
+  - "cron 表达式解析（含 day+weekday 组合拒绝）或 plist 模板发生变化时"
   - "launchctl 命令或 domain 计算方式发生变化时"
   - "电源调度（pmset）的偏移量或逻辑发生变化时"
   - "新增或移除公开导出的类型或函数时"
 out_of_scope:
-  - "CI/CD 流水线（GitHub Actions / GitLab CI / Bitbucket Pipelines）—— 在 02-ci-workflows.md"
-  - "定时 wiki 更新工作流的 fork opt-in 机制 —— 在 03-scheduled-openwiki-updates.md"
-  - "onboarding 配置的交互式编辑（credentials.tsx TUI）—— 在 10-configuration-and-telemetry/"
-  - "openwiki-home 目录结构的完整说明 —— 在 10-configuration-and-telemetry/"
+  - "CI 工作流的模板生成与 GitHub Actions 选择对比 —— 在 02-ci-workflow-generation.md"
+  - "定时 wiki 更新的 `.last-update.json` 状态语义与 no-op 判定 —— 在 03-scheduled-openwiki-updates.md"
+  - "onboarding 配置的交互式编辑（credentials TUI）—— 在 14-configuration-and-telemetry/"
+  - "openwiki-home 目录结构与 OPENWIKI_CONFIG_DIR 解析的完整说明 —— 在 14-configuration-and-telemetry/"
 ---
 
 # 01 — macOS LaunchAgent 调度
 
-`schedules.ts`（918 行）是 OpenWiki 调度子系统的核心文件。它管理 macOS LaunchAgent 的完整生命周期 — 创建、列出、暂停、恢复和删除定时任务 — 并负责将 cron 表达式转换为 macOS 原生的 `launchd` plist 格式。此外，它还通过 `pmset` 管理 macOS 的定时唤醒/睡眠电源调度，确保 Mac 在需要执行定时 wiki 更新时处于唤醒状态。
+`src/scheduling/schedules.ts`（955 行）是 OpenWiki 调度子系统的核心文件。它管理 macOS LaunchAgent 的完整生命周期 — 创建、列出、暂停、恢复和删除定时任务 — 并负责将 cron 表达式转换为 macOS 原生的 `launchd` plist 格式。此外，它还通过 `pmset` 管理 macOS 的定时唤醒/睡眠电源调度，确保 Mac 在需要执行定时 wiki 更新时处于唤醒状态。
 
-> **源码是唯一真相源。** 以下所有函数名、行号、参数和分支均来自 `src/schedules.ts`。
+> **源码是唯一真相源。** 以下所有函数名、行号、参数和分支均来自 `src/scheduling/schedules.ts`（2026-09-13 re-baseline 后全文重锚；旧基线路径 `src/schedules.ts`、918 行的对照见各节行号迁移说明）。
 
 ---
 
 ## 1. 概览（Overview）
 
-`schedules.ts` 是 OpenWiki 中唯一的调度实现文件。它的职责边界非常清晰：
+`schedules.ts` 是 OpenWiki 中唯一的调度实现文件（re-baseline 后位于 `src/scheduling/` 域目录）。它的职责边界非常清晰：
 
 ```
 用户通过 TUI 设置 cron 表达式
@@ -57,17 +58,19 @@ macOS launchd 按 StartCalendarInterval 触发
 - **cronstrue**（`toString`）：将 cron 表达式转为人类可读的英文描述
 - **launchctl**（`execFile` 调用）：与 macOS `launchd` 守护进程交互
 - **pmset**（`osascript` + administrator privileges 调用）：管理 macOS 电源调度
-- **openwiki-home**（`ensureOpenWikiHome`, `openWikiHomeDir`）：家目录管理
+- **openwiki-home**（`ensureOpenWikiHome`, `openWikiHomeDir`）：家目录管理；re-baseline 后同时导入 `OPENWIKI_CONFIG_DIR_ENV_KEY` 与 `resolveOpenWikiHomeDir`，用于 plist 的 `EnvironmentVariables` 注入（见 6.6）
 
-文件导出 10 个公开函数和 7 个类型定义，内部包含 30 个私有辅助函数。
+文件导出 11 个公开函数和 7 个类型定义，内部包含 29 个私有辅助函数。与旧基线（918 行、10 个公开函数）相比的增量：`parseLaunchdCalendarInterval` 改为导出（`:585`，供测试直接调用，见 5.4）。
+
+> **与 02/03 号文档的边界**：LaunchAgent 只是定时更新的「触发器」之一。CI（GitHub Actions）路线的工作流模板生成见 `02-ci-workflow-generation.md`；被触发的一轮 `update` 如何记账（`.last-update.json`）与何时可跳过（no-op）见 `03-scheduled-openwiki-updates.md`。
 
 ---
 
 ## 2. 类型体系（Type System）
 
-`schedules.ts:15-77` 定义了调度子系统的完整类型体系。其中 `CalendarInterval` 和 `RepeatScheduleTime` 为内部类型（未导出，见 2.6），其余类型均导出供外部使用：
+`schedules.ts:20-82` 定义了调度子系统的完整类型体系。其中 `CalendarInterval` 和 `RepeatScheduleTime` 为内部类型（未导出，见 2.6），其余类型均导出供外部使用：
 
-### 2.1 CronValidationResult（`schedules.ts:15-25`）
+### 2.1 CronValidationResult（`schedules.ts:20-30`）
 
 辨别联合类型（discriminated union），以 `valid` 字段为判别键：
 
@@ -80,7 +83,7 @@ type CronValidationResult =
 - `valid: true` 时携带 `description`（cronstrue 生成的人类可读描述）
 - `valid: false` 时携带 `error`（cron-parser 抛出的错误消息）
 
-### 2.2 ScheduleInstallResult（`schedules.ts:27-32`）
+### 2.2 ScheduleInstallResult（`schedules.ts:32-37`）
 
 `installConnectorSchedule()` 的返回值，包含安装后的状态：
 
@@ -91,7 +94,7 @@ type CronValidationResult =
 | `launchAgentPath?` | `string` | 已写入的 .plist 文件路径（仅 macOS） |
 | `warning?` | `string` | 非 macOS 平台或复杂 cron 表达式时的警告 |
 
-### 2.3 ConnectorScheduleStatus（`schedules.ts:34-46`）
+### 2.3 ConnectorScheduleStatus（`schedules.ts:39-51`）
 
 `listConnectorSchedules()` 返回的单个调度状态，包含完整的运行时和文件系统状态：
 
@@ -109,7 +112,7 @@ type CronValidationResult =
 | `updatedAt` | `string` | 最后更新时间戳 |
 | `warning?` | `string` | 警告信息 |
 
-### 2.4 PowerScheduleInstallResult / PowerScheduleStatus（`schedules.ts:48-58`）
+### 2.4 PowerScheduleInstallResult / PowerScheduleStatus（`schedules.ts:53-63`）
 
 电源调度（pmset）的结果和持久化状态：
 
@@ -127,7 +130,7 @@ type PowerScheduleStatus = PowerScheduleInstallResult & {
 };
 ```
 
-### 2.5 ScheduleMutationResult（`schedules.ts:60-66`）
+### 2.5 ScheduleMutationResult（`schedules.ts:65-71`）
 
 所有变更操作（暂停、恢复、删除）的统一返回类型：
 
@@ -143,24 +146,26 @@ type ScheduleMutationResult = {
 
 ### 2.6 内部类型
 
-- **ScheduleTarget**（`schedules.ts:68`）：`ConnectorId | "all"`，目前仅支持 `"all"`
-- **CalendarInterval**（`schedules.ts:70-72`）：`Partial<Record<"Hour" | "Minute" | "Month" | "Day" | "Weekday", number>>`，对应 launchd plist 的 `StartCalendarInterval` 字典
-- **RepeatScheduleTime**（`schedules.ts:74-77`）：`{ days: string; minuteOfDay: number }`，用于 pmset 电源窗口计算
+- **ScheduleTarget**（`schedules.ts:73`）：`ConnectorId | "all"`，目前仅支持 `"all"`
+- **CalendarInterval**（`schedules.ts:75-77`）：`Partial<Record<"Hour" | "Minute" | "Month" | "Day" | "Weekday", number>>`，对应 launchd plist 的 `StartCalendarInterval` 字典
+- **RepeatScheduleTime**（`schedules.ts:79-82`）：`{ days: string; minuteOfDay: number }`，用于 pmset 电源窗口计算
 
 ---
 
 ## 3. 常量（Constants）
 
-`schedules.ts:13-81` 定义了调度子系统的重要常量：
+`schedules.ts` 顶部定义了调度子系统的重要常量：
 
 | 常量 | 值 | 源码行 | 说明 |
 |------|-----|--------|------|
-| `DEFAULT_FIRST_HOUR` | `2` | `:13` | 默认 cron 表达式的小时字段（凌晨 2 点） |
-| `PMSET_WAKE_OFFSET_MINUTES` | `2` | `:79` | 唤醒时间在最早 cron 任务前的偏移分钟数 |
-| `PMSET_SLEEP_OFFSET_MINUTES` | `30` | `:80` | 睡眠时间在最晚 cron 任务后的偏移分钟数 |
-| `PMSET_DEFAULT_DAYS` | `"MTWRFSU"` | `:81` | pmset 日代码默认值（周一至周日） |
+| `DEFAULT_FIRST_HOUR` | `2` | `:18` | 默认 cron 表达式的小时字段（凌晨 2 点） |
+| `PMSET_WAKE_OFFSET_MINUTES` | `2` | `:84` | 唤醒时间在最早 cron 任务前的偏移分钟数 |
+| `PMSET_SLEEP_OFFSET_MINUTES` | `30` | `:85` | 睡眠时间在最晚 cron 任务后的偏移分钟数 |
+| `PMSET_DEFAULT_DAYS` | `"MTWRFSU"` | `:86` | pmset 日代码默认值（周一至周日） |
 
-pmset 日代码映射（`schedules.ts:723-741`）：
+另有模块级 `execFileAsync`（`:17`，`promisify(execFile)`）供所有外部命令调用。
+
+pmset 日代码映射（`weekdayNumberToPmsetDay`，`schedules.ts:749-768`）：
 
 | cron 星期几 | pmset 代码 | 含义 |
 |------------|-----------|------|
@@ -178,7 +183,7 @@ pmset 日代码映射（`schedules.ts:723-741`）：
 
 ### 4.1 创建（installConnectorSchedule）
 
-**函数签名**：`schedules.ts:127-194`
+**函数签名**：`schedules.ts:132-203`
 
 ```typescript
 async function installConnectorSchedule({
@@ -190,34 +195,39 @@ async function installConnectorSchedule({
 
 **执行流程**：
 
-1. **验证 cron 表达式**（`:136-140`）：调用 `validateCronExpression(cronExpression)`，如果不合法则抛出 `Error`。
+1. **验证 cron 表达式**（`:141-145`）：调用 `validateCronExpression(cronExpression)`，如果不合法则抛出 `Error`。
 
-2. **平台守卫**（`:142-149`）：非 Darwin 平台直接返回，带 `warning` 提示仅支持 macOS。不会写入任何文件，也不会抛出异常。
+2. **平台守卫**（`:147-154`）：非 Darwin 平台直接返回，带 `warning` 提示仅支持 macOS。不会写入任何文件，也不会抛出异常。
 
-3. **解析 launchd CalendarInterval**（`:151-159`）：调用 `parseLaunchdCalendarInterval()` 将 cron 字段转换为 launchd 的 `StartCalendarInterval` 字典。如果 cron 表达式过于复杂（如包含 `*/5` 步进值、列表值 `1,3,5`、或范围值 `1-5`），解析失败，返回 warning 但不写 plist。
+3. **解析 launchd CalendarInterval**（`:156-164`）：调用 `parseLaunchdCalendarInterval()` 将 cron 字段转换为 launchd 的 `StartCalendarInterval` 字典。如果 cron 表达式过于复杂（如包含 `*/5` 步进值、列表值 `1,3,5`、范围值 `1-5`，或同时限制「日」与「星期几」，见 5.4），解析失败，返回 warning 但不写 plist。
 
-4. **创建目录结构**（`:163-169`）：
+4. **准备路径与配置目录**（`:166-171`）：
+   - `void connectorId`（`:166`）——整个调度系统目前只支持单一全局调度（`"all"`）
+   - 计算 Label、`~/Library/LaunchAgents/` 目录、`~/.openwiki/logs/` 目录、plist 完整路径
+   - 读取安装进程环境中的 `OPENWIKI_CONFIG_DIR`（`:171`，经 `OPENWIKI_CONFIG_DIR_ENV_KEY`）——非空时 plist 将注入 `EnvironmentVariables`（见 6.6）
+
+5. **创建目录结构**（`:173-175`）：
    - 确保 `~/.openwiki/` 存在（`ensureOpenWikiHome()`）
    - 创建 `~/Library/LaunchAgents/`（权限 `0o700`）
    - 创建 `~/.openwiki/logs/`（权限 `0o700`）
 
-5. **写入 plist 文件**（`:170-183`）：
+6. **写入 plist 文件**（`:176-192`）：
    - 路径：`~/Library/LaunchAgents/com.openwiki.ingestion.plist`
-   - 内容：由 `createLaunchAgentPlist()` 生成（详见第 7 节）
-   - 权限：`0o600`（仅当前用户可读写）
-   - 写入后额外执行 `chmod` 确保权限
+   - 内容：由 `createLaunchAgentPlist()` 生成（详见第 6 节）；`openWikiConfigDir` 参数仅在步骤 4 读到自定义配置目录时传入（`:183-185`，经 `resolveOpenWikiHomeDir(process.env)` 重解析）
+   - 权限：`0o600`（仅当前用户可读写，`writeFile` mode）
+   - 写入后额外执行 `chmod` 确保权限（`:192`）
 
-6. **引导 launchd**（`:185-187`）：
+7. **引导 launchd**（`:194-196`）：
    - 先卸载旧 agent：`unloadLaunchAgent()`
    - 再加载新 agent：`launchctl bootstrap gui/<uid> <plistPath>`
 
-7. **返回结果**（`:189-193`）：包含 `description`、`expression` 和 `launchAgentPath`。
+8. **返回结果**（`:198-202`）：包含 `description`、`expression` 和 `launchAgentPath`。
 
-> **注意**：`connectorId` 参数当前被 `void` 掉（`:161`），整个调度系统目前只支持单一全局调度（`"all"`），不区分 connector。`.plist` 的 Label 固定为 `com.openwiki.ingestion`，所有 connector 共享同一个 LaunchAgent。
+> **注意**：`connectorId` 参数当前被 `void` 掉（`:166`），整个调度系统目前只支持单一全局调度（`"all"`），不区分 connector。`.plist` 的 Label 固定为 `com.openwiki.ingestion`，所有 connector 共享同一个 LaunchAgent。
 
 ### 4.2 列出（listConnectorSchedules）
 
-**函数签名**：`schedules.ts:196-223`
+**函数签名**：`schedules.ts:205-232`
 
 ```typescript
 async function listConnectorSchedules(
@@ -227,11 +237,11 @@ async function listConnectorSchedules(
 
 **执行逻辑**：
 
-1. 从 `config.ingestionSchedule` 读取已保存的调度配置（`:199-201`）
+1. 从 `config.ingestionSchedule` 读取已保存的调度配置（`:208-211`）
 2. 如果无配置，返回空数组 `[]`
-3. 构造单个 `ConnectorScheduleStatus` 对象（`:205-222`）：
+3. 构造单个 `ConnectorScheduleStatus` 对象（`:214-231`）：
    - `launchAgentLoaded`：如果 `pausedAt` 非空则为 `false`，否则通过 `isLaunchAgentLoaded()` 检查 launchctl 状态
-   - `launchAgentPlistExists`：通过 `pathExists()` 检查 plist 文件是否在磁盘上
+   - `launchAgentPlistExists`：优先用配置里保存的 `launchAgentPath` 检查磁盘（`:223-225`），无路径则为 `false`
    - `sourceInstanceId` 固定为 `"all"`，`displayName` 固定为 `"All ingestion"`
 4. 以单元素数组形式返回
 
@@ -239,7 +249,7 @@ async function listConnectorSchedules(
 
 ### 4.3 暂停（pauseConnectorSchedules）
 
-**函数签名**：`schedules.ts:225-263`
+**函数签名**：`schedules.ts:234-272`
 
 ```typescript
 async function pauseConnectorSchedules(
@@ -250,20 +260,20 @@ async function pauseConnectorSchedules(
 
 **执行流程**：
 
-1. **前置守卫**（`:229-240`）：
+1. **前置守卫**（`:238-249`）：
    - 如果 `target !== "all"`，直接返回，将 target 放入 `skippedConnectorIds`
    - 如果无 `ingestionSchedule` 配置，直接返回
    - 如果 `pausedAt` 已存在（已经暂停），直接返回（幂等操作）
 
-2. **浅拷贝配置（单层）并设置 pausedAt**（`:242-250`）：将 `pausedAt` 设为当前 ISO 时间戳，更新 `updatedAt`
+2. **浅拷贝配置（单层）并设置 pausedAt**（`:251-259`）：将 `pausedAt` 设为当前 ISO 时间戳，更新 `updatedAt`
 
-3. **卸载 LaunchAgent**（`:251`）：调用 `unloadLaunchAgent()`，执行 `launchctl bootout`
+3. **卸载 LaunchAgent**（`:260`）：调用 `unloadLaunchAgent()`，执行 `launchctl bootout`
 
-4. **调解电源调度**（`:253-261`）：调用 `reconcileOpenWikiPowerSchedule()` 按需调整 pmset
+4. **调解电源调度**（`:262`）：调用 `reconcileOpenWikiPowerSchedule()` 按需调整 pmset
 
 ### 4.4 恢复（resumeConnectorSchedules）
 
-**函数签名**：`schedules.ts:265-316`
+**函数签名**：`schedules.ts:274-325`
 
 ```typescript
 async function resumeConnectorSchedules({
@@ -275,17 +285,17 @@ async function resumeConnectorSchedules({
 
 **执行流程**：
 
-1. **前置守卫**（`:274-285`）：target 非 `"all"`、无 `ingestionSchedule`、或 `pausedAt` 为空（未暂停）时跳过
+1. **前置守卫**（`:283-294`）：target 非 `"all"`、无 `ingestionSchedule`、或 `pausedAt` 为空（未暂停）时跳过
 
-2. **重新安装调度**（`:287-291`）：调用 `installConnectorSchedule()`，使用保存的 cron 表达式和固定的 `connectorId: "git-repo"`
+2. **重新安装调度**（`:296-300`）：调用 `installConnectorSchedule()`，使用保存的 cron 表达式和固定的 `connectorId: "git-repo"`
 
-3. **更新配置**（`:292-301`）：浅拷贝配置（单层），清除 `pausedAt`（恢复为 `undefined`），更新 `description`、`expression`、`launchAgentPath`、`updatedAt` 和 `warning`
+3. **更新配置**（`:301-310`）：浅拷贝配置（单层），清除 `pausedAt`（新对象不再携带该字段），更新 `description`、`expression`、`launchAgentPath`、`updatedAt` 和 `warning`
 
-4. **调解电源调度**（`:303-315`）：调用 `reconcileOpenWikiPowerSchedule()`，合并 warning 信息
+4. **调解电源调度**（`:312`）：调用 `reconcileOpenWikiPowerSchedule()`，合并 warning 信息（`:318-323`）
 
 ### 4.5 删除（deleteConnectorSchedules）
 
-**函数签名**：`schedules.ts:318-346`
+**函数签名**：`schedules.ts:327-355`
 
 ```typescript
 async function deleteConnectorSchedules(
@@ -296,15 +306,15 @@ async function deleteConnectorSchedules(
 
 **执行流程**：
 
-1. **前置守卫**（`:322-329`）：target 非 `"all"` 或无 `ingestionSchedule` 时跳过
+1. **前置守卫**（`:331-338`）：target 非 `"all"` 或无 `ingestionSchedule` 时跳过
 
-2. **从配置中删除**（`:331-332`）：浅拷贝配置（单层），`delete nextConfig.ingestionSchedule`
+2. **从配置中删除**（`:340-341`）：浅拷贝配置（单层），`delete nextConfig.ingestionSchedule`
 
-3. **卸载并删除文件**（`:333-334`）：
+3. **卸载并删除文件**（`:342-343`）：
    - `unloadLaunchAgent()`：执行 `launchctl bootout`
    - `removeLaunchAgentPlist()`：调用 `fs.unlink` 删除 plist 文件，ENOENT 时静默忽略
 
-4. **调解电源调度**（`:336-345`）：调用 `reconcileOpenWikiPowerSchedule()` 按需调整 pmset
+4. **调解电源调度**（`:345`）：调用 `reconcileOpenWikiPowerSchedule()` 按需调整 pmset
 
 ### 4.6 操作模式总结
 
@@ -324,12 +334,12 @@ async function deleteConnectorSchedules(
 
 ### 5.1 验证（validateCronExpression）
 
-**函数签名**：`schedules.ts:83-110`
+**函数签名**：`schedules.ts:88-115`
 
 ```
 输入: 原始 cron 字符串
   │
-  ├─ normalizeCronExpression()   [schedules.ts:567-569]
+  ├─ normalizeCronExpression()   [schedules.ts:576-578]
   │   └─ trim + 多个空白压缩为单个空格
   │
   ├─ 空检查: 归一化后为空 → { valid: false, error: "Enter a cron expression like 0 2 * * *." }
@@ -339,13 +349,13 @@ async function deleteConnectorSchedules(
       └─ 失败 → { valid: false, error: error.message }
 ```
 
-`normalizeCronExpression()`（`:567-569`）执行两步简单清理：
+`normalizeCronExpression()`（`:576-578`）执行两步简单清理：
 1. `expression.trim()` — 去除首尾空白
 2. `.replace(/\s+/gu, " ")` — 将多个连续空白字符合并为单个空格
 
 ### 5.2 人类可读描述（describeCronExpression）
 
-**函数签名**：`schedules.ts:112-117`
+**函数签名**：`schedules.ts:117-122`
 
 ```typescript
 cronstrue.toString(expression, {
@@ -360,13 +370,13 @@ cronstrue.toString(expression, {
 
 ### 5.3 默认表达式（getSuggestedCronExpression）
 
-**函数签名**：`schedules.ts:119-125`
+**函数签名**：`schedules.ts:124-130`
 
 优先使用 `config.ingestionSchedule.expression`，无配置时返回 `0 2 * * *`（凌晨 2 点），即 `DEFAULT_FIRST_HOUR = 2`。
 
 ### 5.4 转换为 launchd CalendarInterval（parseLaunchdCalendarInterval）
 
-**函数签名**：`schedules.ts:571-619`
+**函数签名**：`schedules.ts:585-645`（re-baseline 变化：**改为 `export`**，JSDoc 注明 "Exported for testing"，测试见 `test/scheduling/launchd-calendar-interval.test.ts`）
 
 这是 cron → plist 转换的核心。launchd 的 `StartCalendarInterval` 只接受单一数值，不支持 cron 的通配、列表、范围或步进语法。因此只有最简形式的 cron 表达式才能转换。
 
@@ -379,32 +389,36 @@ cron: minute hour day month weekday
     CalendarInterval 字典（只包含非 "*" 字段）
 ```
 
-**关键逻辑**（`:571-619`）：
+**关键逻辑**（`:585-645`）：
 
-1. **解析字段**（`:574-578`）：调用 `parseSimpleCronFields()` 拆分为 5 个字段
-2. **分钟**（`:581-584`）：`Minute` 字段必须为具体数值（`getSingleCronNumber`），失败则返回 `null`
-3. **小时**（`:590-595`）：具体数值 → `Hour`；`*` → 省略该 key；其他 → 返回 `null`
-4. **日期**（`:597-602`）：具体数值 → `Day`；`*` → 省略；其他 → `null`
-5. **月份**（`:604-609`）：具体数值 → `Month`；`*` → 省略；其他 → `null`
-6. **星期几**（`:611-616`）：具体数值 → `Weekday`（7 映射为 0，因为 cron 的 7=周日 而 macOS 用 0）；`*` → 省略；其他 → `null`
+1. **解析字段**（`:588-591`）：调用 `parseSimpleCronFields()` 拆分为 5 个字段
+2. **分钟**（`:595-598`）：`Minute` 字段必须为具体数值（`getSingleCronNumber`），失败则返回 `null`
+3. **小时**（`:604-609`）：具体数值 → `Hour`；`*` → 省略该 key；其他 → 返回 `null`
+4. **日 + 星期几组合守卫**（`:617-621`，re-baseline 新增，见下）
+5. **日期**（`:623-628`）：具体数值 → `Day`；`*` → 省略；其他（受限但非单一数值）→ `null`
+6. **月份**（`:630-635`）：具体数值 → `Month`；`*` → 省略；其他 → `null`
+7. **星期几**（`:637-642`）：具体数值 → `Weekday`（`7` 映射为 `0`，`:639`，因为 cron 的 7=周日 而 macOS 用 0）；`*` → 省略；其他 → `null`
+
+**day+weekday 同受限拒绝（`:611-621`）**：这是 re-baseline 新增的语义守卫（upstream `906787d`）。cron 标准规定：当「日」与「星期几」**同时受限**时，两者是 **OR** 关系（“每月 1 号 **或** 任意周一”都会触发）；而 launchd 的 `StartCalendarInterval` 对所有给出的字段取 **AND**（“1 号 **且** 周一”才触发，通常几乎永不触发）。若照译成同时带 `Day` 和 `Weekday` 的 plist，定时器会远比 cron 语义稀疏——静默的近乎死定时器。因此该组合直接返回 `null`，让调用方走「过于复杂」的 warning 回退路径（`:156-164`），而不是装上一个错误触发的 agent。守卫位于 Day/Weekday 数值解析**之前**（先判 `day !== "*"`/`weekday !== "*"`，再在 `:623-628`/`:637-642` 解析具体数值）。
 
 **不支持的 cron 模式**：
 - 步进值：`*/5 * * * *`（每 5 分钟）
 - 列表：`0 2,14 * * *`（凌晨 2 点和下午 2 点）
 - 范围：`0 2-4 * * *`（凌晨 2 点到 4 点）
+- **同时限制日与星期几**：`0 2 1 * 1`（每月 1 号或周一，cron OR 语义 launchd 无法忠实表达）
 - 包含非数字字符的任何字段
 
 这些情况下 `parseLaunchdCalendarInterval()` 返回 `null`，`installConnectorSchedule()` 会回退到仅保存配置而不写 plist 文件。
 
 ### 5.5 字段解析辅助函数
 
-**parseSimpleCronFields**（`schedules.ts:621-641`）：
+**parseSimpleCronFields**（`schedules.ts:647-667`）：
 ```typescript
 const [minute, hour, day, month, weekday, ...extra] = expression.split(/\s+/u);
 // 如果字段不足 5 个或有第 6 个额外字段 → 返回 null
 ```
 
-**getSingleCronNumber**（`schedules.ts:774-784`）：
+**getSingleCronNumber**（`schedules.ts:800-810`）：
 ```typescript
 function getSingleCronNumber(
   field: string | undefined,
@@ -419,9 +433,9 @@ function getSingleCronNumber(
 
 ### 6.1 createLaunchAgentPlist
 
-**函数签名**：`schedules.ts:786-835`
+**函数签名**：`schedules.ts:812-872`
 
-生成标准的 Apple XML plist 文件。核心结构：
+生成标准的 Apple XML plist 文件。核心结构（`openWikiConfigDir` 存在时才含 `EnvironmentVariables` 段，见 6.6）：
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -440,6 +454,12 @@ function getSingleCronNumber(
     <string>--scheduled</string>
     <string>--print</string>
   </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>OPENWIKI_CONFIG_DIR</key>
+    <string>/custom/openwiki/home</string>
+  </dict>
 
   <key>WorkingDirectory</key>
   <string>/path/to/cwd</string>
@@ -461,7 +481,9 @@ function getSingleCronNumber(
 </plist>
 ```
 
-### 6.2 Label（`:841-843`）
+模板内各段行位：Label `:847-848`、ProgramArguments `:849-852`、`EnvironmentVariables` 插入点 `:853`、WorkingDirectory `:854-855`、StandardOutPath `:856-857`、StandardErrorPath `:858-859`、StartCalendarInterval `:860-868`。
+
+### 6.2 Label（`:878-880`）
 
 ```typescript
 function getLaunchAgentLabel(): string {
@@ -471,7 +493,7 @@ function getLaunchAgentLabel(): string {
 
 固定值。这是 launchd 用来标识和查找 agent 的唯一名称。所有 connector 共享同一个 Label。
 
-### 6.3 ProgramArguments（`:797-805`）
+### 6.3 ProgramArguments（`:825-833`）
 
 ```typescript
 const cliPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
@@ -487,7 +509,9 @@ const programArguments = [
 
 `process.argv[1]` 是当前 Node.js 进程的入口脚本路径。`path.resolve()` 将其转为绝对路径。如果 `argv[1]` 为空（例如 REPL 模式），`cliPath` 为空字符串。
 
-### 6.4 StartCalendarInterval（`:824-831`）
+`--scheduled` 不只是标记：`ingest` 命令解析后一路传到 `ingestion.ts` 的 `resolveIngestionSourceInstances`（`src/ingestion/ingestion.ts:227-237`）——`scheduledOnly` 为真时，若配置中无 `ingestionSchedule` 或其 `pausedAt` 非空（已暂停），所有源实例都被过滤掉，即**暂停 LaunchAgent 的同时，手动误跑同款命令也不会执行摄取**。
+
+### 6.4 StartCalendarInterval（`:860-868`）
 
 `CalendarInterval` 字典的每个键值对输出为：
 
@@ -500,7 +524,7 @@ const programArguments = [
 
 ### 6.5 XML 转义（escapePlist）
 
-**函数签名**：`schedules.ts:911-918`
+**函数签名**：`schedules.ts:948-955`
 
 ```typescript
 function escapePlist(value: string): string {
@@ -513,27 +537,43 @@ function escapePlist(value: string): string {
 }
 ```
 
-对 5 个 XML 特殊字符进行实体转义。所有插入 plist XML 的用户/系统数据（Label、ProgramArguments、WorkingDirectory、日志路径）都通过此函数处理。
+对 5 个 XML 特殊字符进行实体转义。所有插入 plist XML 的用户/系统数据（Label、ProgramArguments、WorkingDirectory、日志路径、以及 6.6 的配置目录值）都通过此函数处理。
+
+### 6.6 EnvironmentVariables 注入（re-baseline 新增，`:834-841`）
+
+当安装进程环境中设置了 `OPENWIKI_CONFIG_DIR` 时，`createLaunchAgentPlist` 会输出一个 `EnvironmentVariables` 字典（`:834-841`），把该变量带进 launchd 任务环境：
+
+```xml
+<key>EnvironmentVariables</key>
+<dict>
+  <key>OPENWIKI_CONFIG_DIR</key>
+  <string>${escapePlist(openWikiConfigDir)}</string>
+</dict>
+```
+
+- **注入条件**（`:171` + `:183-185`）：只有安装时 `process.env[OPENWIKI_CONFIG_DIR_ENV_KEY]` 非空才注入；值经 `resolveOpenWikiHomeDir(process.env)` 重解析（与 `config/openwiki-home.ts` 的 `~/` 展开与回退逻辑同源）。未设置时该段整体省略（模板插入位为空行，不影响 XML 合法性）。
+- **为什么需要**：launchd 任务不继承交互 shell 的环境变量。用户用 `OPENWIKI_CONFIG_DIR` 把 OpenWiki 家目录指到自定义位置时，若不注入，定时任务会静默回退到默认 `~/.openwiki`，读写另一个（可能未初始化的）配置。
+- 键名常量 `OPENWIKI_CONFIG_DIR_ENV_KEY = "OPENWIKI_CONFIG_DIR"` 定义在 `src/config/openwiki-home.ts:6`。
 
 ---
 
 ## 7. launchctl 集成（launchctl Integration）
 
-所有 launchctl 交互通过 `execFileAsync`（`node:child_process.execFile` 的 promisify 包装）执行，不经过 shell。
+所有 launchctl 交互通过 `execFileAsync`（`node:child_process.execFile` 的 promisify 包装，`:17`）执行，不经过 shell。
 
-### 7.1 加载（installConnectorSchedule 中，`:187`）
+### 7.1 加载（installConnectorSchedule 中，`:194-196`）
 
 ```bash
 launchctl bootstrap gui/<uid> <plistPath>
 ```
 
-- `gui/<uid>` 域（domain）：`getLaunchdDomain()`（`:837-839`）通过 `process.getuid()` 或 `os.userInfo().uid` 获取当前用户 UID
+- `gui/<uid>` 域（domain）：`getLaunchdDomain()`（`:874-876`）通过 `process.getuid()` 或 `os.userInfo().uid` 获取当前用户 UID
 - `bootstrap`：将 plist 注册到指定域并立即加载
 - 之前会先调用 `unloadLaunchAgent()` 确保干净加载
 
 ### 7.2 卸载（unloadLaunchAgent）
 
-**函数签名**：`schedules.ts:853-862`
+**函数签名**：`schedules.ts:890-899`
 
 ```bash
 launchctl bootout gui/<uid>/com.openwiki.ingestion
@@ -541,11 +581,11 @@ launchctl bootout gui/<uid>/com.openwiki.ingestion
 
 - 使用 `bootout` 子命令（macOS 10.11+）
 - 失败时静默捕获（`.catch(() => null)`），因为 agent 可能本来就没加载
-- 非 Darwin 平台直接返回，不执行命令
+- 非 Darwin 平台直接返回，不执行命令（`:891-893`）
 
 ### 7.3 状态检查（isLaunchAgentLoaded）
 
-**函数签名**：`schedules.ts:878-892`
+**函数签名**：`schedules.ts:915-929`
 
 ```bash
 launchctl print gui/<uid>/com.openwiki.ingestion
@@ -553,7 +593,7 @@ launchctl print gui/<uid>/com.openwiki.ingestion
 
 - 成功退出 → agent 已加载，返回 `true`
 - 命令失败（非零退出码）→ agent 未加载，返回 `false`
-- 非 Darwin 平台直接返回 `false`
+- 非 Darwin 平台直接返回 `false`（`:916-918`）
 
 > **注意**：`launchctl print` 的输出未被解析。函数仅依赖 exit code 判断状态。
 
@@ -565,12 +605,12 @@ launchctl print gui/<uid>/com.openwiki.ingestion
 
 | 组件 | 值 | 源码行 |
 |------|-----|--------|
-| Label | `com.openwiki.ingestion` | `:841-843` |
-| 目录 | `~/Library/LaunchAgents/` | `:845-847` |
-| 文件名 | `com.openwiki.ingestion.plist` | `:849-851` |
+| Label | `com.openwiki.ingestion` | `:878-880` |
+| 目录 | `~/Library/LaunchAgents/` | `:882-884` |
+| 文件名 | `com.openwiki.ingestion.plist` | `:886-888` |
 | 完整路径 | `~/Library/LaunchAgents/com.openwiki.ingestion.plist` | — |
 
-`getLaunchAgentPath()`（`:849-851`）：
+`getLaunchAgentPath()`（`:886-888`）：
 ```typescript
 path.join(getLaunchAgentsDir(), `${getLaunchAgentLabel()}.plist`)
 ```
@@ -579,20 +619,20 @@ path.join(getLaunchAgentsDir(), `${getLaunchAgentLabel()}.plist`)
 
 | 组件 | 值 | 源码行 |
 |------|-----|--------|
-| 目录 | `~/.openwiki/logs/` | `installConnectorSchedule` 中创建（`:164`） |
-| 文件 | `ingestion.schedule.log` | `:177` |
+| 目录 | `~/.openwiki/logs/` | `installConnectorSchedule` 中创建（`:175`） |
+| 文件 | `ingestion.schedule.log` | `:182` |
 | 完整路径 | `~/.openwiki/logs/ingestion.schedule.log` | — |
 
-stdout 和 stderr 都输出到同一个日志文件（`:819-822`）。
+stdout 和 stderr 都输出到同一个日志文件（`:856-859`）。
 
 ### 8.3 目录权限
 
 | 目录 | 权限 | 源码行 |
 |------|------|--------|
 | `~/.openwiki/` | `0o700` | `openwiki-home.ts` 中设置 |
-| `~/Library/LaunchAgents/` | `0o700` | `:168` |
-| `~/.openwiki/logs/` | `0o700` | `:169` |
-| plist 文件 | `0o600` | `:179-183` |
+| `~/Library/LaunchAgents/` | `0o700` | `:174` |
+| `~/.openwiki/logs/` | `0o700` | `:175` |
+| plist 文件 | `0o600` | `:189`（writeFile mode）+ `:192`（chmod） |
 
 ---
 
@@ -602,41 +642,44 @@ stdout 和 stderr 都输出到同一个日志文件（`:819-822`）。
 
 ### 9.1 公共 API
 
-**installOpenWikiPowerSchedule**（`schedules.ts:348-403`）：
+**installOpenWikiPowerSchedule**（`schedules.ts:357-412`）：
 
-1. 调用 `getPowerWindowForConfiguredSchedules()` 计算唤醒/睡眠时间窗口
-2. 通过 `osascript` 以管理员权限执行 `pmset repeat wakeorpoweron <days> <wakeTime> sleep <days> <sleepTime>`
-3. 失败时返回 `enabled: false` 和错误消息
+1. 调用 `getPowerWindowForConfiguredSchedules()` 计算唤醒/睡眠时间窗口（`:360-371`，无法表达为简单 repeat 窗口时返回 `enabled: false` + warning）
+2. 非 Darwin 平台直接返回 `enabled: false`（`:373-379`）
+3. 通过 `osascript` 以管理员权限执行 `pmset repeat wakeorpoweron <days> <wakeTime> sleep <days> <sleepTime>`（`:381-397`）
+4. 失败时返回 `enabled: false` 和错误消息（`:405-411`）；成功时附带「macOS 只支持一个 repeat 电源调度，OpenWiki 已改写为覆盖当前保存的调度」的提示（`:399-404`）
 
-**getSavedPowerScheduleStatus**（`schedules.ts:405-422`）：从 `config.powerManagement.pmset` 读取已保存的电源调度状态。
+**getSavedPowerScheduleStatus**（`schedules.ts:414-431`）：从 `config.powerManagement.pmset` 读取已保存的电源调度状态。
 
-**cancelOpenWikiPowerSchedule**（`schedules.ts:480-513`）：通过 `osascript` 执行 `pmset repeat cancel` 取消所有重复电源调度。
+**cancelOpenWikiPowerSchedule**（`schedules.ts:489-522`）：通过 `osascript` 执行 `pmset repeat cancel` 取消所有重复电源调度。
 
 ### 9.2 电源窗口计算（getPowerWindowForConfiguredSchedules）
 
-**函数签名**：`schedules.ts:643-679`
+**函数签名**：`schedules.ts:669-705`
 
-1. 遍历所有活跃的（非暂停）ingestion schedule，通过 `parseRepeatScheduleTime()` 将其解析为 `RepeatScheduleTime`
-2. 取最早的 `minuteOfDay` 减去 `PMSET_WAKE_OFFSET_MINUTES`（2 分钟）作为唤醒时间
-3. 取最晚的 `minuteOfDay` 加上 `PMSET_SLEEP_OFFSET_MINUTES`（30 分钟）作为睡眠时间
-4. 通过 `mergePmsetDays()` 合并所有 schedule 的日集合
-5. 边界检查：唤醒分钟 < 0 或睡眠分钟 >= 1440（24 小时）时返回 `null`
+1. 遍历活跃的（非暂停）ingestion schedule，通过 `parseRepeatScheduleTime()` 将其解析为 `RepeatScheduleTime`（`:672-680`；无可用解析结果返回 `null`，`:682-684`）
+2. 取最早的 `minuteOfDay` 减去 `PMSET_WAKE_OFFSET_MINUTES`（2 分钟）作为唤醒时间（`:693`）
+3. 取最晚的 `minuteOfDay` 加上 `PMSET_SLEEP_OFFSET_MINUTES`（30 分钟）作为睡眠时间（`:694`）
+4. 通过 `mergePmsetDays()` 合并所有 schedule 的日集合（`:686`）
+5. 边界检查：唤醒分钟 < 0 或睡眠分钟 ≥ 1440（24 小时）时返回 `null`（`:696-698`）
+
+`parseRepeatScheduleTime`（`:707-734`）比 `parseLaunchdCalendarInterval` 更严格：日或月受限即返回 `null`（`:715-717`），只接受「每天/每周几的固定时分」形态。`parsePmsetDays`（`:736-747`）把 weekday 字段转成 pmset 日代码。
 
 ### 9.3 调解（reconcileOpenWikiPowerSchedule）
 
-**函数签名**：`schedules.ts:424-478`
+**函数签名**：`schedules.ts:433-487`（内部函数）
 
 在每次 schedule 变更后自动调用，负责保持电源调度与 ingestion schedule 一致：
 
-- 无活跃 ingestion schedule 且 pmset 已启用 → 调用 `cancelOpenWikiPowerSchedule()` 取消
-- 有活跃 ingestion schedule → 调用 `installOpenWikiPowerSchedule()` 重新计算并设置
-- pmset 未启用 → 不操作
+- 配置未启用 pmset → 不操作（`:439-442`）
+- 无活跃 ingestion schedule 且 pmset 已启用 → 调用 `cancelOpenWikiPowerSchedule()` 取消并落盘禁用状态（`:444-467`）
+- 有活跃 ingestion schedule → 调用 `installOpenWikiPowerSchedule()` 重新计算并设置（`:469-486`）
 
 ---
 
 ## 10. 浅拷贝配置（cloneOnboardingConfig）
 
-**函数签名**：`schedules.ts:521-547`
+**函数签名**：`schedules.ts:530-556`
 
 所有变更操作（暂停、恢复、删除）都先对配置做单层浅拷贝，再修改拷贝。这确保：
 
@@ -644,7 +687,9 @@ stdout 和 stderr 都输出到同一个日志文件（`:819-822`）。
 - connectorConfig 子对象被浅拷贝
 - ingestionSchedule 被浅拷贝
 - powerManagement.pmset 被浅拷贝
-- 调用 `deriveLegacySources()`（`:549-565`）从 sourceInstances 重建向后兼容的 `sources` 映射
+- 调用 `deriveLegacySources()`（`:558-574`）从 sourceInstances 重建向后兼容的 `sources` 映射
+
+另有 `hasActiveIngestionSchedule()`（`:524-528`）供电源调解判断「存在未暂停的调度」。
 
 ---
 
@@ -656,22 +701,34 @@ stdout 和 stderr 都输出到同一个日志文件（`:819-822`）。
 
 | 操作 | 非 macOS 行为 | 源码行 |
 |------|-------------|--------|
-| 安装 schedule | 仅保存配置到 JSON，返回 `warning` | `:142-149` |
-| 卸载 LaunchAgent | 直接返回，不执行命令 | `:854-856` |
-| 检查加载状态 | 返回 `false` | `:879-881` |
-| 删除 plist 文件 | 直接返回，不执行 `unlink` | `:865-867` |
-| 安装/取消电源调度 | 返回含 `warning` 的结果 | `:488-493`, `:364-370` |
+| 安装 schedule | 仅保存配置到 JSON，返回 `warning` | `:147-154` |
+| 卸载 LaunchAgent | 直接返回，不执行命令 | `:891-893` |
+| 检查加载状态 | 返回 `false` | `:916-918` |
+| 删除 plist 文件 | 直接返回，不执行 `unlink` | `:902-904` |
+| 安装/取消电源调度 | 返回含 `warning` 的结果 | `:373-379`, `:497-502` |
 
 ### 11.2 单例调度模型
 
 当前系统只支持一个全局调度（`sourceInstanceId: "all"`）。类型系统中有 `connectorId` 和 `ScheduleTarget` 的预留，但所有实现：
-- `listConnectorSchedules()` 始终返回最多 1 个元素（`:205-222`）
-- `installConnectorSchedule()` 的 `connectorId` 参数被 `void` 掉（`:161`）
+- `listConnectorSchedules()` 始终返回最多 1 个元素（`:214-231`）
+- `installConnectorSchedule()` 的 `connectorId` 参数被 `void` 掉（`:166`）
 - 所有 CRUD 操作的 `target` 参数非 `"all"` 时直接跳过
 
 ### 11.3 cron 复杂度限制
 
-只有最简形式的 cron 表达式能转换为 launchd `StartCalendarInterval`。复杂表达式（步进、列表、范围）仅保存在 JSON 配置中，不会生成 plist 文件，用户会收到 warning。这是 macOS launchd 本身的设计限制。
+只有最简形式的 cron 表达式能转换为 launchd `StartCalendarInterval`。复杂表达式（步进、列表、范围、**day+weekday 同受限**）仅保存在 JSON 配置中，不会生成 plist 文件，用户会收到 warning。其中 day+weekday 拒绝不是「表达式太复杂」，而是 cron OR 与 launchd AND 的语义冲突无法忠实表达（见 5.4）——这是 macOS launchd 本身的设计限制加上 OpenWiki 的防御性拒绝。
+
+### 11.4 持久化配置类型
+
+调度配置持久化在 onboarding 配置的 `ingestionSchedule` 字段，类型 `OnboardingSourceScheduleConfig`（`src/setup/onboarding.ts:21-29`）：`description`/`expression`/`launchAgentPath?`/`pausedAt?`/`updatedAt`/`warning?`。
+
+---
+
+## 12. 测试落点
+
+`parseLaunchdCalendarInterval` 改为导出后，`test/scheduling/` 下有四个直接针对本文件的测试：
+- `launchd-calendar-interval.test.ts` — cron → CalendarInterval 转换与拒绝用例（含 day+weekday 组合）
+- `schedule-operations.test.ts` / `schedules-launchd.test.ts` / `schedules.test.ts` — CRUD、plist 生成与电源调度
 
 ---
 
@@ -679,51 +736,57 @@ stdout 和 stderr 都输出到同一个日志文件（`:819-822`）。
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/schedules.ts:15-25` | `CronValidationResult` | cron 验证结果的辨别联合类型 |
-| `src/schedules.ts:27-32` | `ScheduleInstallResult` | 安装操作的返回值类型 |
-| `src/schedules.ts:34-46` | `ConnectorScheduleStatus` | 调度运行时状态的完整类型 |
-| `src/schedules.ts:48-58` | `PowerScheduleInstallResult`, `PowerScheduleStatus` | 电源调度的结果和状态类型 |
-| `src/schedules.ts:60-66` | `ScheduleMutationResult` | 变更操作的统一返回类型 |
-| `src/schedules.ts:68` | `ScheduleTarget` | 调度操作目标（当前仅 `"all"`） |
-| `src/schedules.ts:70-77` | `CalendarInterval`, `RepeatScheduleTime` | 内部使用的中间类型 |
-| `src/schedules.ts:13` | `DEFAULT_FIRST_HOUR` | 默认 cron 小时（凌晨 2 点） |
-| `src/schedules.ts:79-81` | `PMSET_WAKE_OFFSET_MINUTES` 等 | pmset 电源调度偏移常量 |
-| `src/schedules.ts:83-110` | `validateCronExpression` | cron 表达式验证入口，调用 cron-parser |
-| `src/schedules.ts:112-117` | `describeCronExpression` | 通过 cronstrue 生成人类可读描述 |
-| `src/schedules.ts:119-125` | `getSuggestedCronExpression` | 获取建议的默认 cron 表达式 |
-| `src/schedules.ts:127-194` | `installConnectorSchedule` | 创建 LaunchAgent plist 并引导 launchd |
-| `src/schedules.ts:196-223` | `listConnectorSchedules` | 列出当前配置的调度状态 |
-| `src/schedules.ts:225-263` | `pauseConnectorSchedules` | 暂停调度，设置 pausedAt 并 bootout |
-| `src/schedules.ts:265-316` | `resumeConnectorSchedules` | 恢复调度，清除 pausedAt 并重新 bootstrap |
-| `src/schedules.ts:318-346` | `deleteConnectorSchedules` | 删除调度，清除配置并 bootout + unlink |
-| `src/schedules.ts:348-403` | `installOpenWikiPowerSchedule` | 通过 pmset 安装 macOS 电源调度 |
-| `src/schedules.ts:405-422` | `getSavedPowerScheduleStatus` | 读取已保存的电源调度状态 |
-| `src/schedules.ts:424-478` | `reconcileOpenWikiPowerSchedule` | 调度变更后调解电源调度 |
-| `src/schedules.ts:480-513` | `cancelOpenWikiPowerSchedule` | 取消 pmset 电源调度 |
-| `src/schedules.ts:515-519` | `hasActiveIngestionSchedule` | 检查是否存在活跃（非暂停）的调度 |
-| `src/schedules.ts:521-547` | `cloneOnboardingConfig` | 浅拷贝（单层）onboarding 配置 |
-| `src/schedules.ts:549-565` | `deriveLegacySources` | 从 sourceInstances 重建 legacy sources 映射 |
-| `src/schedules.ts:567-569` | `normalizeCronExpression` | 规范化 cron 表达式空白 |
-| `src/schedules.ts:571-619` | `parseLaunchdCalendarInterval` | cron → launchd CalendarInterval 转换 |
-| `src/schedules.ts:621-641` | `parseSimpleCronFields` | 将 cron 字符串拆分为 5 个字段 |
-| `src/schedules.ts:643-679` | `getPowerWindowForConfiguredSchedules` | 计算 pmset 唤醒/睡眠窗口 |
-| `src/schedules.ts:681-708` | `parseRepeatScheduleTime` | 将 cron 解析为 pmset 所需的时间格式 |
-| `src/schedules.ts:710-721` | `parsePmsetDays` | 将 cron weekday 字段转为 pmset 日代码 |
-| `src/schedules.ts:723-741` | `weekdayNumberToPmsetDay` | cron 星期数字 → pmset 字母映射 |
-| `src/schedules.ts:744-748` | `mergePmsetDays` | 合并多个 pmset 日集合 |
-| `src/schedules.ts:750-756` | `formatPmsetTime` | 将 minuteOfDay 格式化为 `HH:MM:SS` |
-| `src/schedules.ts:758-768` | `pmsetCommand`, `toShellSingleQuotedArg`, `toAppleScriptString` | shell/osascript 命令构建与转义 |
-| `src/schedules.ts:770-772` | `getErrorMessage` | 从 unknown 错误中提取消息字符串 |
-| `src/schedules.ts:774-784` | `getSingleCronNumber` | 严格校验 cron 字段为单一数字 |
-| `src/schedules.ts:786-835` | `createLaunchAgentPlist` | 生成 Apple XML plist 模板 |
-| `src/schedules.ts:837-839` | `getLaunchdDomain` | 返回 `gui/<uid>` launchd 域 |
-| `src/schedules.ts:841-843` | `getLaunchAgentLabel` | 返回固定 Label `com.openwiki.ingestion` |
-| `src/schedules.ts:845-847` | `getLaunchAgentsDir` | 返回 `~/Library/LaunchAgents/` |
-| `src/schedules.ts:849-851` | `getLaunchAgentPath` | 返回 plist 文件完整路径 |
-| `src/schedules.ts:853-862` | `unloadLaunchAgent` | launchctl bootout 卸载 agent |
-| `src/schedules.ts:864-876` | `removeLaunchAgentPlist` | 删除 plist 文件（ENOENT 静默忽略） |
-| `src/schedules.ts:878-892` | `isLaunchAgentLoaded` | 检查 launchctl 中 agent 是否已加载 |
-| `src/schedules.ts:894-901` | `pathExists` | fs.access 包装的文件存在检查 |
-| `src/schedules.ts:903-909` | `isFileNotFoundError` | ENOENT 错误判断 |
-| `src/schedules.ts:911-918` | `escapePlist` | XML 5 字符实体转义 |
-| `src/onboarding.ts:18-25` | `OnboardingSourceScheduleConfig` | 持久化到配置文件的调度数据类型 |
+| `src/scheduling/schedules.ts:20-30` | `CronValidationResult` | cron 验证结果的辨别联合类型 |
+| `src/scheduling/schedules.ts:32-37` | `ScheduleInstallResult` | 安装操作的返回值类型 |
+| `src/scheduling/schedules.ts:39-51` | `ConnectorScheduleStatus` | 调度运行时状态的完整类型 |
+| `src/scheduling/schedules.ts:53-63` | `PowerScheduleInstallResult`, `PowerScheduleStatus` | 电源调度的结果和状态类型 |
+| `src/scheduling/schedules.ts:65-71` | `ScheduleMutationResult` | 变更操作的统一返回类型 |
+| `src/scheduling/schedules.ts:73` | `ScheduleTarget` | 调度操作目标（当前仅 `"all"`） |
+| `src/scheduling/schedules.ts:75-82` | `CalendarInterval`, `RepeatScheduleTime` | 内部使用的中间类型 |
+| `src/scheduling/schedules.ts:18` | `DEFAULT_FIRST_HOUR` | 默认 cron 小时（凌晨 2 点） |
+| `src/scheduling/schedules.ts:84-86` | `PMSET_WAKE_OFFSET_MINUTES` 等 | pmset 电源调度偏移常量 |
+| `src/scheduling/schedules.ts:88-115` | `validateCronExpression` | cron 表达式验证入口，调用 cron-parser |
+| `src/scheduling/schedules.ts:117-122` | `describeCronExpression` | 通过 cronstrue 生成人类可读描述 |
+| `src/scheduling/schedules.ts:124-130` | `getSuggestedCronExpression` | 获取建议的默认 cron 表达式 |
+| `src/scheduling/schedules.ts:132-203` | `installConnectorSchedule` | 创建 LaunchAgent plist 并引导 launchd |
+| `src/scheduling/schedules.ts:171` | `configuredDir` 读取 | 安装时检测 `OPENWIKI_CONFIG_DIR`，决定是否注入 |
+| `src/scheduling/schedules.ts:205-232` | `listConnectorSchedules` | 列出当前配置的调度状态 |
+| `src/scheduling/schedules.ts:234-272` | `pauseConnectorSchedules` | 暂停调度，设置 pausedAt 并 bootout |
+| `src/scheduling/schedules.ts:274-325` | `resumeConnectorSchedules` | 恢复调度，清除 pausedAt 并重新 bootstrap |
+| `src/scheduling/schedules.ts:327-355` | `deleteConnectorSchedules` | 删除调度，清除配置并 bootout + unlink |
+| `src/scheduling/schedules.ts:357-412` | `installOpenWikiPowerSchedule` | 通过 pmset 安装 macOS 电源调度 |
+| `src/scheduling/schedules.ts:414-431` | `getSavedPowerScheduleStatus` | 读取已保存的电源调度状态 |
+| `src/scheduling/schedules.ts:433-487` | `reconcileOpenWikiPowerSchedule` | 调度变更后调解电源调度 |
+| `src/scheduling/schedules.ts:489-522` | `cancelOpenWikiPowerSchedule` | 取消 pmset 电源调度 |
+| `src/scheduling/schedules.ts:524-528` | `hasActiveIngestionSchedule` | 检查是否存在活跃（非暂停）的调度 |
+| `src/scheduling/schedules.ts:530-556` | `cloneOnboardingConfig` | 浅拷贝（单层）onboarding 配置 |
+| `src/scheduling/schedules.ts:558-574` | `deriveLegacySources` | 从 sourceInstances 重建 legacy sources 映射 |
+| `src/scheduling/schedules.ts:576-578` | `normalizeCronExpression` | 规范化 cron 表达式空白 |
+| `src/scheduling/schedules.ts:585-645` | `parseLaunchdCalendarInterval` | cron → launchd CalendarInterval 转换（re-baseline 起 export） |
+| `src/scheduling/schedules.ts:611-621` | day+weekday 组合守卫 | cron OR vs launchd AND，同受限返 `null` |
+| `src/scheduling/schedules.ts:647-667` | `parseSimpleCronFields` | 将 cron 字符串拆分为 5 个字段 |
+| `src/scheduling/schedules.ts:669-705` | `getPowerWindowForConfiguredSchedules` | 计算 pmset 唤醒/睡眠窗口 |
+| `src/scheduling/schedules.ts:707-734` | `parseRepeatScheduleTime` | 将 cron 解析为 pmset 所需的时间格式 |
+| `src/scheduling/schedules.ts:736-747` | `parsePmsetDays` | 将 cron weekday 字段转为 pmset 日代码 |
+| `src/scheduling/schedules.ts:749-768` | `weekdayNumberToPmsetDay` | cron 星期数字 → pmset 字母映射 |
+| `src/scheduling/schedules.ts:770-774` | `mergePmsetDays` | 合并多个 pmset 日集合 |
+| `src/scheduling/schedules.ts:776-782` | `formatPmsetTime` | 将 minuteOfDay 格式化为 `HH:MM:SS` |
+| `src/scheduling/schedules.ts:784-794` | `pmsetCommand`, `toShellSingleQuotedArg`, `toAppleScriptString` | shell/osascript 命令构建与转义 |
+| `src/scheduling/schedules.ts:796-798` | `getErrorMessage` | 从 unknown 错误中提取消息字符串 |
+| `src/scheduling/schedules.ts:800-810` | `getSingleCronNumber` | 严格校验 cron 字段为单一数字 |
+| `src/scheduling/schedules.ts:812-872` | `createLaunchAgentPlist` | 生成 Apple XML plist 模板（含条件 EnvironmentVariables 段） |
+| `src/scheduling/schedules.ts:826-833` | `programArguments` | LaunchAgent 命令仍为 `ingest all --scheduled --print` |
+| `src/scheduling/schedules.ts:834-841` | `environmentVariables` | 注入 `OPENWIKI_CONFIG_DIR`（值经 escapePlist） |
+| `src/scheduling/schedules.ts:874-876` | `getLaunchdDomain` | 返回 `gui/<uid>` launchd 域 |
+| `src/scheduling/schedules.ts:878-880` | `getLaunchAgentLabel` | 返回固定 Label `com.openwiki.ingestion` |
+| `src/scheduling/schedules.ts:882-884` | `getLaunchAgentsDir` | 返回 `~/Library/LaunchAgents/` |
+| `src/scheduling/schedules.ts:886-888` | `getLaunchAgentPath` | 返回 plist 文件完整路径 |
+| `src/scheduling/schedules.ts:890-899` | `unloadLaunchAgent` | launchctl bootout 卸载 agent |
+| `src/scheduling/schedules.ts:901-913` | `removeLaunchAgentPlist` | 删除 plist 文件（ENOENT 静默忽略） |
+| `src/scheduling/schedules.ts:915-929` | `isLaunchAgentLoaded` | 检查 launchctl 中 agent 是否已加载 |
+| `src/scheduling/schedules.ts:931-938` | `pathExists` | fs.access 包装的文件存在检查 |
+| `src/scheduling/schedules.ts:940-946` | `isFileNotFoundError` | ENOENT 错误判断 |
+| `src/scheduling/schedules.ts:948-955` | `escapePlist` | XML 5 字符实体转义 |
+| `src/config/openwiki-home.ts:6` | `OPENWIKI_CONFIG_DIR_ENV_KEY` | plist EnvironmentVariables 注入的键名 |
+| `src/setup/onboarding.ts:21-29` | `OnboardingSourceScheduleConfig` | 持久化到配置文件的调度数据类型 |
+| `src/ingestion/ingestion.ts:227-237` | `resolveIngestionSourceInstances` | `--scheduled` 的调度门（暂停时过滤源实例） |

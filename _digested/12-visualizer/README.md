@@ -1,7 +1,7 @@
 ---
 title: "12 — 可视化器 (Visualizer)"
 doc_type: "index"
-status: "draft"
+status: "current"
 branch: "ethan"
 created: "2026-09-13"
 updated: "2026-09-13"
@@ -25,8 +25,8 @@ out_of_scope:
 
 | # | 文档 | 状态 | 说明 |
 |---|------|------|------|
-| 1 | `01-visualize-command-and-wikigraph.md` | 计划中 | 命令面（`--port/--no-open/--export` 互斥）、`WikiGraph` 数据模型、固定路由与 CSP、服务端图构建 |
-| 2 | `02-frontend-live-reload-and-static-export.md` | 计划中 | force-graph 自绘节点、declutter 标签、SSE reload 与拓扑签名保布局、静态导出 5 文件协议、阅读器净化与 mermaid 渲染 |
+| 1 | `01-visualize-command-and-wikigraph.md` | 已完成| 命令面（`--port/--no-open/--export` 互斥）、`WikiGraph` 数据模型、固定路由与 CSP、服务端图构建 |
+| 2 | `02-frontend-live-reload-and-static-export.md` | 已完成| force-graph 自绘节点、declutter 标签、SSE reload 与拓扑签名保布局、静态导出 5 文件协议、阅读器净化与 mermaid 渲染 |
 
 ## 关键源文件
 

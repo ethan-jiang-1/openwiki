@@ -41,6 +41,18 @@ out_of_scope:
 13. R4a：repository-prompts frontmatter 要求 :133-140；R7：skills.ts = replaceSkillDirectory :53-118 + grantOwnerWrite :127-142
 14. R8 补：ignore 注入点含 claims 侧两处（claims/brains/code/runtime.ts:64-79、evidence/repository/resolver.ts:195-198）
 15. claims 体量：13 文件共 3694 行（07 区 README 原写「约 2900 行」）
+16. langsmith 模块 6 文件共 1363 行（R5a/08 区 README 原写「1727 行」）
+17. **裸 `openwiki` 默认是 code 模式**（commands.ts:530 兜底 `"code"`；:980-982 非 chat 命令缺省亦 code）；personal 入口为 `openwiki personal`（位置参数）或 `--mode personal`（help :1095-1096）；向导以 `allowModeSelection={false}` 挂载（app.tsx:746），模式完全由命令行决定——旧叙事「openwiki 默认 personal」作废
+18. DEVELOPMENT.md 写 "Node.js 20 or newer" 与 package.json engines ">=22" 不一致（以 engines 为准）
+19. R4a ¶4 可用性校验实为**三道闸门**：无 apiKey 也返回 unknown（model-availability.ts:44-49），不止「openai 且无自定义 baseURL」两道
+20. copilot 配置含 `responsesApi: /^gpt-5/u`（constants.ts:301），工厂层 gpt-5.* 走 Responses，但能力表 copilot 无键——reasoning 在能力查找步即被 throw 拦下（能力表先于 transport 判定）
+21. integrations skill 包 references/ 被 4882ba3 移除的是 **5 份**（init/methodology/reviewers/security/update；R7 原写 3 份）
+22. buildChannel 正则定义 :33（:30 为注释行）、resolveBuildChannel :40-42；错误类目闭集类型定义实为 types.ts:12-25（:1-11 为族语义注释，R8-D 作 :1-31）
+23. 遥测新事实：okf_error 的 operation detail 白名单仅 migrate/index_sync/mermaid（其余如 provenance_snapshot/link_validation 被 normalizeErrorDetail 丢弃为 undefined、类别保留）；connector_error 为文档化遥测盲区（okf-middleware.ts:83-85，fail-open 无致命传播）；tee 正常记录为六键 {disabled,ci,host,sent,event}（R8-D 只列四键）
+24. R3 env keys「45→100+」作废：旧基线实测 51 项、现行 65 项（config/env.ts:102-168）；config/constants.ts 的 ENV_KEY 常量为 70 个
+25. R5a credentials/constants.ts 的 APAC 选项实为 :88-93（原写 :84-89）
+26. R3 cli/components/ 实为 **8 文件**（原记 9）；CliCommand 9 variant = HostIntegrationCliCommand(:105，2 个) + 7 个内联变体，error 是失败通道不算用户命令
+27. 凭据向导 PromptStep 实为 **32 步**（旧篇记 26 步，已随 14 区 01 号作废）
 
 ## R1. claims + okf（全新子系统，基线中不存在；基线 OKF 仅存在于 prompt.ts 提示词层）
 

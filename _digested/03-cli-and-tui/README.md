@@ -1,7 +1,7 @@
 ---
 title: "03 — CLI 与终端界面 (CLI and TUI)"
 doc_type: "index"
-status: "draft"
+status: "current"
 branch: "ethan"
 created: "2026-07-17"
 updated: "2026-09-13"
@@ -23,9 +23,9 @@ out_of_scope:
 
 | # | 文档 | 状态 | 说明 |
 |---|------|------|------|
-| 1 | `01-cli-entry-and-ink-tui.md` | 待重写 | 新分层：入口 → app/ → components/；run-log 归约器；进程中断处理 |
-| 2 | `02-command-parsing.md` | 待重写 | `CliCommand` 9 variant（run/auth/cron/ingest/visualize/integrations/mcp/…）、`parseCommand`、`commandLoadsEnvironment` |
-| 3 | `03-startup-and-run-mode.md` | 计划中 | 启动凭据预检（`startup.ts`）、run-mode 判定（`run-mode.ts`）、debug 面板与 `cli/diagnostics/` |
+| 1 | `01-cli-entry-and-ink-tui.md` | 已完成| 新分层：入口 → app/ → components/；run-log 归约器；进程中断处理 |
+| 2 | `02-command-parsing.md` | 已完成| `CliCommand` 9 variant（run/auth/cron/ingest/visualize/integrations/mcp/…）、`parseCommand`、`commandLoadsEnvironment` |
+| 3 | `03-startup-and-run-mode.md` | 已完成| 启动凭据预检（`startup.ts`）、run-mode 判定（`run-mode.ts`）、debug 面板与 `cli/diagnostics/` |
 
 ## 关键源文件
 

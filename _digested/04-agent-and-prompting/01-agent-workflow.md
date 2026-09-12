@@ -186,6 +186,8 @@ chunk 形状是三元组 `[namespace: string[], mode: "messages" | "tools" | "up
 
 另保留 `parseStreamEvent()`（`index.ts:1476-1498`）解析 Agent Protocol 事件形状（`{ type: "event", method, params }`，守卫 `index.ts:1500-1508`），服务于公开 agent 工厂协议，与运行时主循环使用的 `parseAgentStreamChunk` 并存。
 
+**无法解析 chunk 的调试兜底**：`options.debug` 开启时，解析不出事件的前 3 个 chunk 以 `stream.unhandledChunk <shape>` 记入调试输出（计数器 `unhandledChunkCount`，`index.ts:664`、判定 `:675-680`），之后静默跳过——上限防止病态端点刷屏，静默跳过则保证未知形状不会中断正常事件流（消费循环对 `null` 事件不转发、不报错）。
+
 ### 5.3 命名空间归类：model_request 归 "main"
 
 **源码位置**：`src/agent/index.ts:1857-1875`
@@ -367,6 +369,7 @@ export type RunContext = {
 | `src/agent/index.ts:1476-1498` | `parseStreamEvent()` | Agent Protocol 事件形状解析（并存回退） |
 | `src/agent/index.ts:1510-1520` | `isAgentStreamChunk()` | `[namespace, mode, payload]` 类型守卫 |
 | `src/agent/index.ts:1528-1549` | `parseUpdatesChunk()` | updates 模式状态差量提取 assistant 文本 |
+| `src/agent/index.ts:664,675-680` | `unhandledChunkCount` / `stream.unhandledChunk` 调试兜底 | 解析失败 chunk 的 shape 日志（每运行 debug 上限 3 条） |
 | `src/agent/index.ts:1824-1855` | `parseToolStreamEvent()` | tool_start / tool_end 解析 |
 | `src/agent/index.ts:1857-1875` | `MODEL_REQUEST_NAMESPACE_PREFIX` / `getStreamSource()` | model_request 命名空间归类 "main" |
 | `src/agent/index.ts:1881-1901` | `formatToolArgs()` | 数组参数优先于 record 的渲染 |

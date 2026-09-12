@@ -22,7 +22,7 @@ out_of_scope:
 
 | 命令 | 入口 | 说明 |
 |------|------|------|
-| `openwiki`（默认） | `src/cli/cli.tsx` → `src/cli/app/app.tsx` | Personal mode，启动 Ink TUI chat |
+| `openwiki`（默认 = **code** 模式） | `src/cli/cli.tsx` → `src/cli/app/app.tsx` | Code mode run（chat/init/update）；personal 需显式 `openwiki personal` 或 `--mode personal` |
 | `openwiki code` | `src/ingestion/code-mode.ts` → run 流程 | Code mode，为当前仓库初始化文档 wiki 工作流 |
 | `openwiki --init` | `src/cli/cli.tsx` → `src/agent/index.ts:178-230` → `src/generation/` | 从零生成 wiki（page-job 生命周期） |
 | `openwiki --update` | 同上 | 基于源指纹与 manifest 增量更新/快速推进 |

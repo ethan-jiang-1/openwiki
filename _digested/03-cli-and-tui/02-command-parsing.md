@@ -4,443 +4,297 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
-audience: "需要理解 OpenWiki 命令解析、CliCommand 辨别联合类型和帮助系统的人"
-purpose: "详细解释 src/commands.ts 的 CliCommand 辨别联合（discriminated union）、parseCommand 解析流程和帮助系统"
-owns: "src/commands.ts 的 CliCommand 类型定义、parseCommand 解析逻辑和帮助系统"
+updated: "2026-09-13"
+sync_event: "2026-09-13"
+audience: "需要理解 OpenWiki 命令行参数如何变成 `CliCommand`、各命令的选项语义与校验规则的人"
+purpose: "解释 `src/cli/commands.ts` 的 `CliCommand` 9 变体辨别联合、`parseCommand` 主分发器与各命令子解析器的解析细节、四个判定函数、帮助系统，以及消费的跨域校验器"
+owns: "`src/cli/commands.ts` 的 CliCommand 类型、parseCommand 与子解析器、判定函数、helpContent/getHelpText"
 update_when:
-  - "CliCommand 联合类型新增或移除 variant 时"
-  - "子命令（auth/ngrok/ingest/cron/run）的参数格式发生变化时"
-  - "帮助内容（helpContent）发生变化时"
-  - "parseCommand 的解析路由逻辑调整时"
+  - "CliCommand 变体增删或字段变化时"
+  - "任一命令的选项、默认值、校验规则或错误文案变化时"
+  - "判定函数（shouldRunNonInteractively / commandLoadsEnvironment / commandEmitsTelemetry / isDevelopmentMode）语义变化时"
+  - "帮助文本结构或跨域校验器的位置变化时"
 out_of_scope:
-  - "CLI 入口与 Ink TUI 渲染（看 01-cli-entry-and-ink-tui.md）"
-  - "启动路由和凭据预检（看 03-startup-routing.md）"
-  - "code mode 初始化（看 04-code-mode-setup.md）"
-  - "Auth 提供商的执行逻辑（看 07-authentication-and-oauth/）"
-  - "Ingestion 数据摄取流水线（看 08-ingestion-and-personal-mode/）"
-  - "Cron 调度管理（看 09-scheduling-and-ci/）"
+  - "解析结果的执行：runners / integrations 执行函数（详见 01 号与 12、13 区）"
+  - "启动期凭据预检 `resolveStartupCommand`（详见 03 号）"
+  - "provider 配置与模型目录本身（详见 06 区）"
 ---
 
 # 02 — 命令解析 (Command Parsing)
 
-`src/commands.ts`（819 行）是 OpenWiki 的命令解析层。它定义了两个核心事物：(1) `CliCommand` 辨别联合（discriminated union）—— 表示用户可以请求的每一种操作的中心的类型；(2) `parseCommand()` 函数 —— 将原始 `process.argv` 字符串数组解析为该联合类型的一个具体 variant。
+`src/cli/commands.ts`（1339 行）是命令行界面（CLI）的纯函数解析层：把 `process.argv.slice(2)` 变成一个**辨别联合（discriminated union）** `CliCommand`——9 个变体（variant），每个变体用字面量 `kind` 字段区分，字段只携带该命令执行所需的数据。它不做 I/O、不渲染、不触网；解析中的一切校验失败都返回 `{ kind: "error", exitCode: 1, message }`，让调用方决定打印还是进 TUI。本篇讲类型、主分发器、逐命令解析规则、判定函数与帮助系统。
 
----
+> **源码是唯一真相源。** 本文行号对应 `ethan` 分支基线 `e92cc11`，引用前请重读源码核对。
 
-## 1. 概览 (Overview)
-
-`src/commands.ts` 的结构分为三个层次：
-
-- **类型与常量定义**（第 1-76 行）：`HelpRow`、`HelpContent`、`CliCommand`、`OpenWikiRunMode`、`OpenWikiRunModeSource`、`CronTarget`
-- **命令解析**（第 77-589 行）：`parseCommand()` 主解析器（77-330），`parseRunCommand()` run 子命令解析器（332-565），`resolveExplicitMode()` mode 冲突解决（567-583），`isOpenWikiRunMode()` 类型守卫（585-589）
-- **运行时工具与帮助系统**（第 591-819 行）：`shouldRunNonInteractively()`、`isDevelopmentMode()`、`commandEmitsTelemetry()`、`helpContent`、`getHelpText()`、`formatRows()`
-
-整个文件的入口点是 `parseCommand(argv)`。`src/cli.tsx:3554` 调用它：
+## 1. 模块结构概览 (Module Layout)
 
 ```
-process.argv (去掉前两项) → parseCommand(argv) → CliCommand → resolveStartupCommand → 分支到 TUI 或非交互路径
+src/cli/commands.ts
+├── :1-19      导入跨域校验器（模型 ID / 摄取目标 / host 注册表 / 语言 / 认证 provider）
+├── :21-38     HelpRow / OpenWikiRunMode / HelpContent 类型
+├── :43-105    IntegrationsCliCommand、McpCliCommand、HostIntegrationCliCommand
+├── :107-164   CliCommand 9 变体辨别联合
+├── :166       OpenWikiRunModeSource（default | option | positional）
+├── :168-531   parseCommand 主分发器
+├── :539-733   parseIntegrationsCommand / parseMcpCommand / usage 辅助
+├── :735-1031  parseRunCommand（run 解析）+ mode 辅助
+├── :1040-1086 四个导出判定函数
+└── :1088-1339 helpContent 常量 + getHelpText / formatRows
 ```
 
----
+导入的校验器全部**委派出去**：`commands.ts` 自己不实现模型 ID 或摄取目标的语法规则，只调用别处的判定函数并在失败时生成稳定错误文案（见 §9）。
 
-## 2. CliCommand 辨别联合 (CliCommand Discriminated Union)
+## 2. CliCommand：9 变体辨别联合 (Discriminated Union)
 
-`src/commands.ts:26-73` 定义了 `CliCommand` 类型，一个以 `kind` 为辨别字段的联合类型。它共有 7 个 variant，覆盖了所有用户可触发的操作。
+`CliCommand`（`:107-164`）由 `HostIntegrationCliCommand`（`:105`）与 7 个内联变体组成，合计 9 个 `kind`：
 
-### 2.1 `kind: "auth"` — 认证管理
+| `kind` | 行号 | 关键字段 | 说明 |
+|--------|------|---------|------|
+| `integrations` | `:43-80` | `action: "install"\|"list"\|"uninstall"`、`target: HostTargetId \| null`、`scope`、`projectRoot`、`force` | host 集成注册表操作 |
+| `mcp` | `:85-100` | `host: string` | 内部无根 MCP 服务器 |
+| `auth` | `:110-115` | `action: "configure"\|"list"\|"oauth"\|"tools"`、`force`、`provider` | 认证管理 |
+| `ngrok` | `:117-122` | `action: "start"`、`port`、`url` | Slack OAuth 隧道 |
+| `visualize` | `:124-130` | `wikiDir`、`port`、`open`、`exportDir` | 可视化服务器/静态导出 |
+| `ingest` | `:132-138` | `modelId`、`print`、`scheduledOnly`、`target: IngestionTarget` | 摄取运行 |
+| `cron` | `:140-144` | `action: "delete"\|"list"\|"pause"\|"resume"`、`target: CronTarget \| null` | 调度管理 |
+| `help` | `:145` | `exitCode: 0` | 帮助 |
+| `run` | `:147-159` | `command: OpenWikiCommand`、`dryRun`、`language`、`mode`、`modeSource`、`modelId`、`print`、`shouldStart`、`userMessage`、`telemetryFile` | 主运行命令 |
+| `error` | `:161-164` | `exitCode: 1`、`message` | 解析错误（失败通道，不是用户命令） |
 
-`src/commands.ts:27-33`
+值得注意的字段语义：
 
-| 字段 | 类型 | 说明 |
+- **`run.language: string | null`**（`:151`）：本轮生成语言（BCP-47 地区代码，locale），由 `--language/-l` 给出，解析期就经 `resolveLanguage` 校验（§8.3）。
+- **`run.modeSource: OpenWikiRunModeSource`**（`:166`）：记录 mode 来自默认、`--mode` 选项还是位置词（`personal`/`code`），供「`--init` 默认 code」与「位置 mode 词」的仲裁。
+- **`run.shouldStart`**（`:156`）：`command !== "chat" || userMessage !== null`（`:965`）——区分「打开交互聊天」与「确实要跑一轮」。
+- 所有成功变体的 `exitCode` 固定为 `0`，仅作初始值；执行层可在失败时改写进程退出码。
+- `CronTarget = Extract<IngestionTarget, string>`（`:27`）：cron 的目标只允许连接器 ID 或 `"all"`，不允许 source-instance 形态。
+
+相关的外部类型：`run.command` 的类型 `OpenWikiCommand = "chat" | "init" | "update"` 定义在 `src/agent/types.ts:1`（同文件的 `OpenWikiOutputMode = "local-wiki" | "repository"`，`:2`，是 run-mode 层映射的目标）。`commands.ts` 只导入类型不导入运行时——保持解析层零依赖 agent 实现。
+
+## 3. `parseCommand`：主分发器 (Main Dispatcher)
+
+`parseCommand(argv)`（`:168-531`）按前缀分派，顺序即优先级：
+
+| 输入前缀 | 分派 | 行号 |
+|----------|------|------|
+| `--help` / `-h` | `{ kind: "help" }` | `:169-171` |
+| `integrations` | `parseIntegrationsCommand` | `:173-175` |
+| `mcp` | `parseMcpCommand` | `:177-179` |
+| `auth` | 内联 auth 解析 | `:181-240` |
+| `ngrok` | 内联 ngrok 解析 | `:242-303` |
+| `visualize` | 内联 visualize 解析 | `:305-402` |
+| `ingest` | 内联 ingest 解析 | `:404-486` |
+| `cron` | 内联 cron 解析 | `:488-524` |
+| 首词是 `personal`/`code` | `parseRunCommand(rest, mode, "positional")` | `:526-528` |
+| 其余一切 | `parseRunCommand(argv, "code", "default")` | `:530` |
+
+裸 `openwiki …` 落到最后一行：默认 mode 是 `code`、modeSource 是 `default`——「默认」与「显式选择」的区别正是后面冲突仲裁的依据。
+
+### 3.1 错误通道与稳定用法文案 (Error Channel)
+
+`{ kind: "error", exitCode: 1, message }` 是唯一的失败通道：任何校验失败都立即短路返回，不会半解析。错误文案是**稳定契约**——脚本与测试可以依赖它们。代表性的锚点：
+
+| 触发 | 文案（摘要） | 行号 |
+|------|-------------|------|
+| auth 未知选项 | `Unknown option for auth: <arg>` | `:202-208` |
+| ngrok 子命令错误 | `Usage: openwiki ngrok start [url] [--port <port>]` | `:243-249` |
+| 端口越界（ngrok/visualize） | `--port must be between 1024 and 65535.` | `:288-294` / `:393-399` |
+| visualize 互斥 | `--export cannot be combined with --port or --no-open.` | `:385-391` |
+| ingest 目标非法 | `Usage: openwiki ingest <source\|source-instance\|all> …` | `:406-413` |
+| cron 动作错误 | `Usage: openwiki cron list \| pause all \| resume all \| delete all` | `:516-523` |
+| integrations 目标缺失 | `Integration target is required. Supported targets: <registry>` | `:550-555` |
+| mcp host 非法 | `--host must contain 1-64 lowercase letters, digits, or hyphens.` | `:681-688` |
+| mode 冲突 | `Conflicting modes: <a> and <b>.` | `:1020-1024` |
+| print 无目标 | `-p, --print requires a message, --init, or --update.` | `:984-990` |
+
+三类解析期约定贯穿所有子解析器：**分离与 `=` 双形式**（`--port <n>` 与 `--port=<n>` 等价）；**多数取值选项把以 `-` 开头的下一个 token 视为「值缺失」**而非值本身（visualize/ingest/run 如此，ngrok 的 `--port` 只查空值）；**单次出现约束**（重复给出即报错，如 integrations 的 `--force`/`--project`、mcp 的 `--host`）。
+
+## 4. 解析实例走查 (Worked Examples)
+
+用几条真实命令串一遍分派与收尾规则，方便对照实现：
+
+| 输入 argv | 解析结果 |
+|-----------|---------|
+| `openwiki` | run 变体：`command: "chat"`、`mode: "code"`（default）、`shouldStart: false` → 打开交互聊天（落在 `:530` 的默认分支） |
+| `openwiki personal` | 首词命中 mode → `parseRunCommand([], "personal", "positional")`（`:526-528`），`shouldStart: false` |
+| `openwiki --update` | 默认分支 → `command: "update"`、收尾强制 `mode: "code"`（`:980-982`）、`shouldStart: true` → 非聊天运行，跑完 auto-exit |
+| `openwiki --print code --update` | 旗标在前的 mode 词仍被提升（`:950-958`）：`mode: "code"`（positional）+ `print: true` |
+| `openwiki -p` | print 但 `shouldStart: false` → error「-p, --print requires a message, --init, or --update.」（`:984-990`） |
+| `openwiki --mode personal --mode code` | 第二个 `--mode` 经 `resolveExplicitMode` 报「Conflicting modes: personal and code.」（`:833-836`、`:1009-1025`） |
+| `openwiki --language zh --update` | `resolveLanguage("zh")` 识别为合法 locale 才通过；`language` 带入 run 变体（`:997-998`） |
+| `openwiki visualize openwiki --export docs/site --port 4400` | error：「--export cannot be combined with --port or --no-open.」（`:385-391`） |
+| `openwiki integrations install codex --project` | install + 目标 `codex` + `scope: "project"` + `projectRoot: "."`（`--project` 无值时的默认，`:617-623`） |
+| `openwiki mcp` | `{ kind: "mcp", host: "unknown" }`（`:659`、`:704`）——host 是记录字段，可缺省 |
+| `openwiki cron pause web-search` | error：cron 的 pause/resume/delete 只接受 `all`（`:498-514`） |
+| `openwiki --dry-run` | 非开发模式下报「Unknown option: --dry-run」（`:758-769`） |
+
+## 5. host 集成命令：integrations 与 mcp (Host Integration Commands)
+
+这两个解析器（`:539-705`）服务 `src/cli/integrations.ts` 的执行函数；入口 `cli.tsx:47-53` 在环境加载前就把它们短路出去。
+
+### 5.1 `integrations`（parseIntegrationsCommand，:539-650）
+
+- **action 必须是** `install | list | uninstall`，否则返回注册表派生的用法错误（`integrationUsageError:712-721`，host 清单由 `formatSupportedHostTargets:729-733` 实时从安装注册表拼出，不硬编码）。
+- **install/uninstall 要求目标**（`:547-566`）：第二个位置参数必须命中注册表（`getHostTarget`，`src/integrations/install/registry.ts:87`）；`list` 不带目标（`target: null`）。
+- **`--force` 仅 install 有效**（`:575-592`）：其他 action 下出现即报错，且只能出现一次——install 可用它替换非 OpenWiki 托管的技能内容。
+- **`--project [path]`**（`:594-625`）：出现即置 `scope: "project"`；`--project=` 形式路径不能为空（`:604-615`），分离形式取下一个非 `-` 参数，**没有值时默认当前目录 `"."`**（`:617-623`）；只能出现一次（`:595-600`）。
+- **位置参数顺序**：`--project` 之后的裸 token 报错「Project paths must follow --project.」（`:634-638`）——目标必须在 `--project` 之前。
+- 未知 `-` 选项报错（`:627-633`）。
+
+### 5.2 `mcp`（parseMcpCommand，:658-705）
+
+- **`--host <id>`**（`:664-693`）：`--host` 与 `--host=` 两种形式；只能指定一次（`:665-671`）；值不能为空或以 `-` 开头（`:674-680`），且必须通过 `isValidHostId`（1-64 个小写字母/数字/连字符，`src/integrations/core/protocol.ts:174`，`:681-688`）。
+- **默认值是 `"unknown"`**（`:659`）：不带 `--host` 也能解析成功——host 只是被写进运行元数据的记录字段，不是路由必需品。
+- 任何其他参数（无论是否以 `-` 开头）都报错（`:695-701`）。
+
+## 6. auth、ngrok（内联解析）
+
+### 6.1 `auth`（:181-240）
+
+- **action 映射**（`:182-187`）：`auth configure …` → `configure`、`auth tools …` → `tools`、其余（含 `auth list` 与裸 `auth`）→ `oauth`。
+- **provider 的位置随 action 变化**（`:188-195`）：`configure`/`tools` 的 provider 在 `argv[2]`；`oauth` 的在 `argv[1]`（缺省按 `"list"` 处理）。
+- **`--force`**（`:196-200`）：`tools` 不接受任何选项；其他 action 只接受 `--force`，出现未知选项即报错（`:202-208`）。
+- **`auth list` 特例**（`:210-218`）：oauth action 下 provider 为 `list` 时转成 `{ action: "list", provider: null }`。
+- **provider 校验**（`:220-231`）：必须通过 `isAuthProviderId`（`src/auth/providers.ts:106`），否则按 action 给出对应的用法/未知 provider 错误。
+
+### 6.2 `ngrok`（:242-303）
+
+- 子命令**必须是 `start`**（`:243-249`）。
+- **`--port`**（`:257-274`）：默认 `53682`（`:251`）；`--port <n>` 与 `--port=<n>` 两种形式；缺值报错。
+- **固定 URL**（`:276-279`）：第一个不以 `-` 开头的参数作为固定 HTTPS URL。
+- **端口范围**（`:288-294`）：1024-65535 的整数，越界报错。
+
+## 7. visualize 与 ingest（内联解析）
+
+### 7.1 `visualize`（:305-402）
+
+- **默认值**（`:306-308`）：`wikiDir: "openwiki"`、`port: 4321`、`open: true`、`exportDir: null`。
+- **`--no-open`**（`:318-322`）：置 `open = false`。
+- **`--port`**（`:324-343`）：`--port <n>` 与 `--port=<n>` 两种形式；缺值（含以 `-` 开头的值）报错。
+- **`--export <dir>`**（`:345-370`）：`--export <dir>` 与 `--export=<dir>` 两种形式；缺目录报错。导出模式写一个静态可视化目录，替代启动本地服务器。
+- **互斥规则**（`:385-391`）：`--export` 与 `--port` 或 `--no-open` **不能同用**——导出没有服务器，端口与开浏览器都无意义。实现上用 `sawPort`/`sawNoOpen` 标志在循环结束后统一仲裁。
+- **恰好一个位置参数**（`:372-376`）：`sawPositional` 防止第二个 wikiDir。
+- **端口范围**（`:393-399`）：与 ngrok 相同的 1024-65535 检查。
+
+### 7.2 `ingest`（:404-486）
+
+- **目标**（`:405-413`）：`parseIngestionTarget(argv[1] ?? "all")`——位置参数缺失默认 `"all"`；解析失败（未知连接器/非法 source-instance）返回用法错误。目标语法本身委派给 `src/ingestion/ingestion.ts:107-122`（§9）。
+- **`--print` / `-p`**（`:422-425`）：跑完打印而非写 wiki。
+- **`--scheduled`**（`:427-430`）：只跑调度器管理的实例（scheduler-managed runs 用）。
+- **`--modelId <id>`**（`:432-469`）：`--modelId`/`--model-id` 的分离与 `=` 形式；值经 `normalizeModelId` + `isValidModelId` 校验，非法即报错（§9）。
+- 未知选项报错（`:471-475`）。
+
+## 8. `run`：parseRunCommand（:735-1007）
+
+最重的解析器，默认分支（`:530`）与位置 mode 分支（`:526-528`）都汇入这里。
+
+### 8.1 选项族
+
+| 选项 | 行号 | 语义 |
 |------|------|------|
-| `kind` | `"auth"` | 辨别标签 |
-| `action` | `"configure" \| "list" \| "oauth" \| "tools"` | 认证子操作 |
-| `exitCode` | `0` | 固定为 0 |
-| `force` | `boolean` | 是否强制覆盖已有配置（仅 configure 使用） |
-| `provider` | `AuthProviderId \| null` | 目标提供商 ID，`null` 仅用于 list 动作 |
-
-其中 `AuthProviderId`（定义在 `src/auth/types.ts:1`）是 `"gmail" | "notion" | "slack" | "x"`，由 `isAuthProviderId()` 守卫（`src/auth/providers.ts:105`）通过 `AUTH_PROVIDERS` 记录（`src/auth/providers.ts:19`）进行校验。
-
-四种 action 的含义：
-
-- **`oauth`**：启动 OAuth 2.0 PKCE 流程，打开浏览器授权（`src/auth/oauth.ts`）
-- **`configure`**：为已授权的提供商生成本地连接器配置文件（`src/auth/configure.ts`）
-- **`tools`**：列出提供商暴露的 MCP 工具
-- **`list`**：列出所有提供商的认证状态
-
-### 2.2 `kind: "ngrok"` — NGROK 隧道
-
-`src/commands.ts:34-41`
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `kind` | `"ngrok"` | 辨别标签 |
-| `action` | `"start"` | 固定为 start |
-| `exitCode` | `0` | 固定为 0 |
-| `port` | `number` | 隧道监听端口，默认 53682 |
-| `url` | `string \| null` | 固定 HTTPS URL（ngrok 付费功能），`null` 表示使用随机 URL |
-
-ngrok 子命令解析在 `src/commands.ts:140-201`。它仅支持一个子命令 `start`，接受可选的位置参数 `[url]` 和选项 `--port <port>`（也支持 `--port=<port>` 形式）。端口合法范围为 1024-65535。
-
-ngrok 隧道用于 Slack OAuth 的回调接收（`src/ngrok.ts`）。
-
-### 2.3 `kind: "ingest"` — 数据摄取
-
-`src/commands.ts:42-48`
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `kind` | `"ingest"` | 辨别标签 |
-| `exitCode` | `0` | 固定为 0 |
-| `modelId` | `string \| null` | 覆盖模型的 ID，`null` 使用默认 |
-| `print` | `boolean` | 是否以非交互模式运行并打印输出 |
-| `scheduledOnly` | `boolean` | 是否只运行计划调度的摄入源 |
-| `target` | `IngestionTarget` | 摄取目标：连接器 ID、`"all"` 或 source-instance |
-
-`IngestionTarget`（定义在 `src/ingestion.ts:30`）是 `ConnectorId | "all" | SourceInstanceTarget`。`SourceInstanceTarget` 是一个 `{ kind: "source-instance"; id: string }` 对象，用于区分同一连接器的多个实例。
-
-ingest 子命令解析在 `src/commands.ts:203-285`。支持的选项：
-
-- `--print` / `-p`：非交互打印模式
-- `--scheduled`：仅运行调度源
-- `--modelId <id>` / `--model-id <id>`（也支持 `=` 形式）：覆盖模型
-
-### 2.4 `kind: "cron"` — 调度管理
-
-`src/commands.ts:49-54`
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `kind` | `"cron"` | 辨别标签 |
-| `action` | `"delete" \| "list" \| "pause" \| "resume"` | 调度管理子操作 |
-| `exitCode` | `0` | 固定为 0 |
-| `target` | `CronTarget \| null` | 操作目标连接器 ID 或 `"all"`，`null` 仅用于 list |
-
-`CronTarget`（`src/commands.ts:13`）定义为 `Extract<IngestionTarget, string>`，即 `ConnectorId | "all"`。
-
-cron 子命令解析在 `src/commands.ts:287-323`。四个 action 的含义：
-
-- **`list`**：列出保存的连接器调度和本地 launchd 状态。不需要 target（此时 target 为 `null`）。
-- **`pause`**：暂停连接器调度，并调整 macOS 唤醒窗口（`src/schedules.ts`）
-- **`resume`**：恢复暂停的调度，并调整 macOS 唤醒窗口
-- **`delete`**：删除保存的调度和本地调度文件
-
-### 2.5 `kind: "help"` — 帮助信息
-
-`src/commands.ts:55`
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `kind` | `"help"` | 辨别标签 |
-| `exitCode` | `0` | 固定为 0 |
-
-最简单的 variant。可以通过 `--help` 或 `-h` 作为第一个参数触发（`src/commands.ts:78`），也可以在 `parseRunCommand()` 内部的任意位置遇到 `--help` / `-h` 时返回（`src/commands.ts:350`）。
-
-### 2.6 `kind: "run"` — Agent 运���
-
-`src/commands.ts:56-68`
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `kind` | `"run"` | 辨别标签 |
-| `exitCode` | `0` | 固定为 0 |
-| `command` | `OpenWikiCommand` | 命令类型：`"chat"`、`"init"` 或 `"update"` |
-| `dryRun` | `boolean` | 开发模式下的预演标志 |
-| `mode` | `OpenWikiRunMode` | 运行模式：`"personal"` 或 `"code"` |
-| `modeSource` | `OpenWikiRunModeSource` | mode 的来源：`"default"`、`"option"` 或 `"positional"` |
-| `modelId` | `string \| null` | 覆盖模型 ID |
-| `print` | `boolean` | 非交互打印模式 |
-| `shouldStart` | `boolean` | 是否应该立即开始运行（chat 有消息，或 init/update） |
-| `userMessage` | `string \| null` | 用户消息文本 |
-| `telemetryFile` | `string \| null` | 遥测数据导出路径 |
-
-`OpenWikiCommand`（定义在 `src/agent/types.ts:1`）是 `"chat" | "init" | "update"`：
-
-- **`chat`**：交互式对话模式（默认）
-- **`init`**：生成初始 wiki 文档
-- **`update`**：更新已有文档
-
-run 是最复杂的 variant，也是默认命令——当第一个参数不匹配任何已知子命令时，整个 argv 都会被当作 run 命令解析（`src/commands.ts:329`，fallback 到 `parseRunCommand(argv, "code", "default")`）。
-
-`parseRunCommand()` 解析逻辑（`src/commands.ts:332-565`）支持以下选项：
-
-- `--help` / `-h`：在任何位置遇到都返回 kind: "help"
-- `--dry-run`：仅在开发模式可用（`NODE_ENV=development` 或 `OPENWIKI_DEV=1`）
-- `--print` / `-p`：非交互模式，打印最终输出
-- `--init` / `--update`：指定 command 类型，两者互斥
-- `--mode <personal|code>` 或 `--mode=<personal|code>`：显式指定运行模式
-- `--modelId <id>` / `--model-id <id>`（也支持 `=` 形式）：覆盖模型
-- `--telemetry-file <path>` 或 `--telemetry-file=<path>`：导出遥测 JSON
-- 位置参数：被收集为用户消息（userMessage），空格连接
-
-特殊规则：
-
-1. **mode 推导**（`src/commands.ts:539-541`）：当 command 不是 `chat`（即 init 或 update）且 mode 为默认值时，自动切换到 `"code"` mode。`"personal"` mode 必须显式指定。
-
-2. **shouldStart 推导**（`src/commands.ts:536-538`）：当 command 不是 `chat`，或者有用户消息时，`shouldStart` 为 `true`。纯 `openwiki`（无参数、chat command、无消息）不会自动开始。
-
-3. **print 需要操作**（`src/commands.ts:544-550`）：`--print` 必须在有消息或 init/update 时才有效，单独使用返回错误。
-
-4. **mode 冲突检测**（`src/commands.ts:567-583`）：`resolveExplicitMode()` 处理 mode 被多次指定的情况。当 mode 来源不是 `"default"` 且新旧值不同时，返回错误。
-
-5. **位置参数中的 mode 词**（`src/commands.ts:523-530`）：当 mode 为默认且尚未收集用户消息时，第一个位置参数如果是 `"personal"` 或 `"code"`，会被解释为 mode 选择而非用户消息。
-
-### 2.7 `kind: "error"` — 解析错误
-
-`src/commands.ts:69-73`
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `kind` | `"error"` | 辨别标签 |
-| `exitCode` | `1` | 固定为 1（失败退出码） |
-| `message` | `string` | 人类可读的错误消息 |
-
-所有解析失败场景都返回这个 variant。`src/cli.tsx:3927-3938` 中的类型守卫 `shouldPrintStartupError()` 用于判断是否直接向 stderr 输出错误信息并退出（否则错误命令交给 Ink TUI 展示）。
-
----
-
-## 3. parseCommand() — 主解析器 (Main Parser)
-
-`src/commands.ts:77-330` 实现了 `parseCommand(argv: string[]): CliCommand`。
-
-解析流程是一个顺序匹配链（subcommand routing chain），按以下优先级依次尝试：
-
-```
---help / -h 作为第一个参数？
-  ├── 是 → { kind: "help" }
-  └── 否 → 继续
-
-argv[0] === "auth"？
-  ├── 是 → 解析 auth 参数（src/commands.ts:82-138）
-  │         - 提取 action（configure/tools/oauth）
-  │         - 提取并校验 provider（isAuthProviderId）
-  │         - 处理 --force 选项
-  │         - 特殊：oauth + provider === "list" → list 动作
-  └── 否 → 继续
-
-argv[0] === "ngrok"？
-  ├── 是 → 解析 ngrok 参数（src/commands.ts:140-201）
-  │         - 仅接受 "start" 子命令
-  │         - 可选位置 URL 参数
-  │         - --port <port> / --port=<port>
-  │         - 端口校验：1024-65535 的整数
-  └── 否 → 继续
-
-argv[0] === "ingest"？
-  ├── 是 → 解析 ingest 参数（src/commands.ts:203-285）
-  │         - parseIngestionTarget(argv[1]) 解析目标
-  │         - --print / -p
-  │         - --scheduled
-  │         - --modelId / --model-id（带模型校验）
-  └── 否 → 继续
-
-argv[0] === "cron"？
-  ├── 是 → 解析 cron 参数（src/commands.ts:287-323）
-  │         - list：无额外参数
-  │         - pause/resume/delete：需要一个 target（ConnectorId 或 "all"）
-  └── 否 → 继续
-
-argv[0] 是 "personal" 或 "code"？
-  ├── 是 → parseRunCommand(argv.slice(1), argv[0], "positional")
-  │         mode 来源标记为 positional
-  └── 否 → parseRunCommand(argv, "code", "default")
-            默认 mode 为 code，来源为 default
-```
-
-### 3.1 parseRunCommand() 内部解析
-
-`src/commands.ts:332-565` 实现了 `parseRunCommand(argv, initialMode, initialModeSource): CliCommand`。
-
-这是一个典型的命令行选项循环（option loop），逐个消费 argv 中的参数：
-
-- 遇到选项则消费（可能消费后续参数，如 `--mode` 会读 `argv[index+1]`）
-- 遇到 `-` 开头的未知项返回错误
-- 其余作为位置参数累积为 `userMessageParts`
-- 位置参数中的 mode 词在特定条件下会被截获为 mode 选择（`src/commands.ts:523-530`）
-
----
-
-## 4. 帮助系统 (Help System)
-
-### 4.1 HelpRow 和 HelpContent 类型
-
-`src/commands.ts:7-24`
-
-```ts
-type HelpRow = {
-  label: string;       // 命令/选项名称
-  description: string; // 描述文本
-};
-
-type HelpContent = {
-  title: string;
-  description: string;
-  usage: string[];                    // 用法示例行
-  commands: HelpRow[];                // 子命令表
-  options: HelpRow[];                 // 通用选项表
-  developmentOptions: HelpRow[];      // 开发模式专属选项
-  examples: string[];                 // 使用示例
-  developmentExamples: string[];      // 开发模式示例
-};
-```
-
-### 4.2 helpContent 常量
-
-`src/commands.ts:628-773` 定义了完整的帮助内容，以字面量常量的形式维护。包含：
-
-- **usage**（16 行）：涵盖所有子命令的用法格式
-- **commands**（12 行）：每个子命令的描述
-- **options**（6 行）：`--init`、`--update`、`--mode`、`--print`、`--modelId`、`--telemetry-file`
-- **developmentOptions**（1 行）：`--dry-run`
-- **examples**（20 行）：常见使用场景
-- **developmentExamples**（1 行）：`openwiki --dry-run`
-
-### 4.3 getHelpText() — 文本格式化
-
-`src/commands.ts:775-811` 调用 `formatRows()`（`src/commands.ts:813-819`）将 `HelpContent` 拼接为纯文本帮助字符串。`formatRows` 使用 `padEnd` 对齐两列，左侧标签列宽度取所有行中最长的标签长度。
-
-开发模式下（`isDevelopmentMode()` 为 true）会额外显示 `developmentOptions` 表和 `developmentExamples`。
-
----
-
-## 5. OpenWikiRunMode 与相关类型 (OpenWikiRunMode and Related Types)
-
-`src/commands.ts:12-13, 75`
-
-```ts
-type OpenWikiRunMode = "personal" | "code";
-type CronTarget = Extract<IngestionTarget, string>;  // ConnectorId | "all"
-type OpenWikiRunModeSource = "default" | "option" | "positional";
-```
-
-- **`"personal"`**：个人知识库模式，基于已配置的数据源，写入 `~/.openwiki/wiki/`
-- **`"code"`**：代码仓库模式，为当前仓库生成文档，写入仓库下的 `openwiki/` 目录
-- **`OpenWikiRunModeSource`** 记录了 mode 值的来源，用于冲突检测和调试：
-  - `"default"`：未被指定，由代码自动推导（code）
-  - `"option"`：通过 `--mode` 或 `--mode=<value>` 显式指定
-  - `"positional"`：作为位置参数指定（`openwiki personal ...` 或 `openwiki code ...`）
-
----
-
-## 6. 模型校验 (Model Validation)
-
-`src/commands.ts:1` 导入了 `isValidModelId` 和 `normalizeModelId`，均来自 `src/constants.ts:594-607`。
-
-### normalizeModelId
-
-`src/constants.ts:594-596`：简单地去首尾空白（`value.trim()`）。
-
-### isValidModelId
-
-`src/constants.ts:598-607`：校验模型 ID 是否合法：
-
-1. 长度在 1-120 之间
-2. 以字母或数字开头
-3. 仅包含字母、数字、`.`、`_`、`:`、`/`、`@`、`+`、`-`
-4. 不包含 `://`（排除 URL）
-
----
-
-## 7. IngestionTarget 解析 (Ingestion Target Parsing)
-
-`src/commands.ts:5` 导入了 `parseIngestionTarget`，定义在 `src/ingestion.ts:101-116`。
-
-解析逻辑按优先级：
-
-1. `"all"` 字符串匹配 → 返回 `"all"`
-2. `isConnectorId(value)` 通过 → 返回连接器 ID 字符串
-3. `isSafeSourceInstanceId(value)` 通过 → 返回 `{ kind: "source-instance", id: value }`
-4. 都不匹配 → 返回 `null`
-
-连接器 ID 由 `src/connectors/registry.ts` 的 `createConnectorRegistry()` 管理，代表已注册的数据源连接器。
-
----
-
-## 8. commands.ts 如何连接到 cli.tsx (Connection to cli.tsx)
-
-`src/cli.tsx` 从 `src/commands.ts` 导入了以下符号（`src/cli.tsx:14-19`）：
-
-```ts
-import {
-  commandEmitsTelemetry,
-  helpContent,
-  isDevelopmentMode,
-  parseCommand,
-  shouldRunNonInteractively,
-  type CliCommand,
-} from "./commands.js";
-```
-
-数据流如下：
-
-```
-process.argv.slice(2)                  // src/cli.tsx:3554
-  │
-  ├── parseCommand(argv)               // → CliCommand
-  │
-  ├── commandEmitsTelemetry(command)   // → boolean（是否显示遥测声明）
-  │
-  ├── shouldRunNonInteractively()      // → boolean（是否走非交互路径）
-  │
-  └── 最终 command 被分派给各执行函数：
-        - App 组件（TUI 路径）接收 CliCommand
-        - runAuthCommand(command)       // kind: "auth"
-        - runNgrokCommand(command)      // kind: "ngrok"
-        - runCronCommand(command)       // kind: "cron"
-        - runIngestCommand(command)     // kind: "ingest"
-        - runPrintCommand(command)      // kind: "run" + print
-        - shouldPrintStartupError(...) → 输出错误并退出
-```
-
-两个运行时判定函数：
-
-- **`shouldRunNonInteractively()`**（`src/commands.ts:598-607`）：当命令是 run 且非 dryRun，并且启用了 print 模式，或者在非 TTY 环境（CI/cron/管道）且 shouldStart 为 true 时，返回 true。此时跳过 Ink TUI，走非交互路径。
-- **`commandEmitsTelemetry()`**（`src/commands.ts:620-626`）：仅当 command 是 init 或 update（非 dryRun）时返回 true。chat、auth、ingest 等不发送遥测，无需显示一次性隐私声明。
-
----
-
-## 9. 开发模式 (Development Mode)
-
-`src/commands.ts:609-613` 定义了 `isDevelopmentMode()`：检查 `NODE_ENV === "development"` 或 `OPENWIKI_DEV === "1"`。
-
-开发模式影响：
-
-- `--dry-run` 选项仅在开发模式下可用（`src/commands.ts:355-365`）
-- `getHelpText()` 在开发模式下显示额外的 development 选项和示例（`src/commands.ts:791-807`）
-
----
+| `--help` / `-h` | `:754-756` | 任何位置出现都转 help |
+| `--dry-run` | `:758-769` | **仅开发模式**（`isDevelopmentMode:1051-1055`：`NODE_ENV=development` 或 `OPENWIKI_DEV=1`）可用，否则报未知选项 |
+| `--print` / `-p` | `:771-774` | 非交互单轮打印 |
+| `--debug` | `:776-781` | 解析期直接 `process.env.OPENWIKI_DEBUG = "1"`，让后续所有模块共享调试开关 |
+| `--init` / `--update` | `:783-796` | 设定 `command`；与已设定的另一个互斥报错 |
+| `--language` / `-l` | `:798-812` | 语言 locale；缺值（含 `-` 开头）报错 |
+| `--mode <m>` | `:814-842` | `personal`/`code`；经 `resolveExplicitMode:1009-1025` 仲裁冲突（同值或当前为 default 时通过，否则报「Conflicting modes」）；成功后 `modeSource = "option"` |
+| `--mode=<m>` | `:844-863` | 同上的 `=` 形式 |
+| `--modelId <id>` | `:865-889` | 分离与 `=` 形式（`:891-905`）；`normalizeModelId` + `isValidModelId` 校验 |
+| `--telemetry-file <path>` | `:907-936` | 把遥测载荷写到本地 JSON；分离与 `=` 形式 |
+| 未知 `-` 选项 | `:938-944` | 报错 |
+
+### 8.2 位置参数仲裁（:946-964）
+
+- **mode 词**：一个 `personal`/`code` 词若出现在**第一个位置槽**（`modeSource === "default"` 且尚无用户消息），即使前面有旗标（如 `openwiki --print code --update`）也提升 mode，`modeSource = "positional"`（`:950-958`）——否则它会被吞成用户消息、静默跑错 wiki。
+- 其余位置参数全部 join 成 `userMessage`（`:963-964`）。
+
+### 8.3 收尾校验与默认（:965-1006）
+
+1. **`shouldStart`**（`:965`）：`command !== "chat" || userMessage !== null`。
+2. **语言校验**（`:967-978`）：`resolveLanguage`（`src/platform/language.ts:25`）返回 `unrecognized` 即报错——拼写错误的 locale 在解析期被拦下，而不是生成一轮英文 wiki。
+3. **`--init`/`--update` 默认 code 模式**（`:980-982`）：init/update 且 mode 仍为 default 时强制 `mode = "code"`。
+4. **`-p` 需要目标**（`:984-990`）：print 但 `shouldStart` 为假（裸 chat）报错。
+5. 组装 run 变体返回（`:992-1006`），`language` 为校验通过后的规范化值。
+
+## 9. 跨域校验器 (Cross-Domain Validators)
+
+`commands.ts` 依赖外部模块的判定函数；这些符号的**权威位置**如下：
+
+| 符号 | 权威位置 | 规则 |
+|------|---------|------|
+| `normalizeModelId` | `src/config/constants.ts:1213-1215` | trim |
+| `isValidModelId` | `src/config/constants.ts:1217-1228` | 非空、≤120 字符、白名单字符集（首字符可为 `@`，如 Workers AI `@cf/…`；内部 `@` 供 Vertex 版本号）、禁 `://` |
+| `parseIngestionTarget` | `src/ingestion/ingestion.ts:107-122` | `"all"` → `"all"`；连接器 ID 原样；否则安全 source-instance ID → `{ kind: "source-instance", id }`；都不匹配返回 `null`（`IngestionTarget` 类型定义在 `:36`） |
+| `resolveLanguage` | `src/platform/language.ts:25` | locale 规范化与识别，返回 `resolved`/`unrecognized` 判别结果 |
+| `isAuthProviderId` | `src/auth/providers.ts:106` | 认证 provider ID 封闭集合 |
+| `getHostTarget` / `listHostTargets` | `src/integrations/install/registry.ts:87` / `:96` | host 集成注册表查询（目标校验与用法文案都源自这里） |
+| `isValidHostId` | `src/integrations/core/protocol.ts:174` | MCP host ID 语法：1-64 位小写字母/数字/连字符 |
+
+## 10. 判定函数 (Predicate Functions)
+
+四个导出判定函数把「解析结果如何被消费」编码成可单测的纯函数：
+
+- **`shouldRunNonInteractively(command, stdinIsTTY)`**（`:1040-1049`）：run 且非 dry-run，且（print 或「非 TTY 且 shouldStart」）→ 绕过 Ink 走 print 路径。类型守卫签名把输出收窄到 run 变体。
+- **`isDevelopmentMode()`**（`:1051-1055`）：`NODE_ENV === "development"` 或 `OPENWIKI_DEV === "1"`；门控 `--dry-run` 与帮助文本的开发段。
+- **`commandEmitsTelemetry(command)`**（`:1062-1068`）：run 且非 dry-run 且 command 是 init/update——只有这两类运行发唯一的 `openwiki_run` 事件，因此也只有它们需要首跑披露。
+- **`commandLoadsEnvironment(command)`**（`:1078-1086`）：run（非 dry-run）、auth、cron、ingest、ngrok 为真。入口 `cli.tsx:63-65` 用它决定是否 `loadOpenWikiEnv()`；integrations/mcp/help/visualize/dry-run **刻意不加载** OpenWiki 私有凭据（前两者用宿主自己的认证会话）。
+
+## 11. 帮助系统 (Help System)
+
+- **类型**（`:21-38`）：`HelpRow { label, description }` 与 `HelpContent { title, description, usage[], commands[], options[], developmentOptions[], examples[], developmentExamples[] }`。
+- **`helpContent` 常量**（`:1088-1293`）：usage 21 行（`:1092-1114`）、commands 16 条（`:1115-1193`）、options 14 条（`:1194-1252`，含 `--language`、`--mode`、`--modelId`、`--port`、`--no-open`、`--export` 等新面）、developmentOptions 1 条（`:1253-1258`）、examples 31 条（`:1259-1291`）。integrations 的 usage/命令行文案在模块加载期即调用 `formatSupportedHostTargets` 从注册表拼出（`:1112-1113`）。
+- **`getHelpText()`**（`:1295-1331`）：拼装 Usage → Commands → Options（→ 开发模式追加 Development Options，`:1311-1317`）→ Examples（→ 开发示例，`:1324-1328`）；对齐由 `formatRows:1333-1339` 按 label 最宽值 padEnd 完成。
+
+注意 `helpContent` 是**静态常量**，解析器并不从它派生行为——帮助文案与解析规则靠人工保持同步；`isDevelopmentMode` 只控制开发段是否出现，不影响解析语义。这也是改动选项时必须同时改两处的原因（`update_when` 已把「帮助文本结构变化」列为更新触发条件）。
+
+## 12. 与入口的衔接 (Wiring to the Entry)
+
+`src/cli/cli.tsx` 对本模块的消费点：`parseCommand`（`cli.tsx:45`）、`commandLoadsEnvironment`（`:63`）、`commandEmitsTelemetry`（`:76`）、`shouldRunNonInteractively`（`:93`）。解析产物的完整消费者清单：
+
+| 消费者 | 读取的字段 | 用途 |
+|--------|-----------|------|
+| `src/cli/startup.ts:24` | `shouldStart`/`print`/`userMessage`/`language`/`dryRun` | 启动路由：TTY 检查与非交互凭据预检 |
+| `src/cli/run-mode.ts:61-69` | `dryRun`/`print`/`shouldStart`/`command` | `shouldAutoExitStartupRun` auto-exit 判定 |
+| `src/cli/run-mode.ts:9-29` | `kind`/`shouldStart` | `shouldPrintStartupError` 启动错误分流 |
+| `src/cli/runners.ts` | 各非 run 变体整体 | auth/ngrok/cron/ingest/visualize/print 执行 |
+| `src/cli/integrations.ts:20,88` | `integrations`/`mcp` 变体整体 | host 集成命令执行 |
+| `src/cli/app/app.tsx:110-693` | run 变体几乎全部字段 | 交互编排：模式、模型、语言、遥测 |
+
+一处解析、处处收窄——这正是把 9 个变体收进一个辨别联合的意义：每个消费者用 `switch`/提取收窄只看到自己关心的变体，新增命令只需扩展联合与对应执行函数。
 
 ## Source Anchor
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/commands.ts:7-24` | `HelpRow`, `HelpContent` | 帮助系统类型定义 |
-| `src/commands.ts:12` | `OpenWikiRunMode` | 运行模式类型（personal/code） |
-| `src/commands.ts:13` | `CronTarget` | Cron 操作目标类型 |
-| `src/commands.ts:26-73` | `CliCommand` | 7-variant 辨别联合类型 |
-| `src/commands.ts:75` | `OpenWikiRunModeSource` | Mode 来源追踪类型 |
-| `src/commands.ts:77-330` | `parseCommand` | 主命令解析器（子命令路由链） |
-| `src/commands.ts:82-138` | — | auth 子命令解析 |
-| `src/commands.ts:140-201` | — | ngrok 子命令解析 |
-| `src/commands.ts:203-285` | — | ingest 子命令解析 |
-| `src/commands.ts:287-323` | — | cron 子命令解析 |
-| `src/commands.ts:332-565` | `parseRunCommand` | run 子命令解析（选项循环） |
-| `src/commands.ts:567-583` | `resolveExplicitMode` | mode 冲突检测 |
-| `src/commands.ts:585-589` | `isOpenWikiRunMode` | mode 值的类型守卫 |
-| `src/commands.ts:598-607` | `shouldRunNonInteractively` | 非交互路径判定 |
-| `src/commands.ts:609-613` | `isDevelopmentMode` | 开发模式检测 |
-| `src/commands.ts:620-626` | `commandEmitsTelemetry` | 遥测发送判定 |
-| `src/commands.ts:628-773` | `helpContent` | 帮助内容常量 |
-| `src/commands.ts:775-811` | `getHelpText` | 帮助文本格式化拼接 |
-| `src/commands.ts:813-819` | `formatRows` | 两列表格对齐格式化 |
-| `src/agent/types.ts:1` | `OpenWikiCommand` | Agent 命令类型（chat/init/update） |
-| `src/auth/types.ts:1` | `AuthProviderId` | 认证提供商 ID（gmail/notion/slack/x） |
-| `src/auth/providers.ts:19` | `AUTH_PROVIDERS` | 提供商配置注册表 |
-| `src/auth/providers.ts:105` | `isAuthProviderId` | 提供商 ID 校验守卫 |
-| `src/ingestion.ts:30` | `IngestionTarget` | 摄取目标类型（ConnectorId/all/SourceInstanceTarget） |
-| `src/ingestion.ts:101-116` | `parseIngestionTarget` | 摄取目标字符串解析 |
-| `src/constants.ts:594-596` | `normalizeModelId` | 模型 ID 标准化（去空白） |
-| `src/constants.ts:598-607` | `isValidModelId` | 模型 ID 合法性校验 |
-| `src/cli.tsx:14-19` | — | commands.ts 导入点 |
-| `src/cli.tsx:3554` | — | parseCommand 调用点 |
+| `src/cli/commands.ts:107-164` | `CliCommand` | 9 变体辨别联合 |
+| `src/cli/commands.ts:43-105` | `IntegrationsCliCommand`/`McpCliCommand`/`HostIntegrationCliCommand` | host 集成两个变体的独立接口 |
+| `src/cli/commands.ts:151,166` | `run.language`、`OpenWikiRunModeSource` | 语言字段与 mode 来源档位 |
+| `src/cli/commands.ts:168-531` | `parseCommand` | 主分发器（顺序即优先级） |
+| `src/cli/commands.ts:181-240` | auth 解析 | action 映射、provider 位置、`--force` |
+| `src/cli/commands.ts:242-303` | ngrok 解析 | `start` 子命令、默认端口 53682、范围检查 |
+| `src/cli/commands.ts:305-402` | visualize 解析 | 默认 `openwiki`/4321、`--export` 与 `--port`/`--no-open` 互斥 `:385-391` |
+| `src/cli/commands.ts:404-486` | ingest 解析 | 目标委派 `parseIngestionTarget`、`--scheduled`/`--print`/`--modelId` |
+| `src/cli/commands.ts:488-524` | cron 解析 | pause/resume/delete 只接受 `all` |
+| `src/cli/commands.ts:539-650` | `parseIntegrationsCommand` | 目标必填、`--force` 仅 install、`--project` 默认 `"."` |
+| `src/cli/commands.ts:658-705` | `parseMcpCommand` | `--host` 校验、默认 `"unknown"` |
+| `src/cli/commands.ts:712-733` | `integrationUsageError`/`formatSupportedHostTargets` | 注册表派生的用法文案 |
+| `src/cli/commands.ts:735-1007` | `parseRunCommand` | run 全选项解析与收尾校验 |
+| `src/cli/commands.ts:776-781` | `--debug` 处理 | 解析期设置 `OPENWIKI_DEBUG=1` |
+| `src/cli/commands.ts:946-958` | 位置 mode 词仲裁 | 旗标后的 mode 词仍可提升 mode |
+| `src/cli/commands.ts:965-990` | `shouldStart`/语言校验/默认 mode | run 收尾规则 |
+| `src/cli/commands.ts:1009-1031` | `resolveExplicitMode`/`isOpenWikiRunMode` | mode 冲突仲裁 |
+| `src/cli/commands.ts:1040-1049` | `shouldRunNonInteractively` | print / 非 TTY 分流判定 |
+| `src/cli/commands.ts:1051-1055` | `isDevelopmentMode` | `--dry-run` 与帮助开发段的门控 |
+| `src/cli/commands.ts:1062-1068` | `commandEmitsTelemetry` | 仅 init/update 需要首跑披露 |
+| `src/cli/commands.ts:1078-1086` | `commandLoadsEnvironment` | 环境加载判定（integrations/mcp 刻意除外） |
+| `src/cli/commands.ts:1088-1293` | `helpContent` | usage/commands/options/examples 常量 |
+| `src/cli/commands.ts:1295-1339` | `getHelpText`/`formatRows` | 文本拼装与对齐 |
+| `src/config/constants.ts:1213-1228` | `normalizeModelId`/`isValidModelId` | 模型 ID 规范化与校验 |
+| `src/ingestion/ingestion.ts:36,107-122` | `IngestionTarget`/`parseIngestionTarget` | 摄取目标类型与解析 |
+| `src/platform/language.ts:25` | `resolveLanguage` | locale 识别与规范化 |
+| `src/auth/providers.ts:106` | `isAuthProviderId` | 认证 provider 封闭集合 |
+| `src/integrations/install/registry.ts:87,96` | `getHostTarget`/`listHostTargets` | host 集成注册表查询 |
+| `src/integrations/core/protocol.ts:174` | `isValidHostId` | MCP host ID 语法 |
+| `src/cli/cli.tsx:45,63,76,93` | 入口消费点 | 解析结果的四个判定消费 |
+| `src/cli/run-mode.ts:61-69` | `shouldAutoExitStartupRun` | auto-exit 判定消费 run 字段 |

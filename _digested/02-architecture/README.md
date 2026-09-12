@@ -1,7 +1,7 @@
 ---
 title: "02 — 系统架构 (Architecture)"
 doc_type: "index"
-status: "draft"
+status: "current"
 branch: "ethan"
 created: "2026-07-17"
 updated: "2026-09-13"
@@ -23,11 +23,11 @@ OpenWiki 的模块地图与设计决策。2026-09-13 upstream re-baseline（`d4e
 
 | # | 文档 | 状态 | 说明 |
 |---|------|------|------|
-| 1 | `01-system-overview.md` | 待重写 | 按 domain 目录重画全景：CLI 层 → generation 状态机 → agent（planner/worker）→ claims/okf 收尾 → 数据面（connectors/ingestion） |
-| 2 | `02-code-mode.md` | 待更新 | code mode 概念不变；实现移至 `src/ingestion/code-mode.ts`（474 行），补增量拉取与 CI 工作流生成指针 |
-| 3 | `03-personal-mode.md` | 待更新 | 个人 brain wiki（open-questions/themes/commitments）不变；补 contested 信心标签与单源失败隔离 |
-| 4 | `04-agent-internals.md` | 待并入 | 与 `04-agent-and-prompting/` 高度重叠，内容并入该区 01/04 两篇后废弃 |
-| 5 | `05-key-design-decisions.md` | 待更新 | 增补新决策：page-job 生命周期取代单次长运行、claims 代码化、domain 重组、OKF v0.2、中间件钩子（okf/translation） |
+| 1 | `01-system-overview.md` | 已完成| 按 domain 目录重画全景：CLI 层 → generation 状态机 → agent（planner/worker）→ claims/okf 收尾 → 数据面（connectors/ingestion） |
+| 2 | `02-code-mode.md` | 已完成| code mode 概念不变；实现移至 `src/ingestion/code-mode.ts`（474 行），补增量拉取与 CI 工作流生成指针 |
+| 3 | `03-personal-mode.md` | 已完成| 个人 brain wiki（open-questions/themes/commitments）不变；补 contested 信心标签与单源失败隔离 |
+| 4 | `04-agent-internals.md` | 已并入 | 与 `04-agent-and-prompting/` 高度重叠，内容并入该区 01/04 两篇后废弃 |
+| 5 | `05-key-design-decisions.md` | 已完成| 增补新决策：page-job 生命周期取代单次长运行、claims 代码化、domain 重组、OKF v0.2、中间件钩子（okf/translation） |
 
 ## 关键源文件
 
