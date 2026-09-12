@@ -4,7 +4,7 @@ doc_type: "index"
 status: "current"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
+updated: "2026-09-13"
 audience: "需要快速建立心智模型或定位入口的人"
 purpose: "列出 _context 目录中的文档及其用途"
 owns: "_context 目录导航"
@@ -22,5 +22,5 @@ out_of_scope:
 
 | # | 文档 | 用途 | 阅读时间 |
 |---|------|------|---------|
-| 1 | `01-quick_context.md` | OpenWiki 是什么、15 层架构全景、规模、核心能力、关键设计决策 | 5 分钟 |
+| 1 | `01-quick_context.md` | OpenWiki 是什么、domain 架构全景、规模、核心能力、关键设计决策 | 5 分钟 |
 | 2 | `02-entrypoints-at-a-glance.md` | 所有 CLI 命令、核心模块入口、配置文件入口速查 | 2 分钟 |

@@ -4,7 +4,7 @@ doc_type: "index"
 status: "current"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
+updated: "2026-09-13"
 audience: "刚接手仓库的人，以及需要快速建立 OpenWiki 心智模型的 Agent/工程师"
 purpose: "作为 `_digested` 的总导航，说明目录分工、阅读顺序、文档维护契约和写作规范"
 owns: "`_digested` 的导航方式、目录边界、维护原则和阅读入口"
@@ -22,71 +22,77 @@ out_of_scope:
 `_digested/` 是对 OpenWiki（LangChain AI 的 AI 文档 wiki 生成工具）源码的消化文档层。这里不改源码，只整理"源码已经是什么样"的事实、边界、入口和排错抓手。
 
 > **源码是唯一真相源。** 每一条论断（函数名、文件路径、架构关系、数字）都必须能在源码或项目原文档中找到对应。禁止臆造、推测或"应该是这样"。专有术语首次出现必须写成「中文（English）」以保留英文原词，便于 grep 回溯源码。
+>
+> **基线**：`e92cc11`（2026-09-13 upstream re-baseline，253 commits，src/ 52→168 文件 domain 重组）。追平期间锁定。
 
 ## 先建立一个大概轮廓
 
-在钻进下面的目录分工表之前，用一句话理解 OpenWiki：**它是一个 CLI 工具，委托一个 AI Agent 把分散的证据（代码变更、邮件、聊天记录……）整理成持续维护的 markdown 文档**。整个系统可以概括为"三个角色、一个引擎"——CLI 入口（你敲命令的地方）、文档 Agent（真正干活的引擎）、模型提供商与数据源连接器（分别提供"大脑"和"原料"）。这套引擎有两种用法：**Code Mode** 拿 Git 仓库当证据写代码文档，**Personal Mode** 拿外部数据源当证据攒个人知识库。
+用一句话理解 OpenWiki：**它是一个 CLI 工具，让一个 AI Agent 把分散的证据（代码变更、外部数据源……）整理成一套持续维护、可自校正的 markdown 文档 wiki**。系统可概括为「三个角色、一条流水线」——CLI（你敲命令的地方）、生成生命周期（page-job 状态机：规划 → 逐页产出 → 恢复/收尾）、文档 Agent + 可信度层（提示词约束的模型调用；claims 证据链 + OKF front matter 规范保证「写出来的东西可验证」）。两种用法：**Code Mode** 拿 Git 仓库当证据写代码文档，**Personal Mode** 拿外部数据源当证据攒个人知识库。
 
-这一段够不够，取决于你要做什么：
-- 只是想对项目有个整体印象 → 到 `_context/01-quick_context.md` 的"一句话画像"就可以停下了。
-- 想看图解版的完整故事（3 分钟） → 去 `02-architecture/01-system-overview.md`。
-- 需要具体某个子系统的实现细节 → 继续看下面的目录分工表，找到对应主题目录。
-
-下面开始是这份文档的本职工作：目录怎么分工、写作规范是什么、覆盖度怎么追踪——这些是给"已经有了大致印象、现在要动手改文档或查细节"的读者看的。
+- 只想对项目有个整体印象 → `_context/01-quick_context.md`
+- 要找某个命令/入口的源码位置 → `_context/02-entrypoints-at-a-glance.md`
+- 要具体某个子系统的细节 → 下面的目录分工表
 
 ## 怎么使用
 
-- `README.md` 和 `_context/` 负责导航。
-- `01-quickstart/` 到 `10-configuration-and-telemetry/` 的主题文档负责自说明，正文应尽量独立阅读。
-- `_meta/` 只保留历史归档和 git 对齐追踪，不是当前导航的一部分。
-- 每篇文档头部都有 YAML front matter，用来说明这篇文档的读者、目标、负责范围和后续补充入口。
+- `README.md`（本文件）和 `_context/` 负责导航。
+- **README 纯索引原则**：每个主题区 README 只做导航（区定位 ≤3 句、文档状态表、关键源文件表），机制内容一律在命名内容文档里。
+- `_meta/` 只保留归档和追踪，不是当前导航的一部分。
+- 每篇文档头部都有 YAML front matter，说明读者、目标、负责范围和后续补充入口。
 
-## 目录分工
+## 目录分工（14 主题区，2026-09-13 重排）
 
-- `_context/`：快速上下文与入口速查。允许保留强导航。
-- `01-quickstart/`：安装、首次运行、模型选择、常见排错。
-- `02-architecture/`：15 层架构全景、模块关系图、关键设计决策、数据流、扩展点。
-- `03-cli-and-tui/`：CLI 入口（cli.tsx，4019 行 Ink TUI）、命令解析（commands.ts，辨别联合类型）、启动路由（startup.ts）、code mode 初始化（code-mode.ts）。
-- `04-agent-and-wiki-generation/`：文档 agent 核心 — 完整运行流程（10 步）、DeepAgents 集成（index.ts）、系统提示词（prompt.ts）、Git 证据收集（utils.ts）、内容快照防重写机制、只读文件系统后端（docs-only-backend.ts）、skills 系统、索引中间件、frontmatter 校验。
-- `05-model-providers/`：9+ 模型提供商体系 — 提供商解析与回退链、各 provider 的模型创建分支（Anthropic/Vertex/OpenAI/ChatGPT-OAuth/OpenRouter/OpenAI-compatible/Fireworks/NVIDIA/Baseten）、base URL 解析、重试策略。
-- `06-connectors-and-data-sources/`：连接器注册与生命周期、7 个数据源连接器（git-repo、gmail、hackernews、notion-via-MCP、slack、web-search/Tavily、x/twitter）、MCP 子系统（mcp-client.ts 867 行、mcp-runtime.ts）、连接器→agent 工具暴露。
-- `07-authentication-and-oauth/`：连接器 OAuth 2.0 体系 — 浏览器 PKCE 流程（oauth.ts）、提供商定义（providers.ts）、token 存储刷新过期（tokens.ts）、认证配置生成（configure.ts）、ngrok HTTPS 隧道（ngrok.ts）。
-- `08-ingestion-and-personal-mode/`：数据摄取流水线（ingestion.ts）、首次运行配置（onboarding.ts）、个人 brain wiki 概念（open-questions.md、themes.md、commitments.md、personal-logistics.md）。
-- `09-scheduling-and-ci/`：macOS LaunchAgent 调度管理（schedules.ts，918 行）、cron 集成（cron-parser/cronstrue）、CI/CD 工作流（checks.yml、openwiki-update.yml）、fork 上的 opt-in 调度机制。
-- `10-configuration-and-telemetry/`：交互式凭据配置向导（credentials.tsx，4337 行 Ink TUI）、环境变量管理（env.ts）、常量和提供商配置（constants.ts，609 行）、家目录管理（openwiki-home.ts）、PostHog 遥测系统（telemetry/，9 个文件）、诊断工具（diagnostics.ts）。
-- `_meta/`：历史结构、归档记录、git 对齐追踪、upstream sync 日志。
+| 区 | 主题 | 一句话 |
+|----|------|--------|
+| `01-quickstart/` | 快速上手 | 安装、首跑、模型选择、排错 |
+| `02-architecture/` | 架构全景 | domain 地图、双模式、关键设计决策 |
+| `03-cli-and-tui/` | CLI 与 TUI | 命令面（9 variant）、Ink TUI 分层、启动路由 |
+| `04-agent-and-prompting/` | Agent 与提示词 | 运行编排、提示词体系、DeepAgents 后端边界、`.openwikiignore` |
+| `05-generation-lifecycle/` | 生成生命周期 | page-job 状态机、恢复/事务/fast-forward、finalize 管线 |
+| `06-model-providers/` | 模型提供商 | 13 providers、reasoning、model availability |
+| `07-claims-and-okf/` | 证据命题与 OKF | grounded claims、证据版本、OKF v0.2 投影 |
+| `08-connectors-and-data-sources/` | 连接器与数据源 | 9 连接器、双配置通路、弹性 HTTP、MCP |
+| `09-authentication-and-oauth/` | 认证与 OAuth | PKCE、oauth-discovery 校验、external-cli 认证 |
+| `10-ingestion-and-personal-mode/` | 摄取与个人模式 | 摄取流水线、个人 brain wiki、code-mode 增量拉取 |
+| `11-scheduling-and-ci/` | 调度与 CI | LaunchAgent、定时更新、CI 工作流生成 |
+| `12-visualizer/` | 可视化器 | `openwiki visualize`、WikiGraph、静态导出 |
+| `13-integrations/` | 宿主集成 | Codex/Claude/OpenCode/Cursor 集成、MCP 生命周期协议 |
+| `14-configuration-and-telemetry/` | 配置与遥测 | config/platform 分层、凭据向导架构、遥测错误分类学 |
+| `_context/` | 快速上下文 | 5 分钟心智模型 + 入口速查 |
+| `_meta/` | 归档与追踪 | 结构演进、git 对齐、sync 日志、追平计划 |
 
 ## 阅读顺序
 
-1. 先看 `_context/01-quick_context.md`
-2. 再看 `_context/02-entrypoints-at-a-glance.md`
-3. 然后进入你关心的主题目录
-4. 需要理解 wiki 是怎么生成出来的，看 `04-agent-and-wiki-generation/`
-5. 需要添加模型提供商，看 `05-model-providers/`
-6. 只有追历史决策和 git 对齐时才看 `_meta/`
+1. `_context/01-quick_context.md` → `_context/02-entrypoints-at-a-glance.md`
+2. 进入你关心的主题区（生成核心链推荐顺序：02 → 05 → 04 → 07）
+3. 追历史决策和 git 对齐时才看 `_meta/`（追平执行路线见 `_meta/git-tracking/catch-up-plan.md`）
 
 ## 导航速查
 
 | 你要干什么 | 看哪里 |
 |-----------|--------|
 | 理解 OpenWiki 整体是什么 | `_context/01-quick_context.md` |
-| 找某个函数/入口的源码位置 | `_context/02-entrypoints-at-a-glance.md` |
+| 找某个命令/入口的源码位置 | `_context/02-entrypoints-at-a-glance.md` |
 | 查源码→文档覆盖关系 | `_meta/git-tracking/coverage-map.md` |
-| 理解 agent 怎么生成 wiki | `04-agent-and-wiki-generation/` |
-| 了解支持哪些 AI 模型 | `05-model-providers/` |
-| 理解数据源连接器 | `06-connectors-and-data-sources/` |
-| 理解 OAuth 认证 | `07-authentication-and-oauth/` |
-| 做 upstream sync | `_meta/git-tracking/upstream-sync/README.md` |
+| 理解一轮 wiki 生成怎么推进/恢复 | `05-generation-lifecycle/` |
+| 理解 agent 怎么被约束、怎么写页 | `04-agent-and-prompting/` |
+| 理解 wiki 的可信度机制（claims/OKF） | `07-claims-and-okf/` |
+| 了解支持哪些 AI 模型 | `06-model-providers/` |
+| 理解数据源连接器 | `08-connectors-and-data-sources/` |
+| 理解 OAuth / CLI 认证 | `09-authentication-and-oauth/` |
+| 用 coding agent 驱动 OpenWiki | `13-integrations/` |
+| 可视化浏览生成的 wiki | `12-visualizer/` |
+| 做 upstream sync / 追平 | `_meta/git-tracking/`（catch-up-plan、upstream-sync） |
 | 改某篇文档 | 先读目标文档的 front matter（`owns`, `update_when`, `out_of_scope`） |
 | 质量抽检 | `_meta/git-tracking/quality-review.md` |
 
 ## 维护契约
 
-- 主题文档应以源码与 tests 为准，不把别的 `_digested` 文档当成依赖。
-- `README` 和 `_context` 可以做文档级跳转，其它主题文档默认不做依赖式交叉引用。
-- **术语必须中英文对照**：OpenWiki 里不够大众/容易翻译跑偏的专有术语，首次出现必须写成「中文（English）」并保留可回溯的英文原词。
-- 当一个话题需要补充时，优先补到 front matter 的 `owns` 所声明的那篇文档。
-- 当一条信息只和历史演进有关，而不属于当前推荐读法时，应放入 `_meta/`。
+- 主题文档以源码与 tests 为准，不把别的 `_digested` 文档当依赖。
+- **README 只做索引**（本文件与各区 README 同此约束）：机制内容必须落在命名内容文档里。
+- **术语必须中英文对照**：不够大众/易翻译跑偏的专有术语，首次出现写成「中文（English）」。
+- 补充话题时，优先补到 front matter `owns` 声明的那篇文档。
+- 只与历史演进有关的信息放入 `_meta/`。
 
 ---
 
@@ -94,7 +100,7 @@ out_of_scope:
 
 ### Front matter 必填字段
 
-每篇 `_digested` 内容文档（`owner`、`reference`、`topic` 类型）必须包含以下 YAML front matter：
+每篇内容文档（`owner`、`reference`、`topic` 类型）必须包含：
 
 ```yaml
 ---
@@ -114,37 +120,39 @@ out_of_scope:
 ---
 ```
 
+re-baseline 后写出的内容文档加 `sync_event: "2026-09-13"`。
+
 ### doc_type 分类
 
 | doc_type | 含义 | 示例 |
 |----------|------|------|
-| `owner` | 负责解释一个特定源码范围的主文档 | `04-agent-and-wiki-generation/01-agent-workflow.md` |
+| `owner` | 负责解释一个特定源码范围的主文档 | `05-generation-lifecycle/01-page-job-state-machine.md` |
 | `reference` | 纯参考数据，不含源码解释 | `_meta/git-tracking/coverage-map.md` |
 | `topic` | 跨模块话题，不被单个 source area 独占 | 协议参考、集成概览 |
-| `index` | 导航页 | 每个目录的 `README.md` |
+| `index` | 导航页 | 各目录 `README.md` |
 | `context` | 快速上下文，承担强导航职责 | `_context/01-quick_context.md` |
 | `archive` | 历史归档和元数据 | `_meta/` 下的所有文件 |
 
 ### 源码引用格式
 
-所有对源码文件的引用使用相对于仓库根的路径 + 行号格式：
+所有源码引用使用仓库根相对路径 + 行号：
 
 ```
-`src/cli.tsx:123-145`
-`src/agent/index.ts:42`
+`src/cli/commands.ts:168`
+`src/generation/repository-run.ts:976-1009`
 ```
 
 ### Source Anchor 表
 
-每篇 `owner` 文档末尾必须有一个 Source Anchor 表格，列出文档中引用的所有源文件路径：
+每篇 `owner` 文档末尾必须有 Source Anchor 表，列出引用的所有源文件：
 
 ```markdown
 ## Source Anchor
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/agent/index.ts:42-80` | `createDeepAgent` | Agent 创建入口 |
-| `src/agent/prompt.ts:15-30` | `buildSystemPrompt` | 系统提示词组装 |
+| `src/generation/run-state.ts:14` | `RUN_STATE_PATH` | `.run.json` 检查点路径 |
+| `src/agent/index.ts:1077-1264` | `createModel` | 按 provider 分支的模型工厂 |
 ```
 
 ---
@@ -159,11 +167,13 @@ upstream/main (langchain-ai/openwiki)
             └── ethan (本地工作分支) ← _digested/ 文档所在地
 ```
 
-- `main` 分支 = 源码基线，与 upstream 保持同步，不含任何 `_digested/` 文档。
-- `ethan` 分支 = 工作分支，= `main` + `_digested/` + `_faq_on_digested/` + `_tmp_tracking/`。长期领先于 `main`。
-- 当 upstream 发布新变更时，先合并到 `main`，再 rebase/merge 到 `ethan`，然后通过 coverage map 定位需要更新的文档。
+- `main` = 源码基线（当前 `e92cc11`），不含 `_digested/`。
+- `ethan` = 工作分支 = `main` + `_digested/` + `_faq_on_digested/` + `_tmp_tracking/`。
+- upstream 新变更：先合并到 `main`，rebase 到 `ethan`，再按 coverage map 定位受影响文档（流程见 `_meta/git-tracking/upstream-sync/README.md`）。
 
 权威追踪文档：
+
+- `_meta/git-tracking/catch-up-plan.md` — re-baseline 追平计划（结构决策 + 分批路线）
 - `_meta/git-tracking/git-branch-and-upstream-tracking.md` — 分支拓扑和 sync 历史
 - `_meta/git-tracking/coverage-map.md` — 源码→文档覆盖矩阵
-- `_meta/git-tracking/upstream-sync/TEMPLATE.md` — 单次 sync 事件模板
+- `_meta/git-tracking/upstream-sync/` — sync 事件日志与深查报告存档

@@ -1,169 +1,426 @@
 ---
 title: "_digested 源码覆盖地图"
 doc_type: "reference-data"
-status: "stale"
+status: "active"
 branch: "ethan"
 created: "2026-07-17"
 updated: "2026-09-13"
 sync_event: "2026-09-13"
 last_updated: "2026-09-13"
 baseline_ref: "origin/main"
-baseline_commit: "d4e94ab"
-purpose: "回答「哪段源码由哪篇 _digested doc 覆盖」——给 upstream delta triage 和覆盖审计做索引"
+baseline_commit: "e92cc11"
+purpose: "回答「哪段源码由哪篇 _digested doc 覆盖」——给追平批次与覆盖审计做索引"
 owns: "source→doc 映射关系、覆盖度标注"
 update_when:
+  - "每完成一篇追平文档后回写对应行（滚动更新，不攒批）"
   - "upstream sync 后发现新缺口或覆盖度变化"
-  - "新建/重写 _digested doc 后"
 out_of_scope:
-  - "逐文件级别的源码引用（正文里已有行号引用）"
-  - "文档内容质量评估"
+  - "文档内容质量评估（见 quality-review.md）"
 ---
 
 # _digested 源码覆盖地图
 
-> ⚠️ **本地图已整体过期（stale，2026-09-13）。**
-> upstream sync `d4e94ab → e92cc11`（253 commits）对 `src/` 做了 domain 级重组：
-> 旧路径 8 个删除、8 个移动、36 个原地大改，并新增 okf/、claims/、generation/、integrations/、visualize/、mermaid/、cli/、config/、platform/、setup/ 等目录（52 → 168 文件）。
-> **下文矩阵描述的是基线 `d4e94ab` 的源码布局，仅作历史参考，不可用于 triage。**
-> 重写后的新矩阵以 `_meta/git-tracking/catch-up-plan.md` 的结构决策为准。
+> 基线：`e92cc11`（2026-09-13 re-baseline，追平期间锁定不 fetch）。
+> 口径：覆盖度 = 该 source area 的**架构关键路径**在 `_digested` 中被解释的程度，不是逐函数覆盖。
+> 结构依据：`../catch-up-plan.md` §2（14 主题区）。事实底稿：`upstream-sync/2026-09-13-rebaseline-reports.md`。
 
-> 口径：覆盖度 = 该 source area 的**架构关键路径**在 `_digested` 中被解释的程度。
-> 不是"每个函数都提了"，而是"核心机制、关键类型、数据流、启动链"是否有文档可追溯。
-
-## 覆盖度定义
+## 覆盖度语义
 
 | 标记 | 含义 |
 |------|------|
-| **full** | 核心机制已文档化，有源码行号引用，可直接追溯 |
-| **partial** | 关键路径有提及，但子模块或细节未深挖 |
-| **gap** | 无对应文档（尚未覆盖） |
-| **gap*** | 有意不覆盖：低优先级 / 自解释 / 非关键路径 |
+| **full** | 责任文档已完成，核心机制可追溯（含行号引用，抽验 ±5 行） |
+| **partial** | 存量文档大体有效，待批内更新（文件级状态见备注） |
+| **gap** | 责任文档尚未写出（追平批次进行中的默认态） |
+| **gap\*** | 有意不覆盖 |
 
+> 责任文档短引用（如 `04/02`）= `04-agent-and-prompting/02-prompting-strategy.md`；`0X/README` = 该文件仅由区索引的关键源文件表兜底，无专篇。
+
+### 责任文档 `03/01`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/cli/app/app.tsx` | gap | 待对应批次写出 |
+| `src/cli/app/run-state.ts` | gap | 待对应批次写出 |
+| `src/cli/cli.tsx` | gap | 待对应批次写出 |
+| `src/cli/components/chat.tsx` | gap | 待对应批次写出 |
+| `src/cli/components/first-run-notice.tsx` | gap | 待对应批次写出 |
+| `src/cli/components/header.tsx` | gap | 待对应批次写出 |
+| `src/cli/components/markdown.tsx` | gap | 待对应批次写出 |
+| `src/cli/components/panels.tsx` | gap | 待对应批次写出 |
+| `src/cli/components/primitives.tsx` | gap | 待对应批次写出 |
+| `src/cli/components/run-view.tsx` | gap | 待对应批次写出 |
+| `src/cli/components/types.ts` | gap | 待对应批次写出 |
+| `src/cli/debug.ts` | gap | 待对应批次写出 |
+| `src/cli/format.ts` | gap | 待对应批次写出 |
+| `src/cli/guards.ts` | gap | 待对应批次写出 |
+| `src/cli/input/cursor.ts` | gap | 待对应批次写出 |
+| `src/cli/input/menu.ts` | gap | 待对应批次写出 |
+| `src/cli/input/secret.ts` | gap | 待对应批次写出 |
+| `src/cli/input/types.ts` | gap | 待对应批次写出 |
+| `src/cli/process-interrupt.ts` | gap | 待对应批次写出 |
+| `src/cli/run-log/activity.ts` | gap | 待对应批次写出 |
+| `src/cli/run-log/progress.ts` | gap | 待对应批次写出 |
+| `src/cli/run-log/reducer.ts` | gap | 待对应批次写出 |
+| `src/cli/run-log/summary.ts` | gap | 待对应批次写出 |
+| `src/cli/run-log/tool-input.ts` | gap | 待对应批次写出 |
+| `src/cli/run-log/types.ts` | gap | 待对应批次写出 |
+| `src/cli/schedule-format.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `03/02`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/cli/commands.ts` | gap | 待对应批次写出 |
+| `src/cli/integrations.ts` | gap | 待对应批次写出 |
+| `src/cli/runners.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `03/03`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/cli/diagnostics/auth-fix.ts` | gap | 待对应批次写出 |
+| `src/cli/diagnostics/error-diagnostics.ts` | gap | 待对应批次写出 |
+| `src/cli/diagnostics/sanitize.ts` | gap | 待对应批次写出 |
+| `src/cli/run-mode.ts` | gap | 待对应批次写出 |
+| `src/cli/startup.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `04/01`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/agent/index.ts` | gap | 待对应批次写出 |
+| `src/agent/types.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `04/02`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/agent/prompt.ts` | gap | 待对应批次写出 |
+| `src/agent/prompts/code.ts` | gap | 待对应批次写出 |
+| `src/agent/prompts/personal.ts` | gap | 待对应批次写出 |
+| `src/agent/repository-prompts.ts` | gap | 待对应批次写出 |
+| `src/agent/skills.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `04/03`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/agent/utils.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `04/04`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/agent/docs-only-backend.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `04/05`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/agent/openwiki-ignore.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `04/README`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/agent/agent-backend.ts` | gap | 待对应批次写出 |
+| `src/agent/crash-guard.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `05/01`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/agent/repository-runner.ts` | gap | 待对应批次写出 |
+| `src/agent/wiki-finalizer.ts` | gap | 待对应批次写出 |
+| `src/agent/wiki-link-validator.ts` | gap | 待对应批次写出 |
+| `src/agent/wiki-replacement.ts` | gap | 待对应批次写出 |
+| `src/generation/page-jobs.ts` | gap | 待对应批次写出 |
+| `src/generation/page-manifest.ts` | gap | 待对应批次写出 |
+| `src/generation/repository-run.ts` | gap | 待对应批次写出 |
+| `src/generation/run-state.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `05/03`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/agent/okf-middleware.ts` | gap | 待对应批次写出 |
+| `src/agent/translation-middleware.ts` | gap | 待对应批次写出 |
+| `src/mermaid/dom-shim.ts` | gap | 待对应批次写出 |
+| `src/mermaid/fences.ts` | gap | 待对应批次写出 |
+| `src/mermaid/validate.ts` | gap | 待对应批次写出 |
+| `src/mermaid/wiki.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `05/README`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/generation/errors.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `06/01`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/config/constants.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `06/02`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/agent/openai-chatgpt-oauth.ts` | gap | 待对应批次写出 |
+| `src/agent/vertex-surface.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `06/03`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/config/reasoning.ts` | gap | 待对应批次写出 |
+| `src/model-availability.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `07/01`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/claims/brains/code/paths.ts` | gap | 待对应批次写出 |
+| `src/claims/brains/code/runtime.ts` | gap | 待对应批次写出 |
+| `src/claims/brains/code/session.ts` | gap | 待对应批次写出 |
+| `src/claims/brains/code/store.ts` | gap | 待对应批次写出 |
+| `src/claims/brains/code/types.ts` | gap | 待对应批次写出 |
+| `src/claims/core/errors.ts` | gap | 待对应批次写出 |
+| `src/claims/core/mutations.ts` | gap | 待对应批次写出 |
+| `src/claims/core/resolver-cache.ts` | gap | 待对应批次写出 |
+| `src/claims/core/types.ts` | gap | 待对应批次写出 |
+| `src/claims/guidance.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `07/02`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/claims/brains/code/preflight.ts` | gap | 待对应批次写出 |
+| `src/claims/evidence/repository/resolver.ts` | gap | 待对应批次写出 |
+| `src/claims/evidence/repository/resource.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `07/03`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/okf/claim-sources.ts` | gap | 待对应批次写出 |
+| `src/okf/claims-verification.ts` | gap | 待对应批次写出 |
+| `src/okf/frontmatter.ts` | gap | 待对应批次写出 |
+| `src/okf/generated-provenance.ts` | gap | 待对应批次写出 |
+| `src/okf/index-labels.ts` | gap | 待对应批次写出 |
+| `src/okf/index-sync.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `08/01`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/connectors/registry.ts` | gap | 待对应批次写出 |
+| `src/connectors/sources/langsmith/types.ts` | gap | 待对应批次写出 |
+| `src/connectors/tools.ts` | gap | 待对应批次写出 |
+| `src/connectors/types.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `08/02`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/connectors/config.ts` | gap | 待对应批次写出 |
+| `src/connectors/http.ts` | gap | 待对应批次写出 |
+| `src/connectors/sources/langsmith/api.ts` | gap | 待对应批次写出 |
+| `src/connectors/sources/langsmith/index.ts` | gap | 待对应批次写出 |
+| `src/connectors/sources/langsmith/repo-config.ts` | gap | 待对应批次写出 |
+| `src/connectors/sources/langsmith/runs.ts` | gap | 待对应批次写出 |
+| `src/connectors/sources/langsmith/setup.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `08/11`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/connectors/mcp-client.ts` | gap | 待对应批次写出 |
+| `src/connectors/mcp-runtime.ts` | gap | 待对应批次写出 |
+| `src/connectors/sources/mcp.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `08/README`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/connectors/io.ts` | gap | 待对应批次写出 |
+| `src/connectors/sources/git-repo.ts` | gap | 待对应批次写出 |
+| `src/connectors/sources/gmail.ts` | gap | 待对应批次写出 |
+| `src/connectors/sources/hackernews.ts` | gap | 待对应批次写出 |
+| `src/connectors/sources/slack.ts` | gap | 待对应批次写出 |
+| `src/connectors/sources/web-search.ts` | gap | 待对应批次写出 |
+| `src/connectors/sources/x.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `09/01`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/auth/oauth.ts` | partial | 09/01 待更新（存量文档大体有效） |
+
+### 责任文档 `09/02`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/auth/external-cli-auth.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `09/03`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/auth/tokens.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `09/04`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/auth/configure.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `09/05`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/auth/ngrok.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `09/README`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/auth/oauth-discovery.ts` | gap | 待对应批次写出 |
+| `src/auth/providers.ts` | gap | 待对应批次写出 |
+| `src/auth/types.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `10/01`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/ingestion/ingestion.ts` | partial | 10/01 待更新（存量文档大体有效） |
+
+### 责任文档 `10/02`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/setup/onboarding.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `10/03`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/ingestion/code-mode.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `11/01`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/scheduling/schedules.ts` | partial | 11/01 待更新（存量文档大体有效） |
+
+### 责任文档 `12/01`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/visualize/graph.ts` | gap | 待对应批次写出 |
+| `src/visualize/server.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `12/02`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/visualize/client-lib.ts` | gap | 待对应批次写出 |
+| `src/visualize/client.ts` | gap | 待对应批次写出 |
+| `src/visualize/page.ts` | gap | 待对应批次写出 |
+| `src/visualize/static-export.ts` | gap | 待对应批次写出 |
+| `src/visualize/styles.css` | gap | 待对应批次写出 |
+
+### 责任文档 `13/01`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/integrations/core/errors.ts` | gap | 待对应批次写出 |
+| `src/integrations/core/repository-root.ts` | gap | 待对应批次写出 |
+| `src/integrations/core/session-manager.ts` | gap | 待对应批次写出 |
+| `src/integrations/install/atomic-file.ts` | gap | 待对应批次写出 |
+| `src/integrations/install/config-json.ts` | gap | 待对应批次写出 |
+| `src/integrations/install/config-opencode.ts` | gap | 待对应批次写出 |
+| `src/integrations/install/config-toml.ts` | gap | 待对应批次写出 |
+| `src/integrations/install/install-paths.ts` | gap | 待对应批次写出 |
+| `src/integrations/install/installer.ts` | gap | 待对应批次写出 |
+| `src/integrations/install/registry.ts` | gap | 待对应批次写出 |
+| `src/integrations/install/skill-bundle.ts` | gap | 待对应批次写出 |
+| `src/integrations/install/types.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `13/02`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/integrations/core/protocol.ts` | gap | 待对应批次写出 |
+| `src/integrations/mcp/server.ts` | gap | 待对应批次写出 |
+| `src/integrations/mcp/stdio.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `14/01`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/setup/credentials.tsx` | gap | 待对应批次写出 |
+| `src/setup/credentials/components.tsx` | gap | 待对应批次写出 |
+| `src/setup/credentials/constants.ts` | gap | 待对应批次写出 |
+| `src/setup/credentials/format.ts` | gap | 待对应批次写出 |
+| `src/setup/credentials/persistence.ts` | gap | 待对应批次写出 |
+| `src/setup/credentials/steps.ts` | gap | 待对应批次写出 |
+| `src/setup/credentials/types.ts` | gap | 待对应批次写出 |
+| `src/setup/credentials/use-init-setup.ts` | gap | 待对应批次写出 |
+| `src/setup/credentials/view.tsx` | gap | 待对应批次写出 |
+
+### 责任文档 `14/02`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/config/env.ts` | gap | 待对应批次写出 |
+| `src/config/openwiki-home.ts` | gap | 待对应批次写出 |
+| `src/platform/diagnostics.ts` | gap | 待对应批次写出 |
+| `src/platform/fs-errors.ts` | gap | 待对应批次写出 |
+| `src/platform/language.ts` | gap | 待对应批次写出 |
+| `src/platform/utils.ts` | gap | 待对应批次写出 |
+| `src/platform/windows-acl.ts` | gap | 待对应批次写出 |
+| `src/version.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `14/03`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/telemetry/client.ts` | gap | 待对应批次写出 |
+| `src/telemetry/config.ts` | gap | 待对应批次写出 |
+| `src/telemetry/gates.ts` | gap | 待对应批次写出 |
+| `src/telemetry/index.ts` | gap | 待对应批次写出 |
+| `src/telemetry/install-id.ts` | gap | 待对应批次写出 |
+| `src/telemetry/record-run-safe.ts` | gap | 待对应批次写出 |
+| `src/telemetry/senders.ts` | gap | 待对应批次写出 |
+| `src/telemetry/types.ts` | gap | 待对应批次写出 |
+| `src/telemetry/with-run-telemetry.ts` | gap | 待对应批次写出 |
+
+### 责任文档 `14/04`
+
+| 源文件 | 覆盖度 | 备注 |
+|--------|--------|------|
+| `src/telemetry/errors.ts` | gap | 待对应批次写出 |
+| `src/telemetry/taxonomy.ts` | gap | 待对应批次写出 |
 ---
 
-## A. CLI 与 TUI（CLI and TUI）
+## gap*（有意不覆盖）
 
-| Source area | 覆盖文档 | 覆盖度 |
-|-------------|---------|--------|
-| `src/cli.tsx` — Ink TUI 主入口（4019 行） | `03-cli-and-tui/01-cli-entry-and-ink-tui.md` | full |
-| `src/commands.ts` — 命令行解析（819 行） | `03-cli-and-tui/02-command-parsing.md` | full |
-| `src/startup.ts` — 启动路由（102 行） | `03-cli-and-tui/03-startup-routing.md` | gap |
-| `src/code-mode.ts` — code mode 初始化 | `03-cli-and-tui/04-code-mode-setup.md` | gap |
+| 路径 | 理由 |
+|------|------|
+| `test/`（31 → 更多 vitest 文件） | 测试即规格，不在文档口径内 |
+| `evals/`（LEDGER benchmark 等） | 评测资产，非运行时架构 |
+| `examples/` | 示例资产 |
+| `scripts/` | 构建与发布脚本（除 stamp-build-channel.cjs 在 14/03 提及） |
+| `openwiki/`（仓库内上游自生成 wiki） | 是 OpenWiki 的**产物示例**，不是源码；且我们不维护上游生成物 |
+| `integrations/openwiki/`（skill 包内容） | 被安装的提示词资产，机制在 13 区文档中描述 |
 
-## B. Agent 与 Wiki 生成（Agent and Wiki Generation）
+## 统计（批 1 基线）
 
-| Source area | 覆盖文档 | 覆盖度 |
-|-------------|---------|--------|
-| `src/agent/index.ts` — agent 创建、模型初始化、运行编排（1637 行） | `04-agent-and-wiki-generation/01-agent-workflow.md` | full |
-| `src/agent/prompt.ts` — 系统/用户提示词（473 行） | `04-agent-and-wiki-generation/02-prompting-strategy.md` | full |
-| `src/agent/utils.ts` — Git 证据、内容快照、元数据（479 行） | `04-agent-and-wiki-generation/03-git-evidence-and-metadata.md` | full |
-| `src/agent/docs-only-backend.ts` — 只读文件后端 | `04-agent-and-wiki-generation/04-deepagents-backend.md` | full |
-| `src/agent/index-middleware.ts` — wiki 索引中间件 | `04-agent-and-wiki-generation/05-skills-and-middleware.md` | gap |
-| `src/agent/frontmatter-validator.ts` — frontmatter 校验 | `04-agent-and-wiki-generation/05-skills-and-middleware.md` | gap |
-| `src/agent/skills.ts` — skills 管理 | `04-agent-and-wiki-generation/05-skills-and-middleware.md` | gap |
-| `src/agent/types.ts` — 共享类型定义 | `04-agent-and-wiki-generation/01-agent-workflow.md` | full |
+> 按唯一源文件计数；`src/agent/index.ts`、`src/config/constants.ts` 等跨区文件只计一次，取主要责任文档。
 
-## C. 模型提供商（Model Providers）
-
-| Source area | 覆盖文档 | 覆盖度 |
-|-------------|---------|--------|
-| `src/agent/index.ts` — `createModel()` 各 provider 分支 | `05-model-providers/02-provider-model-creation.md` | full |
-| `src/agent/openai-chatgpt-oauth.ts` — ChatGPT OAuth（546 行） | `05-model-providers/03-chatgpt-oauth-provider.md` | gap |
-| `src/agent/vertex-surface.ts` — Vertex AI surface 路由 | `05-model-providers/04-vertex-ai-provider.md` | gap |
-| `src/constants.ts` — provider configs, model lists, env keys | `05-model-providers/01-provider-configuration.md` | full |
-| `src/env.ts` — managedEnvKeys, credential diagnostics | `05-model-providers/01-provider-configuration.md` | full |
-
-## D. 连接器与数据源（Connectors and Data Sources）
-
-| Source area | 覆盖文档 | 覆盖度 |
-|-------------|---------|--------|
-| `src/connectors/registry.ts` — 连接器注册 | `06-connectors-and-data-sources/01-connector-registry.md` | full |
-| `src/connectors/types.ts` — 连接器类型 | `06-connectors-and-data-sources/01-connector-registry.md`（细节待 `02-connector-lifecycle.md`，计划中） | partial |
-| `src/connectors/io.ts` — 连接器 I/O | `06-connectors-and-data-sources/02-connector-lifecycle.md` | gap |
-| `src/connectors/tools.ts` — agent 工具暴露（479 行） | `06-connectors-and-data-sources/01-connector-registry.md`（细节待 `03-connector-tools.md`，计划中） | partial |
-| `src/connectors/mcp-client.ts` — MCP 客户端（867 行） | `06-connectors-and-data-sources/11-mcp-subsystem.md` | gap |
-| `src/connectors/mcp-runtime.ts` — MCP 运行时 | `06-connectors-and-data-sources/11-mcp-subsystem.md` | gap |
-| `src/connectors/sources/git-repo.ts` | `06-connectors-and-data-sources/04-git-repo-connector.md` | gap |
-| `src/connectors/sources/gmail.ts` | `06-connectors-and-data-sources/05-gmail-connector.md` | gap |
-| `src/connectors/sources/hackernews.ts` | `06-connectors-and-data-sources/10-hackernews-connector.md` | gap |
-| `src/connectors/sources/mcp.ts` — Notion via MCP | `06-connectors-and-data-sources/06-notion-connector.md` | gap |
-| `src/connectors/sources/slack.ts`（752 行） | `06-connectors-and-data-sources/07-slack-connector.md` | gap |
-| `src/connectors/sources/web-search.ts` — Tavily | `06-connectors-and-data-sources/08-web-search-connector.md` | gap |
-| `src/connectors/sources/x.ts` — X/Twitter | `06-connectors-and-data-sources/09-x-connector.md` | gap |
-
-## E. 认证与 OAuth（Authentication and OAuth）
-
-| Source area | 覆盖文档 | 覆盖度 |
-|-------------|---------|--------|
-| `src/auth/oauth.ts` — OAuth 2.0 PKCE 流程（637 行） | `07-authentication-and-oauth/01-oauth-pkce-flow.md` | full |
-| `src/auth/providers.ts` — 提供商定义 | `07-authentication-and-oauth/01-oauth-pkce-flow.md`（细节待 `02-auth-providers.md`，计划中） | partial |
-| `src/auth/tokens.ts` — token 存储刷新过期 | `07-authentication-and-oauth/03-token-management.md` | gap |
-| `src/auth/configure.ts` — 认证配置生成 | `07-authentication-and-oauth/04-auth-configuration.md` | gap |
-| `src/auth/ngrok.ts` — HTTPS 隧道 | `07-authentication-and-oauth/05-ngrok-tunnel.md` | gap |
-| `src/auth/types.ts` — 认证类型 | `07-authentication-and-oauth/02-auth-providers.md` | gap |
-
-## F. 摄取与个人模式（Ingestion and Personal Mode）
-
-| Source area | 覆盖文档 | 覆盖度 |
-|-------------|---------|--------|
-| `src/ingestion.ts` — 摄取编排（421 行） | `08-ingestion-and-personal-mode/01-ingestion-pipeline.md` | full |
-| `src/onboarding.ts` — 首次配置（478 行） | `08-ingestion-and-personal-mode/02-onboarding.md` | gap |
-
-## G. 调度与 CI（Scheduling and CI）
-
-| Source area | 覆盖文档 | 覆盖度 |
-|-------------|---------|--------|
-| `src/schedules.ts` — LaunchAgent 管理（918 行） | `09-scheduling-and-ci/01-macos-launchagents.md` | full |
-| `.github/workflows/checks.yml` — CI 流水线 | `09-scheduling-and-ci/02-ci-workflows.md` | gap |
-| `.github/workflows/openwiki-update.yml` — 定时更新 | `09-scheduling-and-ci/03-scheduled-openwiki-updates.md` | gap |
-
-## H. 配置与遥测（Configuration and Telemetry）
-
-| Source area | 覆盖文档 | 覆盖度 |
-|-------------|---------|--------|
-| `src/credentials.tsx` — 交互式凭据向导（4337 行） | `10-configuration-and-telemetry/01-credential-onboarding.md` | full |
-| `src/env.ts` — .env 管理 | `10-configuration-and-telemetry/02-environment-and-config.md` | full |
-| `src/constants.ts` — 常量与配置（609 行） | `10-configuration-and-telemetry/02-environment-and-config.md` | full |
-| `src/openwiki-home.ts` — 家目录 | `10-configuration-and-telemetry/02-environment-and-config.md` | full |
-| `src/fs-errors.ts` — 文件系统错误 | `10-configuration-and-telemetry/02-environment-and-config.md` | full |
-| `src/telemetry/client.ts` — PostHog 客户端 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
-| `src/telemetry/config.ts` — 遥测配置 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
-| `src/telemetry/errors.ts` — 错误报告 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
-| `src/telemetry/gates.ts` — 功能开关 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
-| `src/telemetry/index.ts` | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
-| `src/telemetry/install-id.ts` — 安装 ID | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
-| `src/telemetry/record-run-safe.ts` — 安全记录 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
-| `src/telemetry/senders.ts` — 事件发送 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
-| `src/telemetry/types.ts` — 遥测类型 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
-| `src/diagnostics.ts` — 诊断 | `10-configuration-and-telemetry/03-posthog-telemetry.md` | gap |
-| `src/utils.ts` — 通用工具 | `10-configuration-and-telemetry/02-environment-and-config.md`（该文档已存在但未覆盖 utils.ts） | gap |
-
-## I. 测试（Testing）
-
-| Source area | 覆盖文档 | 覆盖度 |
-|-------------|---------|--------|
-| `test/` — 全部 31 个 vitest 测试文件 | `09-scheduling-and-ci/02-ci-workflows.md` | gap* |
-
----
-
-## 统计
-
-> 按**唯一源文件**计数（`src/agent/index.ts`、`src/env.ts`、`src/constants.ts` 在多个分区出现，各只计一次，取最高覆盖度）。
-
-- **总源文件数**：52（src/ 下 52 个 .ts/.tsx 文件）
-- **已映射到文档的源文件**：52（100%）
-- **覆盖度 full**：16
-  - A: 2（cli.tsx、commands.ts）
-  - B: 5（agent/index.ts、prompt.ts、agent/utils.ts、docs-only-backend.ts、agent/types.ts）
-  - C: 2（constants.ts、env.ts）
-  - D: 1（connectors/registry.ts）
-  - E: 1（auth/oauth.ts）
-  - F: 1（ingestion.ts）
-  - G: 1（schedules.ts）
-  - H: 3（credentials.tsx、openwiki-home.ts、fs-errors.ts）
-  - 合计 2+5+2+1+1+1+1+3 = 16
-- **覆盖度 partial**：3（connectors/types.ts、connectors/tools.ts、auth/providers.ts）
-- **覆盖度 gap**：33（52 − 16 full − 3 partial = 33）
-  - A: 2，B: 3，C: 2，D: 10，E: 4，F: 1，G: 0，H: 11（含 9 个 telemetry 文件、diagnostics.ts、utils.ts）
-- **覆盖度 gap\***（有意不覆盖）：1（test/ 目录，不计入 52 个 src 文件）
-- 注：G 分区的 `.github/workflows/*.yml` 两行不属于 src/ 源文件，不计入以上统计。
+- **总源文件**：168（`git ls-tree HEAD -- src/`）
+- **已映射到责任文档**：168（100%）
+- **覆盖度**：partial 3 / gap 165（full 0——追平批次滚动回写本节）
+- **责任文档数**：40（含区索引兜底；内容文档全部落成后应收敛为 ~35 篇内容文档 + 若干 README）
+- 追平进度以本节与各批验收为准：批 2 → 04/05/07 区转 full；批 3 → 12/13；批 4 → 06/08/09；批 5 → 03/10/11/14/02/01。
