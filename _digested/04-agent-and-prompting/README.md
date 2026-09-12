@@ -1,7 +1,7 @@
 ---
 title: "04 — Agent 与提示词 (Agent and Prompting)"
 doc_type: "index"
-status: "draft"
+status: "current"
 branch: "ethan"
 created: "2026-07-17"
 updated: "2026-09-13"
@@ -25,11 +25,11 @@ out_of_scope:
 
 | # | 文档 | 状态 | 说明 |
 |---|------|------|------|
-| 1 | `01-agent-workflow.md` | 待重写（改名「运行路径与编排」） | 双路径分流、`resolveRunConfig`、流解析三模式、crash-guard、checkpoint 裁剪 |
-| 2 | `02-prompting-strategy.md` | 待重写 | prompts/ 双模板、4 占位符装配、repository-prompts、bundled skills 同步（skills.ts） |
-| 3 | `03-git-evidence-and-metadata.md` | 待重写（改名「源指纹与变更检测」） | `createGitSummary` 已删 → sha256 源指纹体系、`getRepositoryChangedPaths`、元数据 status/language |
-| 4 | `04-deepagents-backend.md` | 待重写 | 11 方法覆写、ignore/claims/shell 白名单三层边界、`writableWikiPages` 写白名单 |
-| 5 | `05-openwikiignore.md` | 计划中 | `.openwikiignore`（`openwiki-ignore.ts` 326 行）：gitignore 兼容语义、last-match-wins、注入点 |
+| 1 | `01-agent-workflow.md` | 已完成 | 《运行路径与编排》：双路径分流、`resolveRunConfig`、流解析三模式、crash-guard、checkpoint 裁剪 |
+| 2 | `02-prompting-strategy.md` | 已完成 | prompts/ 双模板、4 占位符装配、repository-prompts、bundled skills 同步（skills.ts） |
+| 3 | `03-git-evidence-and-metadata.md` | 已完成 | 《源指纹与变更检测》：sha256 源指纹体系、`getRepositoryChangedPaths`、元数据 status/language |
+| 4 | `04-deepagents-backend.md` | 已完成 | 11 方法覆写、ignore/claims/shell 白名单三层边界、`writableWikiPages` 写白名单 |
+| 5 | `05-openwikiignore.md` | 已完成 | `.openwikiignore`（`openwiki-ignore.ts` 326 行）：gitignore 兼容语义、last-match-wins、注入点 |
 
 （原计划的 `05-skills-and-middleware.md` 拆解：skills 并入本区 02；okf/翻译中间件的 finalize 角色归 `05-generation-lifecycle/03`。）
 

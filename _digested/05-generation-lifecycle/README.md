@@ -1,7 +1,7 @@
 ---
 title: "05 — 生成生命周期 (Generation Lifecycle)"
 doc_type: "index"
-status: "draft"
+status: "current"
 branch: "ethan"
 created: "2026-09-13"
 updated: "2026-09-13"
@@ -23,9 +23,9 @@ out_of_scope:
 
 | # | 文档 | 状态 | 说明 |
 |---|------|------|------|
-| 1 | `01-page-job-state-machine.md` | 计划中 | PageJob 队列、恢复语义（源指纹漂移→重规划）、事务序、`RepositoryRunError` 错误码 |
-| 2 | `02-page-manifest-and-fast-forward.md` | 计划中 | manifest schema、与 claims pageVersion 的一致性要求、fast-forward 条件、no-op 严格前置门 |
-| 3 | `03-finalize-pipeline.md` | 计划中 | wiki-finalizer 收尾顺序（mermaid→index_sync→claims_sources→generated_provenance）、mermaid 校验降级协议、索引同步 |
+| 1 | `01-page-job-state-machine.md` | 已完成 | PageJob 队列、恢复语义（源指纹漂移→重规划）、事务序、`RepositoryRunError` 错误码 |
+| 2 | `02-page-manifest-and-fast-forward.md` | 已完成 | manifest schema、与 claims pageVersion 的一致性要求、fast-forward 条件、no-op 严格前置门 |
+| 3 | `03-finalize-pipeline.md` | 已完成 | wiki-finalizer 收尾顺序（mermaid→index_sync→link_validation→claims_sources→generated_provenance 五步）、mermaid 校验降级协议、索引同步 |
 
 ## 关键源文件
 

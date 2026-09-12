@@ -124,7 +124,7 @@ out_of_scope:
 |------|------|------|
 | 01-page-job-state-machine.md | ➕ | begin/planning/generating/finish、.run.json、PageJob 队列、恢复语义（漂移→重规划）、RepositoryRunError（R2） |
 | 02-page-manifest-and-fast-forward.md | ➕ | .page-manifest.json schema、与 claims pageVersion 一致性要求、fast-forward 条件、no-op 严格前置门 |
-| 03-finalize-pipeline.md | ➕ | wiki-finalizer 顺序 mermaid→index_sync→claims_sources→generated_provenance、mermaid 校验降级协议、索引同步 |
+| 03-finalize-pipeline.md | ➕ | wiki-finalizer 顺序（五步：mermaid→index_sync→link_validation→claims_sources→generated_provenance，批 2 勘误）、mermaid 校验降级协议、索引同步 |
 
 ### 06-model-providers/（原 05）
 | 文档 | 处置 | 要点 |
@@ -241,5 +241,5 @@ out_of_scope:
 |----|------|---------|
 | 批 0 | ✅ | 2026-09-13：git 同步 + sync 记录 + 深查 + 本计划（`60ba601`、`13057d7`） |
 | 批 1 | ✅ | 2026-09-13：14 区重排就位、README 全部重写（纯索引体例）、coverage-map 重写（168 文件 0 漏映射）、_context 两篇重写、根 README 更新、验收通过（导航层无死路径；内容文档死路径随批清零） |
-| 批 2 | ⏳ 进行中 | 04/05/07 区 12 篇 |
-| 批 3–6 | ⬜ | 未开始 |
+| 批 2 | ✅ | 2026-09-13：11 篇完成（04 区 5 / 05 区 3 / 07 区 3，约 3,910 行）；行号核验：各代理全量核对 + 协调方独立抽检 55 锚 0 异常；15 项勘误回写报告存档「勘误」节；coverage-map 翻转 43 行 full |
+| 批 3 | ⬜ 待开始 | 12/13 区 4 篇 |

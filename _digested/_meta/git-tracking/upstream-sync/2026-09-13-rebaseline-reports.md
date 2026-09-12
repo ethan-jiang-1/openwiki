@@ -19,6 +19,29 @@ out_of_scope:
 > ⚠️ 使用规则：本档案行号对应 e92cc11。写作时若 HEAD 已变，必须重新核对源码，不得照抄。
 > 各报告由独立只读分析产生，均已与源码核对；相互矛盾处以源码为准。
 
+## 勘误（批 2 写作期间实测修正，2026-09-13）
+
+以下 15 项由 11 篇批 2 文档写作时的源码复核发现；**下文各报告原文保留不改**，写作时以本节为准。
+
+**叙事级**
+1. 收尾顺序为**五**操作：mermaid → index_sync → **link_validation** → claims_sources → generated_provenance（wiki-finalizer.ts:263-284）；claims_sources 仅在有 claimSources 时条件执行（R1/R6 原文漏 link_validation）
+2. `persistRunMetadataIfChanged`（utils.ts:249-272）对 repository run **总是写入并刷新时间戳、清除上轮 interrupted**——「仅内容变更才写 complete」旧叙事作废（R2 及旧文档）
+3. `createDiagramInstructions`（prompt.ts:141-150）为**无调用点导出**，图纪律实际内联于 personal.ts（R6 所引 prompt.ts:144-148 需如此理解）
+4. `{GIT_HISTORY_HINT}`/`{DISCOVERY_INSTRUCTION}` 占位符仅存在于 code 模板；personal 装配时 replace 为无操作（R4a 未提及）
+5. docs-only-backend 对 `.openwikiignore`：read/readRaw **硬拒绝**，仅 ls/grep/glob 静默过滤（R4b 表述易误读）
+6. `replanning` stage 为类型保留档位，当前 repository-runner 只发射 noop/planning/generating/finalizing 四种（R2 未提及）
+
+**锚点级**
+7. okf-middleware 挂载为 `src/agent/index.ts:519` 单点（R4a/R6 的 :486 及 repository-runner 挂载说法过时）
+8. `ClaimsRuntime.finalize` 闭包在 `buildClaimsRuntime` runtime.ts:123-150（接口 :40）；:161 是 `finalizeVerificationProjection`（R1）
+9. assertPageClaimsDurable 本体 :1307-1384、调用点 :1256（R1 的 :1357 是函数内部行）
+10. types.ts：UpdateRunStatus :90、RunContext :101-105、RepositoryGenerationProgressEvent :13-51（R4b 旧值漂移）
+11. OpenRouter fetch 段拆分：activeOpenRouterSinks :2003 / openRouterDebugFetch :2006-2060 / installOpenRouterDebugFetch :2068-2099（R4b 的 :1956-2100 过宽）
+12. R2 微调：no-op 门 :411-458、manifest 原子写 :161-172、分流 :178-230、UpdateMetadata :92-99
+13. R4a：repository-prompts frontmatter 要求 :133-140；R7：skills.ts = replaceSkillDirectory :53-118 + grantOwnerWrite :127-142
+14. R8 补：ignore 注入点含 claims 侧两处（claims/brains/code/runtime.ts:64-79、evidence/repository/resolver.ts:195-198）
+15. claims 体量：13 文件共 3694 行（07 区 README 原写「约 2900 行」）
+
 ## R1. claims + okf（全新子系统，基线中不存在；基线 OKF 仅存在于 prompt.ts 提示词层）
 
 **定位**：`src/okf/`（6 文件）＝OKF v0.2 front matter（type/title/description/tags + generated/verified/sources/status/stale_after 信任族）的确定性校验/修复/投影/索引；`src/claims/`（13 文件）＝grounded claims：每页可验证事实命题（Claim）+ `repo://` 源码证据（确定性版本 token），存储于 `openwiki/.claims/**/*.json` sidecar。claims 是事实状态所有者，okf 是投影目标（sources/verified）。

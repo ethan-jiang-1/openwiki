@@ -1,276 +1,223 @@
 ---
-title: "03 — Git 证据与元数据 (Git Evidence and Metadata)"
+title: "03 — 源指纹与变更检测 (Source Fingerprint and Change Detection)"
 doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
-audience: "需要理解 Git 证据收集、内容快照防重写和 .last-update.json 元数据管理机制的人"
-purpose: "详细解释 src/agent/utils.ts 的两个核心职责：(a) 收集 Git 证据以将 agent 锚定在真实仓库状态，(b) 通过内容快照对比（debounce）管理 .last-update.json 元数据，防止无变更时重复更新"
-owns: "src/agent/utils.ts（479 行）中所有函数：createRunContext、createGitSummary、createOpenWikiContentSnapshot、persistRunMetadataIfChanged、writeLastUpdateMetadata、readLastUpdate、getUpdateNoopStatus、shouldCheckUpdateNoop、runGit、addDirectoryToSnapshot 及其辅助函数"
+updated: "2026-09-13"
+sync_event: "2026-09-13"
+audience: "需要理解 OpenWiki 如何为一次生成锚定仓库源状态、如何结构化描述变更、以及 .last-update.json 元数据与 no-op 判定如何工作的人"
+purpose: "解释 src/agent/utils.ts 的三大职责：(a) 模型可见源输入的 sha256 源指纹（source fingerprint），(b) 结构化变更路径清单，(c) .last-update.json 元数据读写与 update no-op 判定"
+owns: "src/agent/utils.ts（1048 行）全部函数：SOURCE_FINGERPRINT_VERSION、createRepositorySourceSnapshot/Fingerprint、getRepositoryChangedPaths、createRunContext、getUpdateNoopStatus、shouldCheckUpdateNoop、writeLastUpdateMetadata、readLastUpdate、persistRunMetadataIfChanged、createOpenWikiContentSnapshot 及其辅助函数；src/agent/types.ts 的 UpdateMetadata/UpdateRunStatus"
 update_when:
-  - "utils.ts 中任一函数的参数、返回值或逻辑分支发生变化时"
-  - "UpdateMetadata 或 OpenWikiContentSnapshot 类型定义变化时"
-  - "UpdateNoopStatus 的条件逻辑发生变化时"
-  - "UPDATE_METADATA_PATH / LOCAL_WIKI_METADATA_PATH 常量变化时"
+  - "SOURCE_FINGERPRINT_VERSION 或指纹哈希字段序（format/head/status-code/path/kind/bytes…）变化时"
+  - "指纹的路径选择规则（.git/.openwikiignore/openwiki/ignore 规则）变化时"
+  - "getRepositoryChangedPaths 的三来源查询或过滤规则变化时"
+  - "UpdateMetadata 字段集或 readLastUpdate 的验证/兼容逻辑变化时"
+  - "getUpdateNoopStatus 的判定顺序（gitHead → interrupted → language → worktree → committed diff）变化时"
 out_of_scope:
-  - "Agent 10 步工作流中的快照调用时机（在 01-agent-workflow.md）"
-  - "UpdateMetadata 在其他文件中的消费方式"
-  - "local-wiki 模式的完整语义（在 08-ingestion-and-personal-mode/）"
-  - "Git 操作本身的实现细节（execFile 行为、--no-pager 语义等）"
+  - "指纹的消费决策：no-op 严格前置门、fast-forward、源漂移重规划（在 05-generation-lifecycle/02 与 01）"
+  - "主路径/快速路径的调用时机与失败写入时序（在 01-agent-workflow.md 与 05 区 03）"
+  - "page-job 生命周期内元数据写入的完整序列（在 05-generation-lifecycle/03-finalize-pipeline.md）"
+  - ".openwikiignore 的解析语法与匹配语义（在 05-openwikiignore.md）"
+  - "local-wiki 模式的完整语义（在 10-ingestion-and-personal-mode/）"
 ---
 
-# 03 — Git 证据与元数据 (Git Evidence and Metadata)
+# 03 — 源指纹与变更检测 (Source Fingerprint and Change Detection)
 
-`src/agent/utils.ts`（479 行）是文档 agent 与现实世界之间的桥梁。它有两个密不可分的核心职责：
+`src/agent/utils.ts`（1048 行）是文档 agent 与仓库现实之间的桥梁。旧基线（d4e94ab）的 `createGitSummary()`/`formatGitSection()` **文本型 Git 证据（原 `utils.ts:337-441`）已整体删除**——提示词不再接收拼接的 `$ git status`/`$ git log` 文本块。取而代之的是机器可判定的两套机制：**源指纹（source fingerprint）**把"模型能看到哪些源输入"压缩成一个版本化 sha256；**结构化变更清单（changed-path list）**把"哪些路径变了"交给 planner 与前置门消费。元数据与 no-op 判定在同一文件里围绕这两者重组。
 
-1. **Git 证据收集（Git evidence collection）**：从 Git 仓库提取工作树状态、提交历史和未提交变更，组装成 prompt 可用的文本证据块。
-2. **元数据管理与内容快照防重写（Content-snapshot debouncing）**：通过 SHA-256 哈希比较 `openwiki/` 目录前后内容，仅在文档实际变更时才写入 `.last-update.json`，防止无意义更新循环。
-
-> **源码是唯一真相源。** 以下所有函数名、行号、参数和分支均来自 `src/agent/utils.ts`（479 行）。
-
----
+> **源码是唯一真相源。** 以下所有函数名、行号、参数和分支均来自 `src/agent/utils.ts`（1048 行）、`src/agent/types.ts`（105 行）在分支 `ethan` 基线 `e92cc11` 的当前状态。
 
 ## 1. 概览（Overview）
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                    src/agent/utils.ts                     │
-│                                                          │
-│  ┌─────────────────────┐  ┌──────────────────────────┐  │
-│  │  Git 证据收集         │  │  内容快照与元数据管理      │  │
-│  │                     │  │                          │  │
-│  │  runGit()           │  │  createOpenWikiContent-  │  │
-│  │  getGitHead()       │  │    Snapshot()            │  │
-│  │  createGitSummary() │  │  addDirectoryToSnapshot()│  │
-│  │  createRunContext() │  │  readLastUpdate()        │  │
-│  │                     │  │  writeLastUpdateMetadata()│  │
-│  │                     │  │  persistRunMetadataIf-   │  │
-│  │                     │  │    Changed()             │  │
-│  │                     │  │  getUpdateNoopStatus()   │  │
-│  │                     │  │  shouldCheckUpdateNoop() │  │
-│  └─────────────────────┘  └──────────────────────────┘  │
-│                                                          │
-│  辅助函数：                                              │
-│  formatGitSection()  isUpdateMetadataStatusLine()       │
-│  getChangedPathsSinceLastUpdate()  isOpenWikiPath()     │
-│  normalizeGitPath()  isExecError()  getWikiContentRoot()│
-│  getMetadataFilePath()  readSnapshotFile()              │
-│  readRunWikiGoal()                                       │
-└──────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                      src/agent/utils.ts                         │
+│                                                                │
+│  ┌───────────────────────────┐  ┌───────────────────────────┐  │
+│  │ 源指纹（正确性门）           │  │ 变更清单（planner 辅助）     │  │
+│  │ SOURCE_FINGERPRINT_VERSION │  │ getRepositoryChangedPaths │  │
+│  │ createRepositorySource-    │  │ runGitLines（失败降级空）    │  │
+│  │   Snapshot / Fingerprint   │  │ extractGitPaths 等解析族    │  │
+│  │ runFingerprintGit（失败抛） │  │                           │  │
+│  └───────────────────────────┘  └───────────────────────────┘  │
+│                                                                │
+│  ┌───────────────────────────┐  ┌───────────────────────────┐  │
+│  │ 元数据 .last-update.json   │  │ no-op 判定                 │  │
+│  │ writeLastUpdateMetadata   │  │ shouldCheckUpdateNoop     │  │
+│  │ readLastUpdate（验证/兼容） │  │ getUpdateNoopStatus       │  │
+│  │ persistRunMetadataIfChanged│  │ （ignore/interrupted/      │  │
+│  │ createOpenWikiContent-    │  │   language 三重新前置）      │  │
+│  │   Snapshot（内容哈希）      │  │ isUpdateMetadataStatusLine│  │
+│  └───────────────────────────┘  └───────────────────────────┘  │
+│                                                                │
+│  辅助：createRunContext  readRunWikiGoal  getWikiContentRoot    │
+│        getMetadataFilePath  addDirectoryToSnapshot  runGit      │
+│        getGitHead  isOpenWikiPath  normalizeGitPath  isExecError│
+└────────────────────────────────────────────────────────────────┘
 ```
 
-两个职责通过 `createRunContext()` 函数汇聚：它为 agent 组装 `RunContext`（包含 `gitSummary` 和 `lastUpdate`），agent 据此决定文档需要如何更新。
+两条 Git 执行通道的**失败语义刻意相反**：指纹通道（`runFingerprintGit`）失败即抛——指纹是正确性门（correctness gate）；清单通道（`runGitLines`）失败返回空数组——变更上下文只是 planner 辅助，不值得为此中断生命周期。
 
----
+## 2. 源指纹（Source Fingerprint）
 
-## 2. Git 证据收集（Git Evidence Collection）
+### 2.1 版本常量与缓冲上限
 
-### 2.1 入口：`createRunContext()`
-
-**源码位置**：`src/agent/utils.ts:43-73`
+**源码位置**：`src/agent/utils.ts:289-290`
 
 ```typescript
-export async function createRunContext(
-  command: OpenWikiCommand,
+const SOURCE_FINGERPRINT_VERSION = "openwiki-source-fingerprint-v1";
+const SOURCE_FINGERPRINT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+```
+
+版本字符串作为 `format` 字段参与哈希（`utils.ts:384`）：未来任何哈希字段序或语义变化都会换新版本号，使新旧指纹天然不相等、触发重规划而非静默误判。`utils.ts:290` 的 64 MB 上限是四个 Git 查询各自的 stdout 缓冲上限。
+
+### 2.2 快照与指纹：两个导出入口
+
+**源码位置**：`src/agent/utils.ts:307-319`（类型）、`utils.ts:331-404`（快照）、`utils.ts:413-419`（指纹）
+
+```typescript
+export interface RepositorySourceSnapshot {
+  fingerprint: string;   // 版本化哈希，形如 "sha256:<64 hex>"
+  gitHead?: string;      // unborn 分支时省略
+}
+
+export async function createRepositorySourceSnapshot(
   cwd: string,
-  outputMode: OpenWikiOutputMode = "repository",
-): Promise<RunContext>
+  openWikiIgnore: OpenWikiIgnore,
+): Promise<RepositorySourceSnapshot>
+
+export async function createRepositorySourceFingerprint(
+  cwd: string,
+  openWikiIgnore: OpenWikiIgnore,
+): Promise<string>   // = (await createRepositorySourceSnapshot(...)).fingerprint
 ```
 
-`createRunContext()` 是 agent 获取运行上下文（RunContext）的唯一入口。它根据 `command` 和 `outputMode` 决定 Git 证据的形态：
+快照版额外返回观察到的 Git HEAD，供调用方把指纹与 commit 一起落盘（page manifest 的 `sourceFingerprint` + `gitHead`，见 05 区 02）。
 
-| 条件 | gitSummary 内容 | 源码行 |
-|------|----------------|--------|
-| `command === "chat"` | 固定字符串 `"Not applicable for chat."` | `utils.ts:54-56` |
-| `outputMode === "local-wiki"` | 固定字符串，说明连接器原始数据路径优先 | `utils.ts:62-65` |
-| `command !== "chat"` 且 `outputMode === "repository"` | 调用 `createGitSummary()`，动态组装 Git 证据 | `utils.ts:70` |
+### 2.3 路径全集：四个 Git 查询
 
-三种情况都会调用 `readLastUpdate()` 获取上一轮更新的元数据，以及 `readRunWikiGoal()` 获取 wiki 目标描述（来自 `openwiki/INSTRUCTIONS.md` 中的指令或 onboarding 配置）。
+**源码位置**：`src/agent/utils.ts:339-356`
 
-**关键设计决策**：chat 模式和 local-wiki 模式明确跳过 Git 证据收集。Chat 不需要；local-wiki 模式的数据来源是连接器（connector）的原始数据路径和 OpenWiki connector 工具，而非 Git 仓库的 diff。
+`createRepositorySourceSnapshot` 并行执行四个查询：
 
-### 2.2 Git 证据组装：`createGitSummary()`
+| 查询 | 目的 |
+|------|------|
+| `git rev-parse --verify HEAD`（`readFingerprintHead`，`utils.ts:424-444`） | 当前 commit；失败时尝试 `symbolic-ref` 生成 `unborn:<ref>` 稳定形式（`utils.ts:436`），仍失败才抛 |
+| `git ls-files --cached -z` | tracked 路径全集 |
+| `git ls-files --others --exclude-standard -z` | untracked（但未被 gitignore 排除）路径全集 |
+| `git status --porcelain=v1 --untracked-files=all --no-renames -z` | 工作树状态码（参与哈希，见 2.5） |
 
-**源码位置**：`src/agent/utils.ts:337-402`
+候选集 = tracked ∪ untracked，外加**显式纳入的 `.openwikiignore` 本身**（`utils.ts:365-367`，用 `fingerprintEntryExists` 的 `lstat` 探测，不跟随符号链接，`utils.ts:523-531`）。ignore 文件永远是指纹输入——修改排除规则本身必须改变指纹，否则"改了 ignore 却跳过重跑"会成为漏洞。
 
-`createGitSummary()` 将多个 Git 命令的输出组装成一个结构化的文本块，注入到 init/update prompt 中。组装逻辑如下：
+### 2.4 模型可见性过滤
 
-**始终执行的命令**（所有 repository 模式下的 init/update 都会执行）：
-
-| Git 命令 | 作用 | 源码行 |
-|---------|------|--------|
-| `git status --short` | 获取当前工作树变更状态（暂存 + 未暂存 + 未跟踪） | `utils.ts:343` |
-| `git rev-parse HEAD` | 获取当前 HEAD 的 commit hash | `utils.ts:344` |
-| `git diff --name-status HEAD` | 获取相对于 HEAD 的未提交变更列表 | `utils.ts:398` |
-
-**条件执行的日志命令**（根据 command 类型和已有的元数据）：
-
-| 条件 | 执行的 Git 命令 | 源码行 |
-|------|---------------|--------|
-| `command === "update"` 且 `lastUpdate.gitHead` 存在 | `git log <gitHead>..HEAD --name-status --oneline` | `utils.ts:350-361` |
-| `command === "update"` 且仅有 `lastUpdate.updatedAt`（无 gitHead） | `git log --since <updatedAt> --name-status --oneline` | `utils.ts:363-376` |
-| `command === "init"` 或 `command === "update"` 但无元数据 | `git log --max-count=20 --name-status --oneline` | `utils.ts:379-396` |
-
-**三级回退逻辑（three-tier fallback logic）**：
-
-1. **最优**：有 `gitHead` → 精确范围 `gitHead..HEAD`，只包含上次更新后的新提交。
-2. **次优**：仅有 `updatedAt` 时间戳 → `--since` 时间范围，依赖提交时间，可能因 rebase 等因素不够精确。
-3. **兜底**：无元数据或无 gitHead → 最近 20 条提交。对于 `update` 命令，会额外在 prompt 中插入 `"No prior OpenWiki update timestamp was found."` 提示，让 agent 知道它缺少上下文。
-
-**组装格式**：每个命令的输出通过 `formatGitSection()`（`utils.ts:437-441`）格式化为：
-
-```
-$ git <command>
-<output>
-
-$ git <next-command>
-<output>
-```
-
-当命令输出为空时，显示 `(no output)`。
+**源码位置**：`src/agent/utils.ts:511-518`
 
 ```typescript
-function formatGitSection(command: string, output: string): string {
-  return [`$ ${command}`, output.length > 0 ? output : "(no output)"].join("\n");
+function isFingerprintSourcePath(candidate: string, openWikiIgnore: OpenWikiIgnore): boolean {
+  if (candidate === OPENWIKI_IGNORE_FILE) return true;
+  if (candidate === ".git" || candidate.startsWith(".git/")) return false;
+  return !isOpenWikiPath(candidate) && !openWikiIgnore.ignores(candidate);
 }
 ```
 
-### 2.3 底层 Git 执行：`runGit()` 与 `getGitHead()`
+模型可见源文件（model-visible source）的全集定义：
 
-**`runGit()`**（`src/agent/utils.ts:413-435`）是所有 Git 操作的统一执行器。
+- **包含**：tracked + untracked 的全部仓库路径；
+- **排除**：`.git` 内部、`openwiki/` 生成物（`isOpenWikiPath`，`utils.ts:983-987`）、命中 `.openwikiignore` 的路径；
+- **例外保留**：`.openwikiignore` 自身。
+
+即 `tracked + untracked − ignored − openwiki`。过滤后按 UTF-16 码元序排序（`compareFingerprintStrings`，`utils.ts:705-707`）——刻意不用 `localeCompare`，保证跨平台确定性。
+
+### 2.5 哈希构成
+
+**源码位置**：`src/agent/utils.ts:383-397`（装配）、`utils.ts:688-700`（字段编码）
+
+哈希输入按固定顺序写入**长度定界字段**（`updateFingerprintField`：`label \0 <byte-length> \0 <bytes> \0`，`utils.ts:688-700`），杜绝拼接歧义：
+
+1. `format` = `SOURCE_FINGERPRINT_VERSION`；
+2. `head` = 当前 HEAD（或 `unborn:<ref>`）；
+3. 每条 porcelain 状态记录的 `status-code` + `status-path`（经 `parseFingerprintStatus` 解析 NUL 定界记录，`utils.ts:482-492`；`--no-renames` 保证无 rename 对）；
+4. 每个可见路径的：`path` → `executable`（yes/no）→ `kind`（`file` / `symlink` / `directory` / `tracked-missing`）→ 内容字节（文件）或链接目标（symlink）。
+
+结果加 `sha256:` 前缀返回（`utils.ts:399`）。
+
+**每路径哈希的细节**（`updateFingerprintSourceEntry`，`utils.ts:536-599`）：
+
+- 绝对路径越界检查（`utils.ts:542-548`）：Git 输出的路径若解析后逃出仓库根，立即抛错。Git 侧的路径先经 `assertFingerprintGitPath` 校验（拒绝绝对路径与 `../` 逃逸，`utils.ts:497-506`）。
+- `tracked-missing`（`utils.ts:556-559`）：tracked 文件在工作树中消失是**合法状态**（未提交的删除），以独立 `kind` 参与哈希；untracked 路径消失则抛错。
+- symlink（`utils.ts:582-589`）：哈希**链接目标字节**而非目标内容——替换 symlink 是源变更。
+- directory（`utils.ts:591-597`）：仅 submodule gitlink 走到此分支（untracked 目录已被 `ls-files --others` 展开成文件），以路径 + 状态 + 目录 kind 表达。
+
+### 2.6 为什么排除 ctime/stat 漂移
+
+指纹是**内容字节哈希**，从不读取 mtime/ctime/size 等 stat 元数据参与哈希——`git checkout`、分支切换、编辑器触碰都会扰动 stat 而不改变内容，若参与哈希会造成无意义重规划。stat 只用于**读前读后的一致性校验**：
+
+**源码位置**：`src/agent/utils.ts:614-670`
+
+`readFingerprintRegularFile` 以 `O_RDONLY | O_NOFOLLOW`（平台支持时，`getFingerprintFileOpenFlags`，`utils.ts:678-683`）打开文件，然后核对打开句柄的 stat 与先前 `lstat` 的 stat 是否为同一文件（`isSameFingerprintRegularFile`，`utils.ts:645-670`）：
+
+- 非 Windows：`dev + ino` 相等；
+- Windows：同一文件在 `lstat` 与 `FileHandle.stat` 间可能报出不同 dev/ino，退化为 `size + mtimeNs + birthtimeNs` 相等（注释明确说明 ctimeNs 在该场景下不可用，`utils.ts:660-664`）。
+
+不一致即抛 `Source path changed while fingerprinting`——这关闭了"检查后读取"窗口内的 TOCTOU 替换，即使平台没有 `O_NOFOLLOW`，被换入的 symlink 目标字节也永远读不进来（`utils.ts:604-607` 注释）。
+
+### 2.7 失败语义：正确性门
+
+**源码位置**：`src/agent/utils.ts:449-466`、`utils.ts:324-325`（doc 注释）
+
+`runFingerprintGit` 把任何 Git 失败包装成带上下文的 Error 抛出；文件读取、路径逃逸、不支持的平台条目类型同样抛出（`utils.ts:560-562`、`598`）。注释写明原则：*"Git, stat, symlink, and file-read failures reject because the fingerprint is a correctness gate."* 指纹不干净就宁可让运行失败——半可靠的指纹会导致错误的 no-op 或漏更新。消费侧（05 区）用连续两次快照相等来做"指纹稳定"确认，正是建立在"指纹本身绝不静默降级"之上。
+
+## 3. 结构化变更清单：getRepositoryChangedPaths
+
+**源码位置**：`src/agent/utils.ts:909-949`
 
 ```typescript
-async function runGit(cwd: string, args: string[]): Promise<string>
-```
-
-核心特征：
-- 使用 `child_process.execFile`（通过 `promisify` 包装）调用 `git --no-pager <args>`
-- `maxBuffer: 1024 * 1024`（1 MB），限制输出大小以防止内存问题
-- **容错设计**：Git 命令非零退出时不抛异常，而是捕获 `stdout` 和 `stderr` 拼接后返回。这意味着即使 `git rev-parse HEAD` 在非 Git 目录中失败，也不会导致整个 agent 崩溃——agent 会收到 `"(unknown)"` 或空字符串
-- 通过 `isExecError()` 类型守卫（`utils.ts:475-479`）判断错误是否来自 `execFile` 并包含 `stdout`/`stderr`
-
-**`getGitHead()`**（`src/agent/utils.ts:404-408`）：对 `runGit(cwd, ["rev-parse", "HEAD"])` 的简单包装，空字符串时返回 `undefined`。
-
-### 2.4 Prompt 中的实际效果
-
-组装后的 Git 证据块被放入 `RunContext.gitSummary`，agent 的系统提示词和用户提示词通过模板变量 `{gitSummary}` 引用它。Agent 据此可以：
-- 判断自上次更新以来哪些文件发生了变化
-- 识别未提交的更改是否需要反映到文档中
-- 理解仓库的最近提交历史，为文档更新提供上下文
-
----
-
-## 3. 内容快照机制（Content Snapshot Mechanism）
-
-内容快照（content snapshot）是防重写系统的核心。它的目标很简单：**只在 openwiki 目录的内容真正发生变更时才记录新元数据**。
-
-### 3.1 `createOpenWikiContentSnapshot()`
-
-**源码位置**：`src/agent/utils.ts:196-206`
-
-```typescript
-export async function createOpenWikiContentSnapshot(
+export async function getRepositoryChangedPaths(
   cwd: string,
-  outputMode: OpenWikiOutputMode = "repository",
-): Promise<OpenWikiContentSnapshot>
+  openWikiIgnore: OpenWikiIgnore,
+  baseGitHead?: string,
+): Promise<string[]>
 ```
 
-`OpenWikiContentSnapshot` 类型（`utils.ts:27`）定义为 `string`——实质是 SHA-256 哈希的 hex 字符串。
+取代旧 `getChangedPathsSinceLastUpdate`（后者仍以私有形式存留于 no-op 判定，`utils.ts:971-981`）面向 planner 的结构化版本。三个来源取并集：
 
-工作流程：
-1. 通过 `getWikiContentRoot()`（`utils.ts:303-308`）确定快照根目录：
-   - `repository` 模式：`<cwd>/openwiki/`
-   - `local-wiki` 模式：`<cwd>/`（即家目录下的个人 wiki 目录）
-2. 创建 SHA-256 哈希对象
-3. 调用 `addDirectoryToSnapshot()` 递归扫描目录树
-4. 返回 `.digest("hex")`
+| 来源 | 查询 | 源码行 |
+|------|------|--------|
+| 自基线以来的已提交变更 | `git diff --name-only <baseGitHead>..HEAD`（有 baseGitHead 时） | `utils.ts:916-924` |
+| 工作树未提交变更（暂存 + 未暂存） | `git diff --name-only HEAD` | `utils.ts:927-933` |
+| untracked 文件 | `git ls-files --others --exclude-standard` | `utils.ts:936-942` |
 
-### 3.2 `addDirectoryToSnapshot()` — 递归哈希算法
+并集去重后过滤：去掉 `openwiki/` 生成物与 ignore 命中路径，再按确定性排序返回（`utils.ts:944-948`）。每条路径经 `normalizeGitPath`（trim + 反斜杠转正斜杠，`utils.ts:989-991`）。
 
-**源码位置**：`src/agent/utils.ts:250-301`
+**失败降级**：底层 `runGitLines`（`utils.ts:954-969`）对任何 Git 失败返回空数组——doc 注释（`utils.ts:903-908`）说明理由：*"Unlike the source fingerprint, history lookup failures intentionally produce an empty list and do not weaken lifecycle correctness."* 变更清单是 planner 的上下文输入（消费点在 `src/generation/repository-run.ts:827`、`:859`），claims preflight 与规划在没有历史时照常运行；而 fingerprint 的消费（no-op / fast-forward / 重规划判定）在 05 区 02 与 01。
 
-```typescript
-async function addDirectoryToSnapshot(
-  hash: ReturnType<typeof createHash>,
-  directory: string,
-  relativeDirectory: string,
-): Promise<void>
-```
+## 4. 元数据：`.last-update.json`
 
-这是一个在 `utils.ts` 内部使用的 private 函数。算法细节：
+### 4.1 UpdateMetadata 类型
 
-**确定性与排序（Deterministic ordering）**：
-```typescript
-for (const entry of entries.sort((left, right) =>
-  left.name.localeCompare(right.name),
-))
-```
-目录下的所有条目按名称字母排序，确保同一目录树两次扫描得到相同的哈希值，无关文件系统返回顺序。
-
-**元数据文件排除（Metadata exclusion）**：
-```typescript
-if (
-  relativePath === path.basename(UPDATE_METADATA_PATH) ||
-  relativePath === LOCAL_WIKI_METADATA_PATH
-) {
-  continue;
-}
-```
-`UPDATE_METADATA_PATH` = `"openwiki/.last-update.json"`，其 basename 为 `.last-update.json`。`LOCAL_WIKI_METADATA_PATH` = `".last-update.json"`。
-
-两个条件用 `===` 精确匹配 relativePath 的值为 `.last-update.json`。这意味着：
-- 在 repository 模式（扫描 `openwiki/` 目录）下，`openwiki/.last-update.json` 的 relativePath 是 `.last-update.json`，被排除
-- 在 local-wiki 模式（扫描 cwd）下，`.last-update.json` 的 relativePath 也是 `.last-update.json`，被排除
-- **注意**：只有根级（直接位于快照目录下的）`.last-update.json` 被排除。如果子目录下碰巧有同名文件，不会被排除（通过 `===` 精确匹配而非 `endsWith`）
-
-**目录条目**：
-```typescript
-hash.update(`dir:${relativePath}\0`);
-```
-目录只写入路径和终止符，不写入其内容。目录的内容由递归调用处理其中的文件。
-
-**文件条目**：
-```typescript
-hash.update(`file:${relativePath}\0`);
-hash.update(fileContent);
-hash.update("\0");
-```
-文件写入 `file:` 前缀 + 相对路径 + 终止符，然后是完整文件内容的字节，最后再加一个终止符。整个文件内容参与哈希——即使是二进制文件。
-
-**竞态容错（Race tolerance）**：
-- 目录不存在（`ENOENT`）：`addDirectoryToSnapshot()` 在 `readdir` 失败时，如果是 `isExpectedSnapshotRaceError`（`EISDIR`、`ENOENT`、`ENOTDIR`），写入 `"missing"` 到哈希并返回
-- 文件不存在（`ENOENT`）：`readSnapshotFile()`（`utils.ts:322-332`）在 `readFile` 失败时，如果是预期竞态错误则返回 `null`，调用方跳过该文件
-- 非文件非目录（如 socket、符号链接等）：直接 `continue`
-
-这种设计意味着快照操作是 **best-effort**——它不会因为文件系统竞态而崩溃，而是用一个确定的"不可读"标记（`"missing"`）替代，确保即使有文件在扫描过程中被移动或删除，快照也能完成。
-
----
-
-## 4. 元数据持久化（Metadata Persistence）
-
-### 4.1 `UpdateMetadata` 类型
-
-**源码位置**：`src/agent/types.ts:45-50`
+**源码位置**：`src/agent/types.ts:90-99`
 
 ```typescript
+export type UpdateRunStatus = "complete" | "interrupted";
+
 export type UpdateMetadata = {
-  updatedAt: string;       // ISO 8601 时间戳，new Date().toISOString()
-  command: OpenWikiCommand; // "init" | "update"（"chat" 不写入）
-  gitHead?: string;        // Git HEAD commit hash，local-wiki 模式下为 undefined
-  model: string;           // 使用的 AI 模型 ID，如 "claude-haiku-4-5"
+  updatedAt: string;             // ISO 8601
+  command: OpenWikiCommand;      // "init" | "update"（"chat" 不写）
+  gitHead?: string;              // repository 模式才有；local-wiki 为 undefined
+  model: string;
+  status?: UpdateRunStatus;      // 本基线新增
+  language?: string;             // 本基线新增
 };
 ```
 
-四个字段各有用处：
-- `updatedAt`：用于 `git log --since` 的时间范围查询
-- `command`：记录是 `init` 还是 `update`，目前主要用于文档记录
-- `gitHead`：用于 `git log <gitHead>..HEAD` 精确范围查询。这是最优路径，因为基于 commit hash 的范围不受 rebase 影响
-- `model`：用于 `getUpdateNoopStatus()` 的 pre-flight 检查中返回上一次使用的模型 ID
+`status` 让元数据从"上次成功是什么时候"升级为"上次运行以什么状态结束"；`language` 记录 wiki 的持久化语言，供后续运行继承与语言切换检测。`RunContext`（`types.ts:101-105`）持有 `lastUpdate` 与解析后的 `language`——`createRunContext`（`utils.ts:74-97`）的继承链是 `--language 显式值 → lastUpdate.language → "en"`（`utils.ts:84-88`），English 显式物化为 `"en"` 而非缺省键。
 
-### 4.2 `writeLastUpdateMetadata()`
+### 4.2 写入：writeLastUpdateMetadata
 
-**源码位置**：`src/agent/utils.ts:144-163`
+**源码位置**：`src/agent/utils.ts:208-239`
 
 ```typescript
 export async function writeLastUpdateMetadata(
@@ -278,133 +225,74 @@ export async function writeLastUpdateMetadata(
   cwd: string,
   modelId: string,
   outputMode: OpenWikiOutputMode = "repository",
+  status: UpdateRunStatus = "complete",
+  language?: string,
+  gitHeadOverride?: string | null,
 ): Promise<void>
 ```
 
-直接写入元数据文件的函数。其行为：
-1. 通过 `getMetadataFilePath()` 确定写入路径：
-   - repository 模式：`<cwd>/openwiki/.last-update.json`
-   - local-wiki 模式：`<cwd>/.last-update.json`
-2. 对 repository 模式，调用 `getGitHead()` 获取当前 HEAD
-3. 创建 `UpdateMetadata` 对象，`updatedAt` 使用 `new Date().toISOString()`
-4. `mkdir` 确保父目录存在（递归创建），然后 `writeFile` 写入格式化 JSON（`JSON.stringify(metadata, null, 2)` + 末尾换行）
+相比旧基线新增三个参数。行为要点：
 
-**注意**：这个函数本身不做任何快照对比——它盲目写入。快照对比逻辑在 `persistRunMetadataIfChanged()` 中。
+- `gitHead` 仅 repository 模式解析（`utils.ts:218-223`）；`gitHeadOverride === null` 显式省略基线（page-job 收尾用），否则取 override 或实时 `getGitHead`。
+- `status` 恒写入（默认 `"complete"`）；`language` 仅在有值时写入（`utils.ts:230`）。
+- 写入路径：repository → `<cwd>/openwiki/.last-update.json`，local-wiki → `<cwd>/.last-update.json`（`getMetadataFilePath`，`utils.ts:816-823`）。
+- 函数本身无条件写入；条件判断在调用方。
 
-### 4.3 `readLastUpdate()`
+### 4.3 读取：readLastUpdate 的验证与升级兼容
 
-**源码位置**：`src/agent/utils.ts:211-245`
+**源码位置**：`src/agent/utils.ts:712-754`
 
-```typescript
-async function readLastUpdate(
-  cwd: string,
-  outputMode: OpenWikiOutputMode,
-): Promise<UpdateMetadata | null>
-```
+| 字段 | 验证 | 不满足时 |
+|------|------|---------|
+| `updatedAt` / `command` / `model` | `typeof === "string"` | 整体返回 `null` |
+| `command` 规范化 | `"init"` 保留，其余一律转 `"update"` | — |
+| `gitHead` | 字符串则保留，否则 `undefined` | 字段为 `undefined` |
+| `status` | **仅 `"interrupted"` 被识别**，其余（含缺省）视为 `"complete"`（`utils.ts:735-738`） | — |
+| `language` | 字符串则保留，否则 `undefined` | — |
 
-读取并验证已有的元数据文件。验证逻辑：
+`status` 的宽容缺省是升级兼容设计：旧版本写的元数据没有该字段，若视为 `interrupted` 会强迫一次多余重跑。文件不存在（`ENOENT`）与 JSON 解析失败（`SyntaxError`）返回 `null`，其他 IO 错误上抛（`utils.ts:747-750`）。
 
-| 字段 | 验证方式 | 不满足时的后果 |
-|------|---------|--------------|
-| `updatedAt` | `typeof === "string"` | 返回 `null` |
-| `command` | `typeof === "string"`，且规范化：`"init"` 保持 `"init"`，其余一律转为 `"update"` | 返回 `null` |
-| `model` | `typeof === "string"` | 返回 `null` |
-| `gitHead` | 可选。`typeof === "string"` 时保留，否则为 `undefined` | 该字段为 `undefined` |
+### 4.4 persistRunMetadataIfChanged：语义已从"防抖"改为"总是刷新"
 
-容错策略：
-- 文件不存在（`ENOENT`）→ 返回 `null`
-- JSON 解析失败（`SyntaxError`）→ 返回 `null`
-- 其他 IO 错误 → 向上抛出
-
----
-
-## 5. 防重写（Debounce）完整流程
-
-防重写系统的核心目的是：**防止 OpenWiki agent 在文档内容没有实际变化时反复写入相同的元数据，从而避免无意义的后续更新**。
-
-### 5.1 核心对比函数：`persistRunMetadataIfChanged()`
-
-**源码位置**：`src/agent/utils.ts:171-191`
+**源码位置**：`src/agent/utils.ts:249-272`
 
 ```typescript
 export async function persistRunMetadataIfChanged(
-  command: OpenWikiCommand,
-  cwd: string,
-  modelId: string,
-  outputMode: OpenWikiOutputMode,
+  command, cwd, modelId, outputMode,
   snapshotBefore: OpenWikiContentSnapshot | null,
+  status: UpdateRunStatus = "complete",
+  language?: string,
 ): Promise<boolean>
 ```
 
-这是防重写的核心决策点。逻辑：
+**这是相对旧文档叙事变化最大的一处。**函数名保留了 `IfChanged`，但快照对比（debounce）已删除：doc 注释（`utils.ts:241-248`）明确——*"Always refreshes the `.last-update.json` timestamp so freshness checks reflect the actual last run, even when the wiki content is unchanged (a no-op update still means OpenWiki ran). A completed run also clears any previous interrupted status."* 旧基线"内容快照前后相等才写元数据"的防抖语义不复存在，`snapshotBefore` 参数仅剩一个守卫用途：`command === "chat"` 或 `snapshotBefore === null` 时返回 `false`（`utils.ts:258-260`），其余情况一律写入并返回 `true`。
 
-```
-如果 command === "chat"              → 返回 false（chat 不持久化任何元数据）
-如果 snapshotBefore === null         → 返回 false（没有快照可对比，可能是快照失败）
-如果 snapshotBefore === 当前快照     → 返回 false（内容未变，不写元数据）
-否则                                 → 写入元数据 → 返回 true
-```
+防"元数据无限自搅动"的职责没有消失，而是前移了：
 
-`snapshotBefore` 是由调用方（`index.ts` 中的 agent 工作流）在 agent 运行前通过 `createOpenWikiContentSnapshot()` 获取的。Agent 运行完成后，再次调用 `createOpenWikiContentSnapshot()` 获取 `snapshotAfter`（此处即实时计算的当前快照），与 `snapshotBefore` 比较。
+- no-op 场景在**进入生成之前**就被拦截（第 6 节），不会走到收尾写入；
+- 元数据文件本身被排除在内容快照之外（第 5 节），`.run.json` 也一样；
+- 收尾的 `updatedAt` 刷新是有意行为——"OpenWiki 跑过了"这件事本身就是新鲜度语义。
 
-**关键设计**：即使 agent 运行失败（异常退出），也会调用此函数。源码中的注释（`utils.ts:168-170`）说明：
+调用时机（写入侧时序）在 01 篇第 6 节：主路径失败也写 `interrupted`（`src/agent/index.ts:684-708`、`:749-763`），crash-guard 的致命崩溃路径同样盖章 `interrupted`（`src/agent/crash-guard.ts:132-144`）；page-job 生命周期的写入序列在 05 区 03。
 
-> "Used after both successful and failed runs so already-generated content stays diffable by future updates."
+## 5. 内容快照（Content Snapshot）
 
-即使 agent 崩溃，如果它在崩溃前已经部分修改了 wiki 文件，快照就会发生变化，元数据仍然会被写入——这确保下次更新能正确计算 diff 范围。
+**源码位置**：`src/agent/utils.ts:277-287`（入口）、`utils.ts:759-807`（递归）、`utils.ts:828-834`（排除）
 
-### 5.2 调用方的 10 步工作流中的位置
+`createOpenWikiContentSnapshot(cwd, outputMode)` 对 wiki 内容根（repository → `<cwd>/openwiki`，local-wiki → `<cwd>`；`getWikiContentRoot`，`utils.ts:809-814`）递归计算 SHA-256。`addDirectoryToSnapshot`（`utils.ts:759-807`）：
 
-在 `src/agent/index.ts` 的 `runOpenWikiAgentCore()` 中（对应 01-agent-workflow.md 中描述的 Step 5 和 Step 10）：
+- 条目按名称排序（`utils.ts:777-779`）保证确定性；
+- 目录写 `dir:<path>\0`，文件写 `file:<path>\0` + 完整字节 + `\0`；
+- **排除清单**（`isIgnoredSnapshotPath`，`utils.ts:828-834`）：`.last-update.json`、`.run.json`（本基线新增，page-job 状态文件）、local-wiki 元数据——OpenWiki 自有的运行痕迹不参与"内容是否变了"的判定；
+- 竞态容错：目录扫描遇 `EISDIR`/`ENOENT`/`ENOTDIR`（`isExpectedSnapshotRaceError`，`src/platform/fs-errors.ts:26-34`）写入 `"missing"` 标记继续；单个文件读取失败同类容错跳过（`readSnapshotFile`，`utils.ts:839-849`）。非文件非目录条目直接跳过。
 
-```
-Step 5:   snapshotBefore = await createOpenWikiContentSnapshot(cwd, outputMode)
-           ...（agent 执行）...
-Step 10:  didChange = await persistRunMetadataIfChanged(
-             command, cwd, modelId, outputMode, snapshotBefore
-           )
-```
-
-### 5.3 直观流程
-
-```
-┌─────────────────┐
-│  Agent 运行前     │
-│  snapshotBefore  │ ← SHA-256(openwiki/ 除 .last-update.json)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Agent 运行      │ ← Agent 可能修改 openwiki/ 下的文件
-│  (可能成功/失败)  │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Agent 运行后     │
-│  snapshotAfter   │ ← SHA-256(openwiki/ 除 .last-update.json)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────────────────┐
-│  snapshotBefore ===          │
-│  snapshotAfter ?             │
-│                              │
-│  YES → 不写元数据（无变化）    │
-│  NO  → writeLastUpdate-      │
-│         Metadata()（有变化）  │
-└─────────────────────────────┘
-```
-
----
+快照的消费如今只有两处：主路径收尾写入的 null 守卫（4.4）与 page-job 生命周期的 `beforeContentSnapshot`（`src/generation/repository-run.ts:460`，用途见 05 区）。
 
 ## 6. 更新无操作检测（Update No-Op Detection）
 
-在 agent 完整启动之前，有两层 no-op 检查可以提前判断更新是否必要。这能节省 API 调用和凭证检查的代价。
+### 6.1 门禁：shouldCheckUpdateNoop
 
-### 6.1 `shouldCheckUpdateNoop()`
-
-**源码位置**：`src/agent/utils.ts:137-139`
+**源码位置**：`src/agent/utils.ts:197-199`
 
 ```typescript
 export function shouldCheckUpdateNoop(options: OpenWikiRunOptions): boolean {
@@ -412,142 +300,123 @@ export function shouldCheckUpdateNoop(options: OpenWikiRunOptions): boolean {
 }
 ```
 
-这是一个极简的同步判断：
+用户显式给了消息就不检查 no-op——手动意图优先于跳过优化；只有自动调度（cron/LaunchAgent）这类无消息运行才适用。
 
-| 条件 | 返回值 | 含义 |
-|------|--------|------|
-| 用户提供了 `userMessage`（手动运行，如 `openwiki update "fix the intro"`） | `false` | 不检查 no-op，始终运行 |
-| 没有 `userMessage`（自动运行，如 cron/LaunchAgent 调度） | `true` | 检查 no-op，可能跳过 |
+### 6.2 判定：getUpdateNoopStatus(cwd, ignore, language)
 
-**设计意图**：当用户显式提供了一段消息时，即使仓库没有变化，用户也可能想手动触发一次文档润色。只有当更新是自动触发（无用户意图）时，才适用 no-op 逻辑。
+**源码位置**：`src/agent/utils.ts:126-195`
 
-### 6.2 `getUpdateNoopStatus()`
-
-**源码位置**：`src/agent/utils.ts:86-135`
+签名相比旧基线扩展为三个参数：
 
 ```typescript
 export async function getUpdateNoopStatus(
   cwd: string,
+  openWikiIgnore = new OpenWikiIgnore([]),
+  requestedLanguage?: string | null,
 ): Promise<UpdateNoopStatus>
 ```
 
-`UpdateNoopStatus` 类型（`src/agent/utils.ts:29-38`）是一个辨识联合类型（discriminated union）：
+返回类型 `UpdateNoopStatus`（`utils.ts:51-69`）的 skip 分支新增 `language?: string`——跳过时把持久化语言带回去，让 no-op 元数据刷新不丢语言字段。判定按固定顺序短路：
 
-```typescript
-export type UpdateNoopStatus =
-  | {
-      shouldSkip: true;
-      gitHead: string;
-      model: string;
-    }
-  | {
-      shouldSkip: false;
-      reason: string;
-    };
-```
+| # | 条件 | 结果 | 源码行 |
+|---|------|------|--------|
+| 1 | 无上次元数据或无 `gitHead` | 不跳过：`"missing previous update git head"` | `utils.ts:133-135` |
+| 2 | **上次 `status === "interrupted"`** | **不跳过**：`"previous update was interrupted"`——半成品 wiki 必须重跑，这是 interrupted 章的核心消费点 | `utils.ts:137-139` |
+| 3 | **请求语言的主子标签 ≠ 持久化语言** | **不跳过**：`"output language changed"`——语言切换即使树干净也有意义，翻译 pass 必须先跑（`getPrimaryLanguageSubtag` 宽容比对，`utils.ts:141-148`） | |
+| 4 | 当前 HEAD 取不到 | 不跳过：`"missing current git head"` | `utils.ts:150-154` |
+| 5 | `git status --short --untracked-files=all` 过滤后仍有实质行 | 不跳过：`"worktree has changes"` | `utils.ts:156-170` |
+| 6 | HEAD 变了，且提交差异含 `openwiki/` 与 ignore 之外的路径 | 不跳过：`"git head changed"` | `utils.ts:172-187` |
+| 7 | 以上全过 | **跳过**，携带 `gitHead` / `model` / `language` | `utils.ts:189-194` |
 
-**判断逻辑**（按顺序）：
+第 5 步的两层过滤：
 
-```
-1. 读取 lastUpdate
-   ↓ lastUpdate 不存在或无 gitHead？
-   → shouldSkip: false, reason: "missing previous update git head"
+- **状态行过滤**（`isUpdateMetadataStatusLine`，`utils.ts:892-901`）：`.last-update.json` **和 `.page-manifest.json`**（本基线新增，`PAGE_MANIFEST_PATH` 来自 `src/config/constants.ts:2`）。行格式经 `GIT_STATUS_LINE_PATTERN`（`utils.ts:890`）解析——`runGit` 会 trim 掉未暂存行（如 `" M openwiki/.last-update.json"`）的前导空格，所以状态码宽度按 1-2 字符宽容匹配；rename 行的 ` -> ` 后缀形态也一并处理。
+- **ignore 过滤**（`lineReferencesIgnoredPath`，`utils.ts:996-1003`）：一行可含多个路径（rename 的 tab 分隔或 ` -> ` 分隔，`splitGitPaths`，`utils.ts:1032-1042`；`--name-status` 前缀由 `extractGitPaths` 的第二个正则处理，`utils.ts:1014-1024`），任一路径命中 ignore 规则即整行排除——被排除路径自己变化不应触发重建。
 
-2. 获取当前 HEAD（git rev-parse HEAD）
-   ↓ HEAD 不存在（不在 Git 仓库中）？
-   → shouldSkip: false, reason: "missing current git head"
+第 6 步的 "openwiki-only 豁免"（`utils.ts:178-186`）：HEAD 变了但差异**全部**在 `openwiki/` 内或命中 ignore，仍跳过——上次更新提交自己的产物不是新的源变更。**注意与旧叙事的反向变化**：ignore 命中路径现在与 `openwiki/` 同权豁免（旧基线只有 `openwiki/` 豁免），因为 ignore 路径已不在模型可见源之内。
 
-3. 运行 git status --short --untracked-files=all
-   过滤掉仅涉及 .last-update.json 的状态行（isUpdateMetadataStatusLine）
-   ↓ 有其他文件变更（暂存/未暂存/未跟踪）？
-   → shouldSkip: false, reason: "worktree has changes"
+### 6.3 消费点
 
-4. 比较 lastUpdate.gitHead 与当前 HEAD
-   ↓ 相同？
-   → shouldSkip: true（HEAD 未变，且无工作树变更）
+| 调用方 | 位置 | 场景 |
+|--------|------|------|
+| CLI 启动预检 | `src/cli/startup.ts:123-147`（`canSkipCleanUpdateBeforeCredentials`，调用点 `:59`） | 主路径 `openwiki --update` 在**凭证检查之前**短路，干净树连 provider 解析都不做；任何异常按"不跳过"处理（`startup.ts:144-146`） |
+| page-job 严格前置门 | `src/generation/repository-run.ts:412-455` | 05 区：no-op 还需叠加 claims 零未决 issue、manifest 全覆盖、以及**前后两次指纹相等**的稳定性三重校验，全部通过才写 complete 元数据并返回 noop |
 
-   ↓ 不同？运行 git diff --name-only <gitHead>..HEAD
-     获取变更文件列表
-     ↓ 列表为空 或 包含非 openwiki/ 下的文件？
-     → shouldSkip: false, reason: "git head changed"
-     ↓ 列表全部是 openwiki/ 下的文件？
-     → shouldSkip: true（只有 wiki 文件变更，说明上次更新已经写入这些文件）
-```
+主路径与快速路径共用同一判定函数，但严格度不同：CLI 预检只看 `shouldSkip`；生命周期前置门把 no-op 当作需要证明的结论（详见 `05-generation-lifecycle/02-page-manifest-and-fast-forward.md`）。
 
-**`isOpenWikiPath()` 的最后一道防线**（`utils.ts:465-469`）：
+## 7. 与 05 生成生命周期区的分工
 
-```typescript
-function isOpenWikiPath(changedPath: string): boolean {
-  return (
-    changedPath === OPEN_WIKI_DIR || changedPath.startsWith(`${OPEN_WIKI_DIR}/`)
-  );
-}
-```
+| 机制 | 本篇（04 区 03） | 05 区 |
+|------|-----------------|-------|
+| 源指纹实现 | 哈希构成、路径选择、stat 防漂移、失败即抛（本文第 2 节） | 指纹**消费**：plan 落盘（`repository-run.ts:378`）、no-op 稳定性双查（`:422-441`）、resume 漂移检测（`:585-589`）、finish 复查（`:1601`）→ 重规划 |
+| 变更清单 | 三来源查询与降级语义（本文第 3 节） | 作为 planner 上下文注入 page-job 规划（`repository-run.ts:827`、`:859`） |
+| 元数据 | 字段、验证、升级兼容（本文第 4 节） | 生命周期内的写入序列：noop 收尾、interrupted（skipped/sourceChanged 时）、complete（`repository-run.ts:438`、`:1563-1578`） |
+| no-op 判定 | 判定顺序与三重前置（本文第 6 节） | 严格前置门与 fast-forward 的完整条件（`05-generation-lifecycle/02-page-manifest-and-fast-forward.md`） |
 
-如果两个 commit 之间的差异文件**全部**在 `openwiki/` 目录下，说明这些变更很可能是上一次 wiki 更新生成的产物——而非新的源代码变更——因此可以安全跳过。这一步防止了"上次更新写入 wiki 文件导致下次又检测到变更"的循环。
+一句话：**本篇讲"指纹与元数据是怎么算出来、读写的"；05 区讲"拿它们做什么决定"。**
 
-**`isUpdateMetadataStatusLine()` 的作用**（`utils.ts:443-451`）：在检查 `git status` 时过滤掉 `.last-update.json` 自身的状态行。它同时处理普通路径和 rename detection 产生的 ` -> ` 格式：
-
-```typescript
-function isUpdateMetadataStatusLine(line: string): boolean {
-  const statusPath = line.length > 3 ? line.slice(3).trim() : line.trim();
-  const normalizedPath = statusPath.replace(/\\/gu, "/");
-
-  return (
-    normalizedPath === UPDATE_METADATA_PATH ||
-    normalizedPath.endsWith(` -> ${UPDATE_METADATA_PATH}`)
-  );
-}
-```
-
-Git status 短格式中，前三个字符是状态码（如 ` M`、`??`、`R `），路径从第 4 个字符开始。对于 rename 检测，格式是 `R  old -> new`，所以 `endsWith(" -> openwiki/.last-update.json")` 能正确匹配。
-
-### 6.3 No-Op 检测在 Agent 工作流中的位置
-
-在 `src/agent/index.ts` 的 `runOpenWikiAgent()` 中，no-op 检查在 **Step 1（加载 .env）之后、Step 2（解析 provider 检查 API key）之前**执行。如果 `shouldCheckUpdateNoop()` 返回 `true` 且 `getUpdateNoopStatus()` 返回 `shouldSkip: true`，agent 直接返回 `{ skipped: true }`，完全跳过模型创建和 agent 调用。
-
----
-
-## 7. 辅助函数速查
+## 8. 辅助函数速查
 
 | 函数 | 源码行 | 职责 |
 |------|--------|------|
-| `readRunWikiGoal()` | `utils.ts:75-84` | 读取 wiki 目标：repository 模式通过 `readRepositoryWikiInstructions()` 读取 `openwiki/INSTRUCTIONS.md`，local-wiki 模式读取 onboarding 配置 |
-| `getWikiContentRoot()` | `utils.ts:303-308` | 确定 wiki 内容根目录：repository → `<cwd>/openwiki`，local-wiki → `<cwd>` |
-| `getMetadataFilePath()` | `utils.ts:310-317` | 确定元数据文件路径：repository → `<cwd>/openwiki/.last-update.json`，local-wiki → `<cwd>/.last-update.json` |
-| `readSnapshotFile()` | `utils.ts:322-332` | 读取文件用于快照，容忍竞态错误（`EISDIR`/`ENOENT`/`ENOTDIR`）时返回 `null` |
-| `formatGitSection()` | `utils.ts:437-441` | 将 Git 命令和输出格式化为 `$ <cmd>\n<output>` 块 |
-| `isUpdateMetadataStatusLine()` | `utils.ts:443-451` | 判断 `git status --short` 的一行是否仅涉及 `.last-update.json` |
-| `getChangedPathsSinceLastUpdate()` | `utils.ts:453-463` | 运行 `git diff --name-only <head>..HEAD` 并标准化路径 |
-| `isOpenWikiPath()` | `utils.ts:465-469` | 判断路径是否在 `openwiki/` 目录下 |
-| `normalizeGitPath()` | `utils.ts:471-473` | 去除空白并将反斜杠转换为正斜杠 |
-| `isExecError()` | `utils.ts:475-479` | 类型守卫：判断错误是否来自 `execFile` 且包含 `stdout`/`stderr` |
+| `createRunContext()` | `utils.ts:74-97` | 组装 RunContext：lastUpdate + 语言继承链 + wikiGoal |
+| `readRunWikiGoal()` | `utils.ts:99-108` | repository 读 `openwiki/INSTRUCTIONS.md`，local-wiki 读 onboarding |
+| `getUpdateNoopStatus()` | `utils.ts:126-195` | 七步 no-op 判定（6.2 表） |
+| `shouldCheckUpdateNoop()` | `utils.ts:197-199` | 无 userMessage 才检查 |
+| `writeLastUpdateMetadata()` | `utils.ts:208-239` | 无条件写元数据（status/language/gitHeadOverride） |
+| `persistRunMetadataIfChanged()` | `utils.ts:249-272` | 非 chat 且有快照即写入（不再防抖） |
+| `createOpenWikiContentSnapshot()` | `utils.ts:277-287` | wiki 内容 SHA-256 |
+| `createRepositorySourceSnapshot()` | `utils.ts:331-404` | 源指纹 + gitHead |
+| `createRepositorySourceFingerprint()` | `utils.ts:413-419` | 仅指纹字符串 |
+| `readFingerprintHead()` | `utils.ts:424-444` | HEAD 解析，unborn 分支 `unborn:` 前缀 |
+| `runFingerprintGit()` | `utils.ts:449-466` | 指纹 Git 通道：64 MB 缓冲，失败抛 |
+| `splitFingerprintNul()` | `utils.ts:471-477` | NUL 记录流解码，拒非 NUL 结尾输出 |
+| `parseFingerprintStatus()` | `utils.ts:482-492` | porcelain 记录 → (code, path) |
+| `assertFingerprintGitPath()` | `utils.ts:497-506` | 路径校验：拒绝对路径与 `../` 逃逸 |
+| `isFingerprintSourcePath()` | `utils.ts:511-518` | 模型可见性过滤（ignore 文件恒保留） |
+| `fingerprintEntryExists()` | `utils.ts:523-531` | `lstat` 探测，不跟随 symlink |
+| `updateFingerprintSourceEntry()` | `utils.ts:536-599` | 单路径字段哈希（file/symlink/directory/tracked-missing） |
+| `readFingerprintRegularFile()` | `utils.ts:614-643` | O_NOFOLLOW 打开 + dev/ino 同一性核对 |
+| `isSameFingerprintRegularFile()` | `utils.ts:645-670` | 非 Windows dev+ino；Windows size+mtimeNs+birthtimeNs |
+| `getFingerprintFileOpenFlags()` | `utils.ts:678-683` | `O_RDONLY \| O_NOFOLLOW`（平台支持时） |
+| `updateFingerprintField()` | `utils.ts:688-700` | 长度定界字段编码 |
+| `compareFingerprintStrings()` | `utils.ts:705-707` | UTF-16 码元序确定性比较 |
+| `readLastUpdate()` | `utils.ts:712-754` | 读 + 验证 + status 升级兼容 |
+| `addDirectoryToSnapshot()` | `utils.ts:759-807` | 内容快照递归，竞态容错 |
+| `getWikiContentRoot()` | `utils.ts:809-814` | repository → `<cwd>/openwiki`；local-wiki → `<cwd>` |
+| `getMetadataFilePath()` | `utils.ts:816-823` | 元数据文件路径 |
+| `isIgnoredSnapshotPath()` | `utils.ts:828-834` | 排除 `.last-update.json` / `.run.json` |
+| `readSnapshotFile()` | `utils.ts:839-849` | 快照读文件，竞态错误返回 null |
+| `getGitHead()` | `utils.ts:851-855` | `rev-parse HEAD`，空 → undefined |
+| `runGit()` | `utils.ts:860-882` | 容错 Git 执行器：1 MB 缓冲，错误转输出 |
+| `GIT_STATUS_LINE_PATTERN` | `utils.ts:890` | 1-2 字符状态码的短格式行匹配 |
+| `isUpdateMetadataStatusLine()` | `utils.ts:892-901` | 过滤 `.last-update.json` 与 `.page-manifest.json` 状态行 |
+| `getRepositoryChangedPaths()` | `utils.ts:909-949` | 三来源结构化变更清单（失败降级空） |
+| `runGitLines()` | `utils.ts:954-969` | 清单 Git 通道：失败返回 `[]` |
+| `getChangedPathsSinceLastUpdate()` | `utils.ts:971-981` | no-op 判定内部用的 base diff |
+| `isOpenWikiPath()` | `utils.ts:983-987` | 路径是否在 `openwiki/` 下 |
+| `normalizeGitPath()` | `utils.ts:989-991` | trim + 反斜杠转正斜杠 |
+| `lineReferencesIgnoredPath()` | `utils.ts:996-1003` | 行内任一路径命中 ignore 即排除 |
+| `extractGitPaths()` / `splitGitPaths()` | `utils.ts:1014-1042` | 短格式/`--name-status` 行的路径提取与 rename 拆分 |
+| `isExecError()` | `utils.ts:1044-1048` | execFile 错误类型守卫 |
 
----
+## 9. 关键设计决策
 
-## 8. 关键设计决策
+### 9.1 为什么用内容指纹替代文本 Git 摘要
 
-### 8.1 为什么快照排除了 `.last-update.json`
+文本摘要让模型"读一段 Git 输出自己理解"，判定权在模型；指纹把"源是否变了"压缩为一次相等比较，判定权在代码。no-op、fast-forward、重规划都是生命周期级的硬决策，不能依赖模型对 Git 文本的解读；指纹的可比较性使"连续两次快照相等"成为可机械验证的稳定性证明（05 区）。
 
-因为排除 `.last-update.json` 后，元数据自身的写入不会触发快照变化——这正是期望的行为。否则每次更新后写入元数据都会导致快照变化，下次运行又检测到变化，形成无限循环。
+### 9.2 为什么指纹排除 stat 但清单/快照用不同容错
 
-### 8.2 为什么 `runGit()` 不抛异常
+三者失败代价不同：指纹错误 → 错误的 no-op 或漏更新（不可接受，抛）；清单错误 → planner 少一点上下文（可接受，降级空）；内容快照错误 → 收尾写入的 null 守卫误判（影响有限，竞态类容错）。同一个 `utils.ts` 里三档语义并存是刻意分层，不是不一致。
 
-Git 仓库可能处于各种异常状态（detached HEAD、shallow clone、非 Git 目录等）。如果 `runGit()` 抛异常，整个 agent 就会崩溃。当前设计将 Git 命令的 stderr 作为输出的一部分返回，让 agent 的 prompt 自行理解 Git 不可用的上下文。
+### 9.3 为什么 no-op 判定把 interrupted 和语言变化放在 gitHead 比较**之前**
 
-### 8.3 为什么三级回退（gitHead → updatedAt → max-count=20）
+两者都是"树干净也不许跳过"的例外：interrupted 意味着 wiki 可能残缺（树干净只说明源没变，不说明产物完整）；语言切换意味着"变"的对象不是源码而是产物语言。把这两个检查放在第 2、3 步，保证它们先于任何"树干净"结论短路。
 
-- `gitHead..HEAD` 是最精确的，基于不可变的 commit hash
-- `--since` 依赖提交时间戳，在 rebase、cherry-pick 时可能不准确
-- `--max-count=20` 是最后的兜底，至少给 agent 提供一些上下文
+### 9.4 为什么 `.openwikiignore` 既是过滤规则又是指纹输入
 
-### 8.4 为什么 chat 模式也读取 `lastUpdate`
-
-虽然 chat 模式不使用 Git 证据，但 `lastUpdate` 元数据仍然被传入 `RunContext`。Agent 的系统提示词可以引用这些信息，让 chat 会话也能感知到上次更新是什么时候、用了什么模型。
-
-### 8.5 No-Op 的 "openwiki-only changes" 豁免
-
-`getUpdateNoopStatus()` 中有一个看似反直觉的逻辑：如果 `gitHead` 变了，但变更的文件**全部**在 `openwiki/` 目录下，仍然返回 `shouldSkip: true`。这是因为上次 agent 运行已经写入了这些文件，在 commit 之后 HEAD 会变化，但源代码本身并没有新的变更——跳过是安全的。
+ignore 规则决定"模型可见源"的边界，而边界本身是指纹语义的一部分：修改 ignore 文件会同时改变候选集（过滤结果变）和指纹（显式纳入，2.3），两条路都指向新指纹——不可能出现"规则变了指纹没变"的状态。
 
 ---
 
@@ -555,35 +424,38 @@ Git 仓库可能处于各种异常状态（detached HEAD、shallow clone、非 G
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/agent/utils.ts:1-21` | imports | 依赖：`child_process`、`crypto`、`fs/promises`、`constants.js`、`fs-errors.js`、`onboarding.js`、`types.js` |
-| `src/agent/utils.ts:24` | `execFileAsync` | promisified `execFile` |
-| `src/agent/utils.ts:25` | `LOCAL_WIKI_METADATA_PATH` | 常量 `".last-update.json"`（local-wiki 模式） |
-| `src/agent/utils.ts:27` | `OpenWikiContentSnapshot` | 类型别名 `string`（SHA-256 hex） |
-| `src/agent/utils.ts:29-38` | `UpdateNoopStatus` | 辨识联合类型：`shouldSkip: true` 或 `shouldSkip: false + reason` |
-| `src/agent/utils.ts:43-73` | `createRunContext()` | 主入口：组装 RunContext（gitSummary + lastUpdate + wikiGoal） |
-| `src/agent/utils.ts:75-84` | `readRunWikiGoal()` | 读取 wiki 目标描述 |
-| `src/agent/utils.ts:86-135` | `getUpdateNoopStatus()` | 更新 no-op 检测逻辑：5 步判断 |
-| `src/agent/utils.ts:137-139` | `shouldCheckUpdateNoop()` | 判断是否应执行 no-op 检查（无 userMessage 时） |
-| `src/agent/utils.ts:144-163` | `writeLastUpdateMetadata()` | 无条件写入元数据到 `.last-update.json` |
-| `src/agent/utils.ts:171-191` | `persistRunMetadataIfChanged()` | 防重写核心：对比前后快照，仅变更时写入 |
-| `src/agent/utils.ts:196-206` | `createOpenWikiContentSnapshot()` | 创建 openwiki/ 目录的 SHA-256 快照 |
-| `src/agent/utils.ts:211-245` | `readLastUpdate()` | 读取并验证 `.last-update.json` |
-| `src/agent/utils.ts:250-301` | `addDirectoryToSnapshot()` | 递归目录遍历哈希，排除 `.last-update.json` |
-| `src/agent/utils.ts:303-308` | `getWikiContentRoot()` | 根据 outputMode 返回 wiki 根目录 |
-| `src/agent/utils.ts:310-317` | `getMetadataFilePath()` | 根据 outputMode 返回元数据文件路径 |
-| `src/agent/utils.ts:322-332` | `readSnapshotFile()` | 读取文件内容用于快照，容忍竞态错误 |
-| `src/agent/utils.ts:337-402` | `createGitSummary()` | 组装 Git 证据文本块：5 个 Git 命令 + 三级回退 |
-| `src/agent/utils.ts:404-408` | `getGitHead()` | 获取当前 HEAD commit hash |
-| `src/agent/utils.ts:413-435` | `runGit()` | 统一 Git 执行器：`git --no-pager`，容错 |
-| `src/agent/utils.ts:437-441` | `formatGitSection()` | 格式化 `$ <cmd>\n<output>` |
-| `src/agent/utils.ts:443-451` | `isUpdateMetadataStatusLine()` | 过滤 `git status` 中的 `.last-update.json` 行 |
-| `src/agent/utils.ts:453-463` | `getChangedPathsSinceLastUpdate()` | `git diff --name-only` + 路径标准化 |
-| `src/agent/utils.ts:465-469` | `isOpenWikiPath()` | 判断路径是否在 `openwiki/` 下 |
-| `src/agent/utils.ts:471-473` | `normalizeGitPath()` | 路径标准化：trim + 反斜杠转正斜杠 |
-| `src/agent/utils.ts:475-479` | `isExecError()` | 类型守卫：execFile 错误判断 |
-| `src/agent/types.ts:1-2` | `OpenWikiCommand`, `OpenWikiOutputMode` | 命令和输出模式类型 |
-| `src/agent/types.ts:45-50` | `UpdateMetadata` | 元数据类型：updatedAt, command, gitHead, model |
-| `src/agent/types.ts:52-56` | `RunContext` | 运行上下文类型：lastUpdate, gitSummary, wikiGoal |
-| `src/constants.ts:1-2` | `OPEN_WIKI_DIR`, `UPDATE_METADATA_PATH` | 常量：`"openwiki"`, `"openwiki/.last-update.json"` |
-| `src/fs-errors.ts:12-18` | `isFileNotFoundError()` | ENOENT 错误判断 |
-| `src/fs-errors.ts:26-34` | `isExpectedSnapshotRaceError()` | 竞态错误判断：EISDIR, ENOENT, ENOTDIR |
+| `src/agent/utils.ts:45-47` | `execFileAsync` / `LOCAL_WIKI_METADATA_PATH` / `REPOSITORY_RUN_STATE_BASENAME` | 基础常量 |
+| `src/agent/utils.ts:51-69` | `UpdateNoopStatus` | skip 分支携带 gitHead/model/language |
+| `src/agent/utils.ts:74-97` | `createRunContext()` | 语言继承链 + lastUpdate + wikiGoal |
+| `src/agent/utils.ts:126-195` | `getUpdateNoopStatus()` | 七步判定：interrupted/语言/ignore 过滤 |
+| `src/agent/utils.ts:197-199` | `shouldCheckUpdateNoop()` | 无 userMessage 才检查 |
+| `src/agent/utils.ts:208-239` | `writeLastUpdateMetadata()` | 元数据写入（status/language/gitHeadOverride） |
+| `src/agent/utils.ts:249-272` | `persistRunMetadataIfChanged()` | 总是刷新（防抖已删），null 守卫 |
+| `src/agent/utils.ts:277-287` | `createOpenWikiContentSnapshot()` | wiki 内容 SHA-256 |
+| `src/agent/utils.ts:289-290` | `SOURCE_FINGERPRINT_VERSION` / 缓冲上限 | `openwiki-source-fingerprint-v1` / 64 MB |
+| `src/agent/utils.ts:307-319` | `RepositorySourceSnapshot` | fingerprint + gitHead（unborn 省略） |
+| `src/agent/utils.ts:331-404` | `createRepositorySourceSnapshot()` | 四查询、过滤、字段序哈希 |
+| `src/agent/utils.ts:413-419` | `createRepositorySourceFingerprint()` | 仅指纹入口 |
+| `src/agent/utils.ts:424-444` | `readFingerprintHead()` | HEAD / `unborn:<ref>` |
+| `src/agent/utils.ts:449-466` | `runFingerprintGit()` | 指纹 Git 通道（失败抛） |
+| `src/agent/utils.ts:471-506` | `splitFingerprintNul` / `parseFingerprintStatus` / `assertFingerprintGitPath` | NUL 解码与路径校验 |
+| `src/agent/utils.ts:511-518` | `isFingerprintSourcePath()` | tracked+untracked−ignored−openwiki，ignore 文件恒保留 |
+| `src/agent/utils.ts:536-599` | `updateFingerprintSourceEntry()` | 越界检查、tracked-missing、symlink/gitlink |
+| `src/agent/utils.ts:614-670` | `readFingerprintRegularFile` / `isSameFingerprintRegularFile` | O_NOFOLLOW + dev/ino 同一性（Windows 退化） |
+| `src/agent/utils.ts:688-707` | `updateFingerprintField` / `compareFingerprintStrings` | 长度定界字段与确定性排序 |
+| `src/agent/utils.ts:712-754` | `readLastUpdate()` | 验证表 + status 缺省视为 complete |
+| `src/agent/utils.ts:759-849` | `addDirectoryToSnapshot` / `isIgnoredSnapshotPath` / `readSnapshotFile` | 内容快照递归与 `.run.json` 排除 |
+| `src/agent/utils.ts:851-882` | `getGitHead()` / `runGit()` | 容错 Git 执行器 |
+| `src/agent/utils.ts:890-901` | `GIT_STATUS_LINE_PATTERN` / `isUpdateMetadataStatusLine()` | 状态行过滤（含 `.page-manifest.json`） |
+| `src/agent/utils.ts:909-949` | `getRepositoryChangedPaths()` | 三来源结构化变更清单 |
+| `src/agent/utils.ts:954-969` | `runGitLines()` | 清单 Git 通道（失败降级空） |
+| `src/agent/utils.ts:971-1048` | no-op/清单辅助函数族 | diff、路径解析、类型守卫 |
+| `src/agent/types.ts:90` | `UpdateRunStatus` | `"complete" \| "interrupted"` |
+| `src/agent/types.ts:92-99` | `UpdateMetadata` | 新增 `status?` / `language?` |
+| `src/agent/types.ts:101-105` | `RunContext` | `lastUpdate` + `language` + `wikiGoal`（gitSummary 已删） |
+| `src/agent/crash-guard.ts:132-144` | `handleFatal` 的 interrupted 盖章 | 崩溃路径的元数据兜底（时序见 01 篇） |
+| `src/config/constants.ts:1-3` | `OPEN_WIKI_DIR` / `PAGE_MANIFEST_PATH` / `UPDATE_METADATA_PATH` | 生成物与元数据路径常量 |
+| `src/cli/startup.ts:123-147` | `canSkipCleanUpdateBeforeCredentials()` | 主路径 no-op 预检（凭证检查前短路） |
+| `src/generation/repository-run.ts:378,412-455,585-589,827,859,1601` | 指纹/清单/no-op 消费点 | 05 区：plan 落盘、严格前置门、漂移重规划、planner 上下文 |
+| `src/platform/fs-errors.ts:12-18,26-34` | `isFileNotFoundError` / `isExpectedSnapshotRaceError` | ENOENT 与快照竞态错误判断 |
+| `src/agent/openwiki-ignore.ts:8` | `OPENWIKI_IGNORE_FILE` | `".openwikiignore"` 常量 |

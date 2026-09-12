@@ -1,7 +1,7 @@
 ---
 title: "07 — 证据命题与 OKF (Claims and OKF)"
 doc_type: "index"
-status: "draft"
+status: "current"
 branch: "ethan"
 created: "2026-09-13"
 updated: "2026-09-13"
@@ -17,15 +17,15 @@ out_of_scope:
 
 # 07 — 证据命题与 OKF
 
-> 2026-09-13 re-baseline 新增主题区。基线 `d4e94ab` 中 OKF 仅存在于提示词约定；现在 `src/okf/`（6 文件）与 `src/claims/`（13 文件，约 2900 行）构成代码强制的 wiki 可信度体系。两者的关系与机制细节见下方 01–03 号文档。
+> 2026-09-13 re-baseline 新增主题区。基线 `d4e94ab` 中 OKF 仅存在于提示词约定；现在 `src/okf/`（6 文件）与 `src/claims/`（13 文件，3694 行）构成代码强制的 wiki 可信度体系。两者的关系与机制细节见下方 01–03 号文档。
 
 ## 文档
 
 | # | 文档 | 状态 | 说明 |
 |---|------|------|------|
-| 1 | `01-claims-model.md` | 计划中 | Claim/Evidence/操作集（add/confirm/update/retract）、稀疏对账协议、`.claims` sidecar 格式、ClaimSession 互斥与归属 |
-| 2 | `02-evidence-versions-and-preflight.md` | 计划中 | `repo://path#Lx-Ly` URI、版本 token（`repo-file-v1:sha256:…`）、hash 锚点重定位、歧义即 unresolved、preflight 证据债 |
-| 3 | `03-okf-frontmatter-and-projections.md` | 计划中 | OKF v0.2 校验/修复/信任族、`generated` provenance、`sources`/`verified` 投影、`migrateWikiToOkf`、确定性 index.md |
+| 1 | `01-claims-model.md` | 已完成 | Claim/Evidence/操作集（add/confirm/update/retract）、稀疏对账协议、`.claims` sidecar 格式、ClaimSession 互斥与归属 |
+| 2 | `02-evidence-versions-and-preflight.md` | 已完成 | `repo://path#Lx-Ly` URI、版本 token（`repo-file-v1:sha256:…`）、hash 锚点重定位、歧义即 unresolved、preflight 证据债 |
+| 3 | `03-okf-frontmatter-and-projections.md` | 已完成 | OKF v0.2 校验/修复/信任族、`generated` provenance、`sources`/`verified` 投影、`migrateWikiToOkf`、确定性 index.md |
 
 ## 关键源文件
 

@@ -88,36 +88,36 @@ out_of_scope:
 
 | 源文件 | 覆盖度 | 备注 |
 |--------|--------|------|
-| `src/agent/index.ts` | gap | 待对应批次写出 |
-| `src/agent/types.ts` | gap | 待对应批次写出 |
+| `src/agent/index.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/agent/types.ts` | full | 批 2 已完成（2026-09-13） |
 
 ### 责任文档 `04/02`
 
 | 源文件 | 覆盖度 | 备注 |
 |--------|--------|------|
-| `src/agent/prompt.ts` | gap | 待对应批次写出 |
-| `src/agent/prompts/code.ts` | gap | 待对应批次写出 |
-| `src/agent/prompts/personal.ts` | gap | 待对应批次写出 |
-| `src/agent/repository-prompts.ts` | gap | 待对应批次写出 |
-| `src/agent/skills.ts` | gap | 待对应批次写出 |
+| `src/agent/prompt.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/agent/prompts/code.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/agent/prompts/personal.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/agent/repository-prompts.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/agent/skills.ts` | full | 批 2 已完成（2026-09-13） |
 
 ### 责任文档 `04/03`
 
 | 源文件 | 覆盖度 | 备注 |
 |--------|--------|------|
-| `src/agent/utils.ts` | gap | 待对应批次写出 |
+| `src/agent/utils.ts` | full | 批 2 已完成（2026-09-13） |
 
 ### 责任文档 `04/04`
 
 | 源文件 | 覆盖度 | 备注 |
 |--------|--------|------|
-| `src/agent/docs-only-backend.ts` | gap | 待对应批次写出 |
+| `src/agent/docs-only-backend.ts` | full | 批 2 已完成（2026-09-13） |
 
 ### 责任文档 `04/05`
 
 | 源文件 | 覆盖度 | 备注 |
 |--------|--------|------|
-| `src/agent/openwiki-ignore.ts` | gap | 待对应批次写出 |
+| `src/agent/openwiki-ignore.ts` | full | 批 2 已完成（2026-09-13） |
 
 ### 责任文档 `04/README`
 
@@ -130,25 +130,25 @@ out_of_scope:
 
 | 源文件 | 覆盖度 | 备注 |
 |--------|--------|------|
-| `src/agent/repository-runner.ts` | gap | 待对应批次写出 |
-| `src/agent/wiki-finalizer.ts` | gap | 待对应批次写出 |
-| `src/agent/wiki-link-validator.ts` | gap | 待对应批次写出 |
-| `src/agent/wiki-replacement.ts` | gap | 待对应批次写出 |
-| `src/generation/page-jobs.ts` | gap | 待对应批次写出 |
-| `src/generation/page-manifest.ts` | gap | 待对应批次写出 |
-| `src/generation/repository-run.ts` | gap | 待对应批次写出 |
-| `src/generation/run-state.ts` | gap | 待对应批次写出 |
+| `src/agent/repository-runner.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/agent/wiki-finalizer.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/agent/wiki-link-validator.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/agent/wiki-replacement.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/generation/page-jobs.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/generation/page-manifest.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/generation/repository-run.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/generation/run-state.ts` | full | 批 2 已完成（2026-09-13） |
 
 ### 责任文档 `05/03`
 
 | 源文件 | 覆盖度 | 备注 |
 |--------|--------|------|
-| `src/agent/okf-middleware.ts` | gap | 待对应批次写出 |
-| `src/agent/translation-middleware.ts` | gap | 待对应批次写出 |
-| `src/mermaid/dom-shim.ts` | gap | 待对应批次写出 |
-| `src/mermaid/fences.ts` | gap | 待对应批次写出 |
-| `src/mermaid/validate.ts` | gap | 待对应批次写出 |
-| `src/mermaid/wiki.ts` | gap | 待对应批次写出 |
+| `src/agent/okf-middleware.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/agent/translation-middleware.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/mermaid/dom-shim.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/mermaid/fences.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/mermaid/validate.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/mermaid/wiki.ts` | full | 批 2 已完成（2026-09-13） |
 
 ### 责任文档 `05/README`
 
@@ -180,35 +180,35 @@ out_of_scope:
 
 | 源文件 | 覆盖度 | 备注 |
 |--------|--------|------|
-| `src/claims/brains/code/paths.ts` | gap | 待对应批次写出 |
-| `src/claims/brains/code/runtime.ts` | gap | 待对应批次写出 |
-| `src/claims/brains/code/session.ts` | gap | 待对应批次写出 |
-| `src/claims/brains/code/store.ts` | gap | 待对应批次写出 |
-| `src/claims/brains/code/types.ts` | gap | 待对应批次写出 |
-| `src/claims/core/errors.ts` | gap | 待对应批次写出 |
-| `src/claims/core/mutations.ts` | gap | 待对应批次写出 |
-| `src/claims/core/resolver-cache.ts` | gap | 待对应批次写出 |
-| `src/claims/core/types.ts` | gap | 待对应批次写出 |
-| `src/claims/guidance.ts` | gap | 待对应批次写出 |
+| `src/claims/brains/code/paths.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/claims/brains/code/runtime.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/claims/brains/code/session.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/claims/brains/code/store.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/claims/brains/code/types.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/claims/core/errors.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/claims/core/mutations.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/claims/core/resolver-cache.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/claims/core/types.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/claims/guidance.ts` | full | 批 2 已完成（2026-09-13） |
 
 ### 责任文档 `07/02`
 
 | 源文件 | 覆盖度 | 备注 |
 |--------|--------|------|
-| `src/claims/brains/code/preflight.ts` | gap | 待对应批次写出 |
-| `src/claims/evidence/repository/resolver.ts` | gap | 待对应批次写出 |
-| `src/claims/evidence/repository/resource.ts` | gap | 待对应批次写出 |
+| `src/claims/brains/code/preflight.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/claims/evidence/repository/resolver.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/claims/evidence/repository/resource.ts` | full | 批 2 已完成（2026-09-13） |
 
 ### 责任文档 `07/03`
 
 | 源文件 | 覆盖度 | 备注 |
 |--------|--------|------|
-| `src/okf/claim-sources.ts` | gap | 待对应批次写出 |
-| `src/okf/claims-verification.ts` | gap | 待对应批次写出 |
-| `src/okf/frontmatter.ts` | gap | 待对应批次写出 |
-| `src/okf/generated-provenance.ts` | gap | 待对应批次写出 |
-| `src/okf/index-labels.ts` | gap | 待对应批次写出 |
-| `src/okf/index-sync.ts` | gap | 待对应批次写出 |
+| `src/okf/claim-sources.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/okf/claims-verification.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/okf/frontmatter.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/okf/generated-provenance.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/okf/index-labels.ts` | full | 批 2 已完成（2026-09-13） |
+| `src/okf/index-sync.ts` | full | 批 2 已完成（2026-09-13） |
 
 ### 责任文档 `08/01`
 
@@ -421,6 +421,6 @@ out_of_scope:
 
 - **总源文件**：168（`git ls-tree HEAD -- src/`）
 - **已映射到责任文档**：168（100%）
-- **覆盖度**：partial 3 / gap 165（full 0——追平批次滚动回写本节）
+- **覆盖度**：full 43 / partial 3 / gap 122（批 2 后；后续批次滚动回写本节）
 - **责任文档数**：40（含区索引兜底；内容文档全部落成后应收敛为 ~35 篇内容文档 + 若干 README）
 - 追平进度以本节与各批验收为准：批 2 → 04/05/07 区转 full；批 3 → 12/13；批 4 → 06/08/09；批 5 → 03/10/11/14/02/01。
