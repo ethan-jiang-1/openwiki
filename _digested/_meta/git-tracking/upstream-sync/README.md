@@ -4,7 +4,7 @@ doc_type: "archive"
 status: "archive"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
+updated: "2026-09-13"
 purpose: "列出所有已记录的 upstream sync 事件"
 owns: "sync 事件日志索引"
 update_when:
@@ -30,4 +30,4 @@ out_of_scope:
 
 | # | 日期 | 基线 commit | 变更范围 | 日志文件 |
 |---|------|------------|---------|---------|
-| — | 尚无 sync 事件 | — | — | — |
+| 1 | 2026-09-13 | `d4e94ab` → `e92cc11` | 253 commits，`src/` domain 重组（**re-baseline 级**，52→168 文件） | `2026-09-13-rebaseline.md` |

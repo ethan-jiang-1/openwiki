@@ -4,8 +4,8 @@ doc_type: "archive"
 status: "archive"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-17"
-sync_event: "2026-07-17"
+updated: "2026-09-13"
+sync_event: "2026-09-13"
 purpose: "记录当前分支/remote 快照和 upstream sync 历史"
 owns: "分支拓扑、remote 配置、sync 事件日志"
 update_when:
@@ -27,6 +27,7 @@ out_of_scope:
 | 基线分支 | `main`（源码基线，与 upstream 对齐） |
 | origin | `git@github.com:ethan-jiang-1/openwiki.git` |
 | upstream | `git@github.com:langchain-ai/openwiki.git` |
+| 当前基线 commit | `e92cc11` — "docs: update OpenWiki (#873)"（2026-09-13 快进） |
 | 初始基线 commit | `d4e94ab` — "feat: OKF + telemetry (#345)" |
 
 ## 分支关系
@@ -47,3 +48,4 @@ upstream/main (langchain-ai/openwiki)
 | 日期 | 基线 commit | 说明 |
 |------|------------|------|
 | 2026-07-17 | `d4e94ab` | 初始 snapshot，10 主题区文档骨架建立 |
+| 2026-09-13 | `e92cc11` | re-baseline 级 sync：main 快进（253 commits），ethan rebase 干净重放 `b2ac85d`→`6c4394e`；日志见 `upstream-sync/2026-09-13-rebaseline.md`。⚠️ `origin/ethan` 仍在旧 tip，推送需 `--force-with-lease` |

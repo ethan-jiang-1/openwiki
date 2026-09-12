@@ -4,8 +4,8 @@ doc_type: "archive"
 status: "archive"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-18"
-sync_event: "2026-07-17"
+updated: "2026-09-13"
+sync_event: "2026-09-13"
 purpose: "记录 _digested 目录结构的创建、变更和重大重组"
 owns: "_digested 结构变更历史"
 update_when:
@@ -16,6 +16,14 @@ out_of_scope:
 ---
 
 # _digested 结构演进日志
+
+## 2026-09-13 — upstream re-baseline 同步（d4e94ab → e92cc11）
+
+**事件**：upstream 累计 253 commits（src/ 52→168 文件，domain 级重组）后执行 re-baseline 级同步：`main` 快进至 `e92cc11`（零本地独有提交），`ethan` rebase 干净重放 9 个提交（`b2ac85d` → `6c4394e`）。
+
+**影响**：全部 10 个主题区文档受影响——旧 `src/` 布局中 8 个文件删除（cli.tsx、credentials.tsx、constants.ts、env.ts、utils.ts、code-mode.ts、agent/frontmatter-validator.ts、agent/index-middleware.ts）、8 个移动（→ cli/、config/、platform/、scheduling/、setup/、ingestion/）、36 个原地大改；全新子系统 src/okf/、src/claims/、src/generation/、src/integrations/、src/visualize/、src/mermaid/、connectors/sources/langsmith/。事实清单见 `../git-tracking/upstream-sync/2026-09-13-rebaseline.md`。
+
+**决策**：追平采用「先盘清、再计划、分批执行」——8 路子系统深查（源码事实+现有文档失效论断）→ 汇总为 `_meta/git-tracking/catch-up-plan.md`（主题区结构调整与分批路线）→ 按批执行。coverage-map.md 已整体标记 stale，待追平批 1 重写。
 
 ## 2026-07-18 — 覆盖地图与主题 README 去陈旧化
 

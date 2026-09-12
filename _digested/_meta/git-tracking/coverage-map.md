@@ -1,12 +1,12 @@
 ---
 title: "_digested 源码覆盖地图"
 doc_type: "reference-data"
-status: "active"
+status: "stale"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-07-18"
-sync_event: "2026-07-17"
-last_updated: "2026-07-18"
+updated: "2026-09-13"
+sync_event: "2026-09-13"
+last_updated: "2026-09-13"
 baseline_ref: "origin/main"
 baseline_commit: "d4e94ab"
 purpose: "回答「哪段源码由哪篇 _digested doc 覆盖」——给 upstream delta triage 和覆盖审计做索引"
@@ -20,6 +20,12 @@ out_of_scope:
 ---
 
 # _digested 源码覆盖地图
+
+> ⚠️ **本地图已整体过期（stale，2026-09-13）。**
+> upstream sync `d4e94ab → e92cc11`（253 commits）对 `src/` 做了 domain 级重组：
+> 旧路径 8 个删除、8 个移动、36 个原地大改，并新增 okf/、claims/、generation/、integrations/、visualize/、mermaid/、cli/、config/、platform/、setup/ 等目录（52 → 168 文件）。
+> **下文矩阵描述的是基线 `d4e94ab` 的源码布局，仅作历史参考，不可用于 triage。**
+> 重写后的新矩阵以 `_meta/git-tracking/catch-up-plan.md` 的结构决策为准。
 
 > 口径：覆盖度 = 该 source area 的**架构关键路径**在 `_digested` 中被解释的程度。
 > 不是"每个函数都提了"，而是"核心机制、关键类型、数据流、启动链"是否有文档可追溯。
