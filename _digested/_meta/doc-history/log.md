@@ -23,7 +23,7 @@ out_of_scope:
 
 **影响**：全部 10 个主题区文档受影响——旧 `src/` 布局中 8 个文件删除（cli.tsx、credentials.tsx、constants.ts、env.ts、utils.ts、code-mode.ts、agent/frontmatter-validator.ts、agent/index-middleware.ts）、8 个移动（→ cli/、config/、platform/、scheduling/、setup/、ingestion/）、36 个原地大改；全新子系统 src/okf/、src/claims/、src/generation/、src/integrations/、src/visualize/、src/mermaid/、connectors/sources/langsmith/。事实清单见 `../git-tracking/upstream-sync/2026-09-13-rebaseline.md`。
 
-**决策**：追平采用「先盘清、再计划、分批执行」——8 路子系统深查（源码事实+现有文档失效论断）→ 汇总为 `_meta/git-tracking/catch-up-plan.md`（主题区结构调整与分批路线）→ 按批执行。coverage-map.md 已整体标记 stale，待追平批 1 重写。
+**决策**：追平采用「先盘清、再计划、分批执行」——10 路子系统深查（源码事实+现有文档失效论断，存档见 `../git-tracking/upstream-sync/2026-09-13-rebaseline-reports.md`）。**结构决策：放弃旧 10 区修补，重排为 14 主题区**（新增 05-generation-lifecycle、07-claims-and-okf、12-visualizer、13-integrations；04 更名 agent-and-prompting；05→06、06→08、07→09、08→10、09→11、10→14），旧文档按价值回收（重写 10 / 更新 8 / 废弃并入 1 / 新增 16）。路线与验收标准见 `../git-tracking/catch-up-plan.md`。coverage-map.md 已整体标记 stale，批 1 重写。
 
 ## 2026-07-18 — 覆盖地图与主题 README 去陈旧化
 
