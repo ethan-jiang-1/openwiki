@@ -402,6 +402,35 @@ out_of_scope:
 |--------|--------|------|
 | `src/telemetry/errors.ts` | full | 批 5 已完成（2026-09-13） |
 | `src/telemetry/taxonomy.ts` | full | 批 5 已完成（2026-09-13） |
+
+### 主题文档 `15/01–02`（topic，2026-09-13 补充）
+
+消费视角文档（读取协议 + 用法盘点），以下共享文件以主责文档计数，不改变上方统计：
+
+| 源文件 | 主责文档 | 15/01 视角 |
+|--------|---------|-----------|
+| `src/ingestion/code-mode.ts` | 11/02 | AGENTS.md/CLAUDE.md 管理块（L0 引导层） |
+| `src/integrations/core/protocol.ts` | 13/02 | 「读侧无 API」取舍 |
+| `src/okf/index-sync.ts` | 07/03 | 产物索引的读取形态 |
+| `src/claims/brains/code/preflight.ts` | 07/02 | 消费者视角的证据新鲜度 |
+| `integrations/openwiki/SKILL.md`（非源码资产） | gap*（13 区描述） | 页面契约的消费语义（taxonomy/relatedPages/description） |
+
+### 主题文档 `16/01–03`（topic，2026-09-13 补充）
+
+生产路径选型 + 两路径端到端细节，全部锚点为其他区主责文件的复述，不新增责任行：
+
+| 复述的源文件 | 主责文档 |
+|--------|---------|
+| `src/integrations/install/installer.ts` / `registry.ts` | 13/01 |
+| `src/integrations/core/session-manager.ts` | 13/02 |
+| `src/agent/repository-runner.ts` | 04/01 |
+| `src/ingestion/code-mode.ts` | 11/02 |
+| `src/setup/onboarding.ts` | 10/02 |
+| `src/setup/credentials/steps.ts` | 14/01 |
+| `src/cli/commands.ts` / `src/cli/runners.ts` | 03/02、03/03 |
+| `src/agent/utils.ts` | 04/03 |
+| `src/connectors/types.ts` / `registry.ts` / `tools.ts` | 08/01 |
+| `src/connectors/sources/langsmith/index.ts` / `repo-config.ts` | 08/02 |
 ---
 
 ## gap*（有意不覆盖）
@@ -412,7 +441,7 @@ out_of_scope:
 | `evals/`（LEDGER benchmark 等） | 评测资产，非运行时架构 |
 | `examples/` | 示例资产 |
 | `scripts/` | 构建与发布脚本（除 stamp-build-channel.cjs 在 14/03 提及） |
-| `openwiki/`（仓库内上游自生成 wiki） | 是 OpenWiki 的**产物示例**，不是源码；且我们不维护上游生成物 |
+| `openwiki/`（仓库内上游自生成 wiki） | 是 OpenWiki 的**产物示例**，不是源码；且我们不维护上游生成物。其**读取接口视角**（引导块/任务路由/检索元数据/证据 sidecar）由 15/01 作为 topic 文档描述 |
 | `integrations/openwiki/`（skill 包内容） | 被安装的提示词资产，机制在 13 区文档中描述 |
 
 ## 统计（批 1 基线）
@@ -424,3 +453,5 @@ out_of_scope:
 - **覆盖度**：full 149 / partial 3 / gap 16（追平批 2–5 完成后定稿；剩余 gap 为计划中的可选连接器/子篇与 gap* 资产）
 - **责任文档数**：40（含区索引兜底；内容文档全部落成后应收敛为 ~35 篇内容文档 + 若干 README）
 - 追平进度以本节与各批验收为准：批 2 → 04/05/07 区转 full；批 3 → 12/13；批 4 → 06/08/09；批 5 → 03/10/11/14/02/01。
+- 2026-09-13 补充：新增 topic 文档 `15-agent-consumption/01-how-agents-read-the-wiki.md`（Agent 消费视角），共享文件以主责文档计，本表 full/partial/gap 统计不变。
+- 2026-09-13 补充：新增 topic 文档 `16-production-paths/01-ways-to-produce-a-wiki.md`（生产路径选型），同理不改变统计。

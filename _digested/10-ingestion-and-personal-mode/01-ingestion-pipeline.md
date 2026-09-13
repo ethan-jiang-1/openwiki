@@ -355,7 +355,7 @@ const agentResult = await withRunTelemetry(
 - **`RunTelemetryContext` 是可变上下文**（`src/telemetry/with-run-telemetry.ts:17-40`）：边界外创建空对象，agent 在运行中往里写 provider 与 noop 短路结果，边界在运行落定后读取并随事件上报。
 - **遥测永不抛错**：记录失败被 `recordRunSafe` 吞掉，不影响摄取结果。
 
-同一机制也覆盖 CLI 交互路径（`src/cli/app/app.tsx`）、`--print` 路径（`src/cli/runners.ts`）与代码模式仓库运行（`src/generation/repository-run.ts`），错误分类细节见 14 区遥测篇。
+同一机制也覆盖 CLI 交互路径（`src/cli/app/app.tsx:574`）与 `--print` 路径（`src/cli/runners.ts:294`）；代码模式仓库生成路径（`src/generation/repository-run.ts` 及其上游调用链）**不在**遥测边界内（该文件全文无遥测引用），错误分类细节见 14 区遥测篇。
 
 ---
 

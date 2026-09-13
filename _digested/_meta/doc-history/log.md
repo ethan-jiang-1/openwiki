@@ -17,6 +17,48 @@ out_of_scope:
 
 # _digested 结构演进日志
 
+## 2026-09-13 — 16 区补篇：输入与证据源（16/04）
+
+**事件**：补齐 16 区「原料侧」——生产 OpenWiki 的输入是什么、支持几种形式。核实：`ConnectorId` 9 值封闭集合（types.ts:1-10）；git 仓库在两 mode 双重角色（code 主输入兼证据锚 / personal 里是普通连接器）；langsmith 是唯一 mode:"code" 连接器（index.ts:92）；connector 工具在 repository 模式零暴露（tools.ts:38-40）。
+
+**变更内容**：新增 `16-production-paths/04-inputs-and-evidence-sources.md`：输入全景 mermaid、Git 仓库三种贡献面（源码树/git 历史/工作区状态 + repo:// 证据形态）、9 连接器表与三条交叉规则、意图输入（brief/language）与控制输入、选输入速查表；16/README 加行、16/01 边界表加行、coverage-map 补复述映射。
+
+## 2026-09-13 — 15 区补篇：消费用法盘点（15/02）
+
+**事件**：直答「coding agent 怎么用 OpenWiki」——文件系统直读确为唯一正门（CLI 9 个命令 kind 无一面向消费、6 个 MCP 工具全是生产协议），但正门之内可归纳四种阅读策略，另发现 graph.json 机器可读全图这一非 obvious 副产品用法。
+
+**变更内容**：新增 `15-agent-consumption/02-agent-usage-patterns.md`：四种模式（任务路由/索引扫描/graph.json 全图/证据核验）、刻意不存在的用法清单（含上游 retrieval-tools 分支信号）、模式选型表；15/01 §6 加交叉引用；coverage-map 15/01 节改为 15/01–02。
+
+**事实来源**：`src/cli/commands.ts:107-164`（9 kind 无 read）、`src/visualize/static-export.ts:46-70`（graph.json 导出）、`src/visualize/graph.ts:40-56,302-320`（WikiNode 形状与 linkNodes 边）。
+
+## 2026-09-13 — 16 区拆分：两条生产路径各自成篇
+
+**事件**：16/01 初稿把两条路径的细节压在一篇里，篇幅失衡。拆为三篇：01 瘦身为纯总览/决策表，新增 16/02（host 驱动路径端到端：scope 决策、SKILL.md 8 步展开、语言/溯源语义、排错）与 16/03（原生 CLI 端到端：向导步骤、旗标、no-op 门三条件、fast-forward、CI 模板逐段、断点续传、排错）。全部新锚点经源码核实（`src/cli/commands.ts:814-829` --mode 旗标、`src/cli/runners.ts:261` runPrintCommand、`src/generation/repository-run.ts:409-458` no-op 门等）。
+
+## 2026-09-13 — 新增 16-production-paths 区（Wiki 生产路径）
+
+**事件**：继 15 区（消费视角）后补齐对称缺口——「一个 Agent 要生产 OpenWiki 有哪几种方法、推荐哪种」。核实三个事实后成文：host 路径零模型调用（`session-manager.ts` 唯一 "model" 是元数据身份串）、CI 跑的是原生 CLI（workflow 模板 `openwiki code --update --print`）、两条路径共用同一 `beginRepositoryRun` 入口与 `.run.json` 检查点。
+
+**变更内容**：
+
+1. 新增 `16-production-paths/01-ways-to-produce-a-wiki.md`：全景 mermaid 图、路径 A（host 驱动，零凭据）/路径 B（原生 CLI，需 provider）对比、自动化层（CI/LaunchAgent/断点续传）、选型决策表。
+2. 新增 `16-production-paths/README.md`（纯索引体例）。
+3. 根 README 目录分工 15→16 区并加导航速查行；coverage-map 增 16/01 topic 节（锚点全部为主责文件复述，统计不变）。
+
+**事实来源**：`src/cli/integrations.ts:63-75`（install 三步指引）、`src/integrations/core/session-manager.ts:343-345`、`src/generation/repository-run.ts:319,321-328`、`src/agent/repository-runner.ts:205-254`、`src/ingestion/code-mode.ts:287-339,375,380`、`integrations/openwiki/SKILL.md:16-18`。
+
+## 2026-09-13 — 新增 15-agent-consumption 区（Agent 消费视角）
+
+**事件**：同步 review（对 e92cc11 基线的全量行锚抽验 + 结构核对）确认 14 区全部是「生产者视角」（wiki 怎么被造出来），「wiki 怎么被 Agent 读」散见于 13/02（MCP 生产协议）与 07/03（OKF），无独立承载；coverage-map 亦将产物 `openwiki/` 整体记为 gap*。补建 15 区闭合该缺口。
+
+**变更内容**：
+
+1. 新增 `15-agent-consumption/01-how-agents-read-the-wiki.md`：三读者三界面、六层渐进披露漏斗（AGENTS.md 引导块 → quickstart 任务路由 → index → front matter → 正文 → claims 证据）、consumer-first 组织原则、读侧无 API 取舍、双场景走查。
+2. 新增 `15-agent-consumption/README.md`（纯索引体例）。
+3. 根 README 目录分工 14→15 区并加导航速查行；coverage-map 增 15/01 topic 节，并在 gap* 表 `openwiki/` 行注明读取接口视角归属。
+
+**事实来源**：本仓库自产物实例（`openwiki/`、`AGENTS.md`、`integrations/openwiki/SKILL.md`）+ 基线源码锚（`src/ingestion/code-mode.ts:18-26/241-273/421-432`、`src/integrations/core/protocol.ts:14-20`、`src/okf/index-sync.ts:14`、`src/claims/brains/code/preflight.ts:71-85`）。
+
 ## 2026-09-13 — upstream re-baseline 同步（d4e94ab → e92cc11）
 
 **事件**：upstream 累计 253 commits（src/ 52→168 文件，domain 级重组）后执行 re-baseline 级同步：`main` 快进至 `e92cc11`（零本地独有提交），`ethan` rebase 干净重放 9 个提交（`b2ac85d` → `6c4394e`）。

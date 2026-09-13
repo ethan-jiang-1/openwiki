@@ -40,7 +40,7 @@ out_of_scope:
 - `_meta/` 只保留归档和追踪，不是当前导航的一部分。
 - 每篇文档头部都有 YAML front matter，说明读者、目标、负责范围和后续补充入口。
 
-## 目录分工（14 主题区，2026-09-13 重排）
+## 目录分工（16 主题区，2026-09-13 重排；15/16 区为同日补充）
 
 | 区 | 主题 | 一句话 |
 |----|------|--------|
@@ -58,6 +58,8 @@ out_of_scope:
 | `12-visualizer/` | 可视化器 | `openwiki visualize`、WikiGraph、静态导出 |
 | `13-integrations/` | 宿主集成 | Codex/Claude/OpenCode/Cursor 集成、MCP 生命周期协议 |
 | `14-configuration-and-telemetry/` | 配置与遥测 | config/platform 分层、凭据向导架构、遥测错误分类学 |
+| `15-agent-consumption/` | Agent 消费视角 | wiki 如何被 Agent 发现、路由、检索与信任：引导块、任务路由、渐进披露漏斗、证据回溯 |
+| `16-production-paths/` | Wiki 生产路径 | 两条生产路径（host 驱动 / 原生 CLI）+ 自动化层的选型决策地图 |
 | `_context/` | 快速上下文 | 5 分钟心智模型 + 入口速查 |
 | `_meta/` | 归档与追踪 | 结构演进、git 对齐、sync 日志、追平计划 |
 
@@ -77,6 +79,8 @@ out_of_scope:
 | 理解一轮 wiki 生成怎么推进/恢复 | `05-generation-lifecycle/` |
 | 理解 agent 怎么被约束、怎么写页 | `04-agent-and-prompting/` |
 | 理解 wiki 的可信度机制（claims/OKF） | `07-claims-and-okf/` |
+| 理解 Agent 怎么读这份 wiki（消费视角/渐进披露） | `15-agent-consumption/01-how-agents-read-the-wiki.md` |
+| 想生产一份 wiki，不知道选哪条路 | `16-production-paths/01-ways-to-produce-a-wiki.md` |
 | 了解支持哪些 AI 模型 | `06-model-providers/` |
 | 理解数据源连接器 | `08-connectors-and-data-sources/` |
 | 理解 OAuth / CLI 认证 | `09-authentication-and-oauth/` |

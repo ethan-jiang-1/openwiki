@@ -94,7 +94,7 @@ out_of_scope:
 | `<repo>/openwiki/.claims/**/*.json` | claims sidecar |
 | `<repo>/openwiki/.langsmith.json` | LangSmith 连接器提交配置 |
 | `<repo>/.openwikiignore` | 路径排除规则 |
-| `.github/workflows/openwiki-update.yml` | 定时更新（fork guard 注意：手工补丁会被模板再生成冲掉） |
+| `.github/workflows/openwiki-update.yml` | 定时更新（模板只在文件缺失时创建：`src/ingestion/code-mode.ts:82-89` 存在即 early-return，手工补丁不会被再生成冲掉；模板自带 fork guard 恢复步骤，运维沿革见 `11-scheduling-and-ci/02-ci-workflow-generation.md`） |
 
 ## 待填充
 

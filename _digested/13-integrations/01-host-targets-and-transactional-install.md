@@ -27,6 +27,22 @@ OpenWiki 可以被装入 coding agent 宿主（host）：安装器把两样东�
 
 > **源码是唯一真相源。** 本文行号对应 `ethan` 分支基线 `e92cc11`，引用前请重读源码核对。
 
+> **30 秒版**：装进 host 靠两件东西——skill 包（教 host 内 agent 怎么驱动 OpenWiki）+ MCP config 条目（给 agent 6 个工具）。安装是**事务**：SHA-256 回执（receipt）定所有权，modified 无 `--force` 即冲突，提交「先易回滚者先行」，失败自动回滚。4 个目标（Codex/Claude/OpenCode/Cursor）的全部路径来自一张不可变注册表。
+
+```mermaid
+flowchart LR
+    subgraph SRC["OpenWiki 安装源 integrations/openwiki"]
+        SK["skill 包：SKILL.md + agents/openai.yaml"]
+        CE["MCP 条目：openwiki mcp --host target"]
+    end
+    SRC --> INS["事务安装器：清单回执 · 冲突检测 · 失败回滚"]
+    INS --> H1["codex：.agents + .codex/config.toml"]
+    INS --> H2["claude：.claude/skills + .claude.json 或 .mcp.json"]
+    INS --> H3["opencode：.config/opencode + opencode.jsonc"]
+    INS --> H4["cursor：.cursor/skills + .cursor/mcp.json"]
+    H2 -. "agent 拉起 openwiki mcp，6 工具驱动生成（02 号）" .-> SRC
+```
+
 ## 1. 产品概念与命令面
 
 「装入 host」解决的问题是：host 内的 agent 天然会读 skill 目录里的说明、按 MCP config 启动本地 server。OpenWiki 顺着这个机制交付自己——**不驻留后台、不自带 agent**，只在 host 拉起 `openwiki mcp` 时作为一个无根（rootless）进程存在，把 05 区那套可恢复页任务（page job）生命周期以 6 个 MCP 工具暴露给 host（详见 02 号）。写作（调研、 prose、页面质量）由 host 侧模型承担，OpenWiki 只拥有状态、队列、校验与收尾。
@@ -160,6 +176,20 @@ resolveInstallContext          # 解析 root/skill/config 绝对路径，project
 → commitInstall（:383-437）
 ```
 
+同一个流程画成分支图（事务三出口 + 回滚路径一目了然）：
+
+```mermaid
+flowchart TD
+    A["inspectInstallation：按回执 hash 判目的地状态"] -->|"not-installed"| B["全量安装"]
+    A -->|"installed 且版本/命令/清单全等"| C["短路：只补 config，skill 不动"]
+    A -->|"modified 且无 --force"| D["conflict：什么都不改"]
+    B --> E["staging 兄弟目录复制 + 复核清单与规范清单逐字节相等"]
+    E --> F["commitInstall：config 快照 → 先写 config → 挪开旧 skill → rename 提交"]
+    F -->|"任一步失败且未提交"| G["rollbackInstall：旧 skill 归位 · config 按快照还原 · 删 staging"]
+    G -->|"回滚自身再失败"| H["AggregateError：原错误与回滚错误一起报，绝不静默"]
+    F -->|"rename 成功"| I["committed：此后无可失败步骤"]
+```
+
 两个前置判定值得单独说：
 
 - **canonical 对比**：第 168 行先给规范包算清单，第 215-221 行给 staging 副本再算一次并要求 `sameFiles` 完全相等（`skill-bundle.ts:235-245`，键数与逐键 hash 都要相同）——复制过程本身也被事务覆盖。
@@ -219,6 +249,20 @@ config 的期望条目以**回执里记录的命令**为准（无回执时退回
 
 三个适配器同构，各自暴露三件套：`install*`（幂等——已有等值条目返回 false 不重写；已有「可替换条目」才改写；其余一律 conflict）、`uninstall*`（只删与期望逐字节等价的受管条目）、`get*Status`（absent/intact/modified）。所有写盘都经 `writeTextAtomic`（`src/integrations/install/atomic-file.ts:11-34`）：先 lstat 记下原文件 mode（新建缺省 0644），写同目录隐藏临时文件，一次 `rename` 顶替——config 永远不会以半截状态被 host 读到，且权限位不漂移。
 
+```text
+              一套三件套契约（install* / uninstall* / get*Status）
+                                 │
+        ┌────────────────────────┼───────────────────────────┐
+        ▼                        ▼                           ▼
+  config-json              config-toml                config-opencode
+  （claude / cursor）       （codex managed block）     （JSONC AST 切片手术）
+  整文件 parse，            文本级标记对切片，           节点 offset 手术，
+  只动 mcpServers.openwiki  块外同名表即 conflict       注释与排版原样保留
+        └────────────────────────┼───────────────────────────┘
+                                 ▼
+              writeTextAtomic：tmp + rename，原子且不漂移权限
+```
+
 ### 5.1 JSON（claude、cursor）
 
 整文件 `JSON.parse`，只动 `mcpServers.openwiki` 一个键（`config-json.ts:14-40`）。等值判定要求条目恰好两键且 command 与 args 逐项相等（`matchesEntry` `:156-165`）；不认识或不等值即 conflict。坏 JSON 报 `invalid_input` 且**不尝试修复**（`readJsonObject` `:101-124`）。卸载只删 openwiki 键，留下其余 server 原样（`:49-70`）。状态查询遇到任何解析错误一律报 `modified`（保守侧，`:79-92`）。
@@ -236,6 +280,14 @@ config 的期望条目以**回执里记录的命令**为准（无回执时退回
 ## 6. 路径安全细节
 
 host 集成的写入目标是 home 目录或用户仓库，路径即攻击面，防线有四层：
+
+```text
+┌─ 第 1 层 ─ assertNoSymlinkComponents ── 逐段 lstat，任何 symlink 组件当场拒绝
+├─ 第 2 层 ─ resolveInside ────────────── 注册表相对路径必须落在 root 内，越界即拒
+├─ 第 3 层 ─ resolveRepositoryRoot ────── project：git 根解析 + 拒绝文件系统根与 ~
+├─ 第 4 层 ─ .openwiki-install.json ───── 回执逐字节校验 = 所有权证明，无回执永不碰
+└─ 加固 ──── mkdir 后复查 symlink ─────── 缩小 TOCTOU 窗口（install :201-202）
+```
 
 1. **组件级拒绝 symlink**：`assertNoSymlinkComponents` 从 root 逐段 lstat 到目的地，任何已存在组件是符号链接即 `invalid_input`，中间组件不是目录也拒绝（`src/integrations/install/install-paths.ts:118-145`）；遇到首个不存在的组件即止（后面由 mkdir 创建）。install 在 mkdir 之后 `installer.ts:201-202` 再查一次，缩小检查与使用之间的窗口。
 2. **scope 包容**：注册表相对路径必须落在 root 内——绝对路径、解析后等于 root 或越出 root 一律 `invalid_input`（`resolveInside`，`install-paths.ts:304-323`）；root 本身必须存在且是目录（realpath 规范化，`resolveInstallRoot` `:277-294`）。

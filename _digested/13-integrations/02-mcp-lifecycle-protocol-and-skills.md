@@ -27,6 +27,15 @@ out_of_scope:
 
 > **源码是唯一真相源。** 本文行号对应 `ethan` 分支基线 `e92cc11`，引用前请重读源码核对。
 
+> **30 秒版**：装好之后是两份契约在干活——`openwiki mcp`（本地 stdio server）把 05 区生命周期**原样**暴露成 6 个工具；`SKILL.md` 把「agent 该怎么用这 6 个工具」写成 8 步纪律。分工一句话：**host agent 出调研与 prose，OpenWiki 出状态、队列、claims 与收尾**。仓库里两套 "skills"（host skill 包 vs 自研 bundled skills）互不相干，判据见 §6。
+
+```mermaid
+flowchart TD
+    HOST["host 内的 coding agent：出调研与 prose"] -->|"按 SKILL.md 纪律调用"| MCP["openwiki mcp：stdio server，只暴露 6 个工具"]
+    MCP -->|"一比一透传，零生命周期逻辑"| GEN["generation/repository-run.ts：可恢复 page-job 生命周期（05 区，唯一实现）"]
+    GEN --> OWN["OpenWiki 独占：运行状态 · 页队列 · claims 校验 · 索引 · 溯源 · 收尾"]
+```
+
 ## 1. 命令链与进程形态
 
 ```
@@ -91,6 +100,32 @@ openwiki_begin → openwiki_submit_plan → (openwiki_next_page ⇄ openwiki_sub
                                           [openwiki_inspect_page_claims 按需]) → openwiki_finish
 ```
 
+展开成完整时序（含 noop 短路与页循环）：
+
+```mermaid
+sequenceDiagram
+    participant A as host agent
+    participant M as openwiki mcp
+    participant R as repository-run
+    A->>M: openwiki_begin（root + mode + language）
+    M->>R: beginRepositoryRun
+    alt status = noop
+        M-->>A: 无需更新，到此为止
+    else 需要 run
+        M-->>A: durable run + runId
+    end
+    A->>M: openwiki_submit_plan（规范页路径 + relatedPages）
+    loop 每个待决页
+        A->>M: openwiki_next_page
+        M-->>A: 页任务 + 仅 stale/unresolved 的待决 Claims
+        A->>A: 该页调研 + 写 Markdown（host 原生工具）
+        A->>M: openwiki_submit_page（稀疏 claims 决策）
+        Note over A,M: 要改「清单外」内容时才调 openwiki_inspect_page_claims
+    end
+    A->>M: openwiki_finish
+    M-->>A: complete（此后才许报成功）
+```
+
 每个工具的输入都是 `zod` `.strict()` schema——多余字段即拒绝，协议演进时旧 host 不会把拼错的载荷静默送进生命周期。公共积木：`CanonicalString = z.string().trim().min(1)`（`:4`）；runId 一律 `z.string().uuid()`（`RunInput` `:78-82`）；host/producer id 过 `isValidHostId`（`:174-176`）。传输无关的工具契约是 `ProtocolTool` 接口（`:181-204`）：`name` + 面向模型的 `description` + `schema` + `handle(input: unknown)`——handle 自己负责 parse，输入永远按不可信处理。
 
 逐工具 schema 与结果语义（schema 行号均指 `protocol.ts`；结果语义摘自 `session-manager.ts:222-268` 的 description 与各方法 docstring）：
@@ -119,6 +154,12 @@ openwiki_begin → openwiki_submit_plan → (openwiki_next_page ⇄ openwiki_sub
 ### 4.2 直接委托 generation/repository-run（与 05 区的关系）
 
 适配器**不含任何生命周期逻辑**：`begin` 解析仓库根后把参数原样传给 `beginRepositoryRun`（`:127-150`），`submitPlan`/`nextPage`/`inspectPageClaims`/`submitPage`/`finish` 同样是「取 session → 一步委托」（`:158-215`）。它与 CLI 侧自研 agent 的关系是：**两者是同一套 `generation/repository-run.ts` 导出函数的两个驱动方**——05 区 01 号讲的 begin→planning→generating→finish 状态机只有一份，CLI 经 `src/agent/repository-runner.ts` 驱动它，host 经本适配器驱动它；durable run、检查点、恢复语义完全共享，谁先 begin 谁就接到同一个 run（SKILL.md 第 2 步因此要求「always continue the durable run」）。适配器新增的只有三件事：身份注入（§4.3）、操作串行化（§4.1）、错误映射（§4.4）。
+
+```text
+CLI 自研 agent（src/agent/repository-runner.ts）──┐
+                                                  ├──► 同一套 generation/repository-run.ts 生命周期
+host 驱动方 HostSessionManager（本文主角）────────┘    （durable run / 检查点 / 恢复语义完全共享）
+```
 
 `begin` 里仓库根走 `resolveRepositoryRoot`（`:129`）：绝对路径 + `git rev-parse --show-toplevel` 解析 worktree 根 + **拒绝文件系统根与用户 home 目录**（`src/integrations/core/repository-root.ts:20-34,122-133`）——host 场景下「agent 在哪个目录启动都行」与「绝不在错误粒度上生成」之间的平衡点。这套守卫与安装器共用（01 号 §6）。
 

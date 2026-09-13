@@ -29,7 +29,7 @@ out_of_scope:
 
 ## 1. Personal Mode 做什么
 
-Personal Mode 是 OpenWiki 的默认运行模式 (`openwiki` 命令不带 `--code` 选项即为 personal mode，见 `src/cli/commands.ts:26` 的 `OpenWikiRunMode = "personal" | "code"`)。它的核心目标：**从用户连接的外部数据源（Gmail、Slack、Notion 等）定期拉取数据，由 Agent 消化整理后，写回 `~/.openwiki/wiki/`，形成一个持续更新的个人知识 brain**。
+Personal Mode 是 OpenWiki 的两大运行模式之一（`src/cli/commands.ts:26` 的 `OpenWikiRunMode = "personal" | "code"`），但**不是默认值**：命令行默认解析为 code（`src/cli/commands.ts:530`），且非 chat 命令在默认 modeSource 下强制 code（`src/cli/commands.ts:980-982`）——personal 需要显式选择。它的核心目标：**从用户连接的外部数据源（Gmail、Slack、Notion 等）定期拉取数据，由 Agent 消化整理后，写回 `~/.openwiki/wiki/`，形成一个持续更新的个人知识 brain**。
 
 ```
 外部数据源 → 认证层 → 摄取流水线 → Agent 处理 → ~/.openwiki/wiki/

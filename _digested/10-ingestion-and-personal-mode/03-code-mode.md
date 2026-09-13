@@ -141,7 +141,7 @@ const windowHours = windowHoursSince(await readLastUpdatedAt(repoRoot));
 
 ## 4. 调用方地图 (Callers)
 
-三个调用点覆盖了代码模式的全部三条启动路径，且都被统一遥测边界 `withRunTelemetry` 包裹（`src/telemetry/with-run-telemetry.ts:59-85`，pre-agent 抛错因此也有遥测记录）：
+三个调用点覆盖了代码模式的全部三条启动路径；其中 `app.tsx` 与 `runners.ts` 两条 CLI 路径被统一遥测边界 `withRunTelemetry` 包裹（`src/telemetry/with-run-telemetry.ts:59-85`，pre-agent 抛错因此也有遥测记录），`repository-run.ts` 的生成生命周期入口**不在**该边界内（`src/generation/repository-run.ts` 全文无遥测引用）：
 
 | 调用方 | 导入行 | setup 调用 | connectors 调用 | 场景 |
 |--------|--------|-----------|----------------|------|
@@ -155,7 +155,7 @@ const windowHours = windowHoursSince(await readLastUpdatedAt(repoRoot));
 
 ## 5. CI 工作流模板生成 (Workflow Template Generation)
 
-`createCodeModeWorkflow`（:341-421）返回完整的 `openwiki-update.yml` YAML 文本。**划界**：本节讲模板的实现与各字段的来历；工作流的**运维主题**——定时策略选择、fork guard 手工补丁会被 `--init` 再生成冲掉（上游 #285 未解）、`.run.json` 清理的运维含义——归 11-scheduling-and-ci/02-ci-workflow-generation.md。
+`createCodeModeWorkflow`（:341-421）返回完整的 `openwiki-update.yml` YAML 文本。**划界**：本节讲模板的实现与各字段的来历；工作流的**运维主题**——定时策略选择、fork guard 的历史冲掉陷阱及其化解（`ensureCodeModeWorkflow` 只在文件缺失时创建，存在即 early-return：:82-89；模板内另带恢复步骤）、`.run.json` 清理的运维含义——归 11-scheduling-and-ci/02-ci-workflow-generation.md。
 
 模板骨架（行号为模板在源文件中的位置）：
 
@@ -298,7 +298,7 @@ OpenWiki 在仓库根维护两个 agent 指令文件中的管理块（`<!-- OPEN
 | `src/cli/app/app.tsx:34-36` | 导入 | TUI 路径调用方（setup :580、connectors :592） |
 | `src/cli/runners.ts:13-15` | 导入 | `--print` 路径调用方（setup :300、connectors :310） |
 | `src/generation/repository-run.ts:32` | 导入 | 生成生命周期调用方（setup :334） |
-| `src/telemetry/with-run-telemetry.ts:59-85` | `withRunTelemetry()` | 三条调用路径共同的遥测边界 |
+| `src/telemetry/with-run-telemetry.ts:59-85` | `withRunTelemetry()` | app.tsx 与 runners.ts 两条 CLI 路径的遥测边界 |
 | `src/config/constants.ts:3` | `UPDATE_METADATA_PATH` | `openwiki/.last-update.json` |
 | `src/config/constants.ts:66` | `OPENWIKI_MODEL_ID_ENV_KEY` | 模型 ID env 键 |
 | `src/config/constants.ts:421` | `getProviderConfig()` | provider 配置查询 |
