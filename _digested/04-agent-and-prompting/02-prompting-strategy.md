@@ -252,7 +252,7 @@ createRepositoryPagePrompt(job: RepositoryPageWorkerJob, allPages, language): st
 
 ## 8. 装配与调用路径
 
-- **chat/local-wiki**：`runOpenWikiAgent` 装配 context/model/checkpointer 后调 `createOpenWikiAgentGraph`（index.ts:422-428），graph 内 `systemPrompt: createSystemPrompt(command, outputMode, context.language, openWikiIgnore)`（index.ts:530-535）；运行时 user message 由 `createRunUserMessage`（index.ts:792-810）→ `createUserPrompt`（:802）生成。
+- **chat/local-wiki**：`runOpenWikiAgent`（index.ts:154-274）进入 `runOpenWikiAgentCore`（:539-781）装配 context（:552-556）/model（:567-578）/checkpointer（:583-588）后调 `createOpenWikiAgentGraph`（:595-611，调用点 `:598`；低层工厂 `createOpenWikiAgent` :393-427 亦在 `:420-427` 委托同一 graph 工厂），graph 内 `systemPrompt: createSystemPrompt(command, outputMode, context.language, openWikiIgnore)`（index.ts:530-535）；运行时 user message 由 `createRunUserMessage`（index.ts:792-810）→ `createUserPrompt`（:802）生成。
 - **repository**：index.ts:179-208 入口分流（见 01-agent-workflow.md）→ `runNativeRepositoryGeneration` → planner（repository-runner.ts:351）/逐页 worker（:487）；共享提示词在 `prompt.ts:27-29`/`:74-76` 被显式禁止。
 
 系统提示词之外，graph 还装配两个**代码侧**的提示词伴生机制（它们改写的是 run 前后的确定性产物，不是模型输入文本，故只在此划界）：

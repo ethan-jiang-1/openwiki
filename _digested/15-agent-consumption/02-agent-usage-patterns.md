@@ -74,7 +74,7 @@ openwiki visualize --export <目录>   # 静态导出五件套之一就是 graph
 - 找孤岛页/断链（某页没有任何入边）；
 - 需要「全 wiki 长什么样」的结构化回答，而不是逐文件读。
 
-**注意**：这是**副产品复用**，不是专用 API——`--export` 会同时写出 index.html/client.js 等人用资产；graph 反映的是构建时刻的链接结构，不含正文内容。
+**注意**：这是**副产品复用**，不是专用 API——`--export` 会同时写出 index.html/client.js 等人用资产；graph 反映的是构建时刻的链接结构，且**每个 `WikiNode.body` 携带该页完整 markdown 正文（仅去 frontmatter）**，连同 description/tags 一起写入 graph.json（`src/visualize/graph.ts:66-69,290-291,331-337`；`src/visualize/static-export.ts:72-76`）——按页分发产物时把它当作含正文/元数据的导出来对待（隐私与体积）。
 
 ## 5. 模式 4：证据核验读法（高 stakes 决策前）
 
@@ -88,7 +88,7 @@ openwiki visualize --export <目录>   # 静态导出五件套之一就是 graph
 |-----------|------|------|
 | read/search 类 MCP 工具 | **没有**——6 个工具全是生产协议 | `src/integrations/core/protocol.ts:14-20` |
 | wiki 检索/查询 API 或服务 | **没有**——无服务器、无向量库 | 01 号 §6 的取舍论证 |
-| CLI 读/查询命令 | **没有**——9 个命令 kind（run/auth/integrations/mcp/visualize/ingest/cron/help/error）无一面向消费 | `src/cli/commands.ts:107-164` |
+| CLI 读/查询命令 | **没有**——9 个命令 kind（integrations/mcp/auth/ngrok/visualize/ingest/cron/help/run，另有解析失败的 error 变体）无一面向消费 | `src/cli/commands.ts:107-164` |
 | 人类网页通道（agent 该用吗） | **不用**——`openwiki visualize` 是人类界面 | `openwiki/quickstart.md:44-45` |
 
 上游 `codex/openwiki-retrieval-tools` 探索分支表明检索工具是候选演进方向；合入前，「没有读 API」不是缺陷而是设计立场：文件系统直读零集成、逐字节确定、与代码同 git 化（01 号 §6）。

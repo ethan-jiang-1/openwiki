@@ -184,7 +184,7 @@ OpenWiki 的架构在 5 个方向上预留了清晰的扩展点。这些方向�
 2.  在 `PROVIDER_CONFIGS`（`src/config/constants.ts:255`）中加一行配置（含 `authMethod` 声明）
 3.  在 `src/agent/index.ts` 的 `createModel()` 中加一个 `case` 分支（无特殊传输需求的 provider 可直接走兜底分支）
 4.  在 `src/config/env.ts` 的托管 env key 清单中注册新 key（让诊断和 env 格式化感知）
-5.  在 `src/setup/credentials.tsx` 的交互式配置中加一项
+5.  在 `src/setup/credentials/steps.ts` 的向导步骤表（`credentialStep`/`orderedSetupSteps`，:201-249）中加一项——`src/setup/credentials.tsx` 只是 30 行组合根，交互步骤都在 `credentials/` 子目录
 
 5 步、4 个文件，每一步的职责都是清晰的。
 

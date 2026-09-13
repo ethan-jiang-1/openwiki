@@ -61,7 +61,7 @@ flowchart TD
 
 | 层 | 入口 | 详情 |
 |----|------|------|
-| GitHub Actions | `openwiki-update.yml`（`--init` 生成；SHA 锁定 + provider secrets + fork guard 守卫） | `03-native-cli-production.md` §7.1、11/02 |
+| GitHub Actions | `openwiki-update.yml`（`--init` 生成；SHA 锁定 + provider secrets；生成模板不含 fork guard 恢复步） | `03-native-cli-production.md` §7.1、11/02 |
 | 本地定时 | cron / macOS LaunchAgent | 11/01 |
 | 防重入/断点 | `.last-update.json` complete/interrupted 语义 | 11/03 |
 

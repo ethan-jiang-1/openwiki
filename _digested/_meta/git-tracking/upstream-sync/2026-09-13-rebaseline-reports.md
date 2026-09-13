@@ -54,6 +54,34 @@ out_of_scope:
 26. R3 cli/components/ 实为 **8 文件**（原记 9）；CliCommand 9 variant = HostIntegrationCliCommand(:105，2 个) + 7 个内联变体，error 是失败通道不算用户命令
 27. 凭据向导 PromptStep 实为 **32 步**（旧篇记 26 步，已随 14 区 01 号作废）
 
+**2026-09-13 sync review 增补（28–44）**：全量 review（1,681 引用机械校验 + 4 路语义核验约 370 锚）发现 17 项，**已同步回写**受影响文档（16 区 2 篇、15 区 2 篇、04 区 2 篇、02 区 2 篇、05 区 2 篇、根 README）；证据清单见 `_tmp_tracking/digested-sync-review-2026-09-13.md`。
+
+**叙事级（major）**
+
+28. `--init` 生成的 CI 模板**不含** fork guard 恢复步——`Restore protected workflow file` 仅存在于手工维护的 `.github/workflows/openwiki-update.yml:68-76`，其注释自述模板再生成会丢弃该守卫（upstream issue #423；R8 已记此事实，16 区初稿误读为模板自带）。CLI 侧防线仅「文件存在即 early-return」（code-mode.ts:82-89）
+29. graph.json **含每页完整 markdown 正文**：`WikiNode.body`（去 frontmatter 的原文，graph.ts:66-69，node :290-291，序列化 :331-337，static-export.ts:72-76），另有 description/tags——「不含正文内容」作废
+30. worker 工具白名单 `WORKER_TOOL_NAMES`（repository-runner.ts:80-85）= 6 个文件系统工具（read_file/ls/glob/grep/write_file/edit_file）+ submit_plan/inspect_claims/submit_page；**无**名为 begin/next_page 的工具（那是生命周期函数 beginRepositoryRun/nextRepositoryPage）
+
+**叙事级（minor）**
+
+31. claims 运行时在 begin/resume 内装配（repository-run.ts:364（begin）/:639（resume）`prepareClaimsRuntime`），非「运行分流（第 4 步）前」
+32. submitRepositoryPage :1183-1298 为**八步**事务（:1216/:1232/:1251/:1255/:1256/:1265/:1289/:1290）；「九步」仅在把区间外的 worker 写页也计入时成立
+33. OpenRouter `recordFailure` 把失败**广播写入所有已注册 sink**（index.ts:2020-2024，调用 :2040/:2053-2056）——引用计数隔离的只是 install/restore，并发下各 run 的 sink 互相可见彼此的失败
+34. chat 路径的 `createOpenWikiAgentGraph` 调用点在 `runOpenWikiAgentCore` :598（context :552-556 / model :567-578 / checkpointer :583-588）；index.ts:420-427 是低层工厂 `createOpenWikiAgent`（:393-427）内的委托
+35. `getRepositoryChangedPaths` 计入 staged+unstaged（`diff --name-only HEAD`，utils.ts:926-933）与未跟踪文件（`ls-files --others`，:935-941）——触及指纹可见源文件的未提交改动**直接**令 fast-forward 条件 3 失败（repository-run.ts:859-864），不依赖后续指纹复核兜底
+36. 被覆盖后 skipped 的页保留 manifest 条目（`preservePages`，page-manifest.ts:260-264，经 repository-run.ts:1553-1559 回填），下次 update 基线非空 → `fullReview: false`；fullReview 组只含 legacy 页与从未覆盖的页
+37. 向导顺序：provider → 凭据（+secret-key/gcp/base-url/region 条件步）→ model → langsmith → code-repo-confirm（code 模式）→ wiki brief → cron（`orderedSetupSteps`，steps.ts:201-249）；「先凭据后 provider」作废
+38. 强制 streaming 仅 openai-chatgpt（index.ts:1195-1199）与 copilot（constants.ts:491-500）；openai-compatible 可选开启（:486-489）；其余 provider 默认非流式——「按 provider 七分支创建并强制 streaming」为过度概括（七分支数本身正确）
+
+**锚点级**
+
+39. run-state.ts:14 符号为 `REPOSITORY_RUN_STATE_BASENAME`；`RUN_STATE_PATH` 全仓 0 命中
+40. CliCommand 9 个用户命令 kind = integrations/mcp/auth/ngrok/visualize/ingest/cron/help/run（error 为解析失败通道，不算命令；ngrok 在 :117-122）
+41. 无 `openwiki schedule` 命令；调度由向导安装、`openwiki cron list|pause|resume|delete` 管理（commands.ts:1150-1167）
+42. 证据 id 配对：`openwiki-source-8037e2358a2c4f9b2c722a11` ↔ `repo://AGENTS.md`（openwiki/quickstart.md:7-8）；`repo://src/generation/repository-run.ts` 的 id 为 `7c5ecb56558cc061dab24f9d`（:25-26）
+43. 交互凭据步骤在 `src/setup/credentials/steps.ts`（`credentialStep`/`orderedSetupSteps` :201-249）；`src/setup/credentials.tsx` 是 30 行组合根
+44. `sanitizeDiagnosticText` 在 `src/platform/diagnostics.ts:31`（`.js` 仅为 ESM import 后缀，mermaid/validate.ts:1）
+
 ## R1. claims + okf（全新子系统，基线中不存在；基线 OKF 仅存在于 prompt.ts 提示词层）
 
 **定位**：`src/okf/`（6 文件）＝OKF v0.2 front matter（type/title/description/tags + generated/verified/sources/status/stale_after 信任族）的确定性校验/修复/投影/索引；`src/claims/`（13 文件）＝grounded claims：每页可验证事实命题（Claim）+ `repo://` 源码证据（确定性版本 token），存储于 `openwiki/.claims/**/*.json` sidecar。claims 是事实状态所有者，okf 是投影目标（sources/verified）。

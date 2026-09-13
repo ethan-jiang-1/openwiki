@@ -172,7 +172,7 @@ mermaid 的 flowchart/state 解析器内部调 DOMPurify，裸 Node 下会报 `D
 
 错误文本在进注释前经 `sanitizeMermaidError`（:215-226）三道处理：
 
-1. **秘密脱敏**（redact）：先过 `sanitizeDiagnosticText`（`src/platform/diagnostics.js`，:217）——错误可能内嵌路径、凭据等敏感串；
+1. **秘密脱敏**（redact）：先过 `sanitizeDiagnosticText`（`src/platform/diagnostics.ts:31`；`.js` 只是 ESM import 后缀，`src/mermaid/validate.ts:1`）——错误可能内嵌路径、凭据等敏感串；
 2. **拍平成单行**：保留定位行与 `Expecting ... got ...` 诊断（后续 run 修复真正需要的信息），丢弃空行与 caret 下划线噪声行（:218-224）；
 3. **HTML 注释安全**：`--` 会被当成注释终止符，全部折叠为 `-`；限长 400 字符；空结果兜底 `"unknown error"`（:225）。
 

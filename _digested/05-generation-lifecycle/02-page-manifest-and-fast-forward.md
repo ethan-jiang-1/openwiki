@@ -168,7 +168,7 @@ HEAD 前进了，但新提交只动了 `openwiki/` 下的生成物（典型：�
 
 满足后 `recordRepositoryPageCompletion` 重写条目（`866-872`）：§3.1 一致性门自动重证页体与 sidecar；`completedBy`/`completedRunId` 原样透传（`869-871`）——页没有变，作者归属也不该变。任一条件不满足的页保持旧覆盖，进入本轮正常规划。
 
-注意条件 3 的措辞：判定的是「entry 基线之后**零变更路径**」，而不是「git 状态干净」——工作区有未提交改动不直接阻止 fast-forward，但如果改动触及指纹可见的源文件，该页的完成证明会在下一次 `getCurrentRepositoryPageCompletion` 复核时因指纹不匹配而失效（§3.2 第 2 级），不会产生错误放行。
+注意条件 3 的措辞：判定的是「entry 基线之后**零变更路径**」，而不是「git 状态干净」——但两者差距比字面小：`getRepositoryChangedPaths`（`src/agent/utils.ts:909`）除提交区间（`baseGitHead..HEAD`，`:916-924`）外，还计入工作区 staged+unstaged 改动（`diff --name-only HEAD`，`:926-933`）与未跟踪文件（`ls-files --others`，`:935-941`）。因此触及指纹可见源文件的**未提交改动会直接让条件 3 失败**（`repository-run.ts:859-864`），条目不推进——并不依赖后续 `getCurrentRepositoryPageCompletion` 的指纹复核（§3.2 第 2 级）兜底；「有未提交改动仍能 fast-forward」只在改动落在 ignore/指纹边界之外时成立。无论走哪条路径，都不会产生错误放行。
 
 一个具体走查：设某页 entry 基线为 commit B，当前 HEAD 为 D，历史为 B→C→D。
 
@@ -177,7 +177,7 @@ HEAD 前进了，但新提交只动了 `openwiki/` 下的生成物（典型：�
 
 ### 5.3 规划视图：页更新窗口
 
-与 fast-forward 同源的 `getRepositoryPageUpdateWindows`（`repository-run.ts:807-836`）把现有页按 manifest `gitHead` 基线分组（`815`，无条目的页基线为空串），每组附「基线以来变更路径」，通过 begin 响应的 `pageUpdateWindows`/`changedPaths` 暴露给 planner（`764-797`）。无基线的组标记 `fullReview: true`（`832`）——包括 legacy 页与被 skip 过的页，规划时按「无历史可依」处理。
+与 fast-forward 同源的 `getRepositoryPageUpdateWindows`（`repository-run.ts:807-836`）把现有页按 manifest `gitHead` 基线分组（`815`，无条目的页基线为空串），每组附「基线以来变更路径」，通过 begin 响应的 `pageUpdateWindows`/`changedPaths` 暴露给 planner（`764-797`）。无基线的组标记 `fullReview: true`（`832`）——包括 legacy 页与**从未有过覆盖**的页；曾被覆盖后标 skipped 的页在 finish 时保留 manifest 条目（`preservePages`，`src/generation/page-manifest.ts:260-264`，经 `repository-run.ts:1553-1559` 回填 skipped 页），下次 update 基线非空 → `fullReview: false`，按常规窗口处理。
 
 ## 6. no-op 严格前置门
 

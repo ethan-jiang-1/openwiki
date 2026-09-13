@@ -93,7 +93,7 @@ repository 快速路径不流式输出模型文本，而是发出**结构化生�
 | `finalizing` | `repository-runner.ts:236-241` | 页面队列耗尽，进入 finalize 管线 |
 | `replanning` | 类型联合保留（`types.ts:22`），CLI 渲染层有对应文案（`src/cli/run-log/progress.ts:38`） | 源漂移（source drift）触发重规划的保留档位 |
 
-worker 内部的工具事件由 `streamWorkerTools`（`repository-runner.ts:538-554`）以 `streamMode: ["tools"]` 消费，只转发白名单工具（begin/submit_plan/next_page/submit_page 等，`parseWorkerToolEvent`，`repository-runner.ts:562-597`），worker 的叙述文本被刻意丢弃。
+worker 内部的工具事件由 `streamWorkerTools`（`repository-runner.ts:538-554`）以 `streamMode: ["tools"]` 消费，只转发白名单 `WORKER_TOOL_NAMES`（`repository-runner.ts:80-85`）：6 个文件系统工具（read_file/ls/glob/grep/write_file/edit_file，即转发达绝对多数的事件）+ `submit_plan`/`inspect_claims`/`submit_page` 三个提交类工具（`parseWorkerToolEvent`，`repository-runner.ts:562-597`）；`beginRepositoryRun`/`nextRepositoryPage` 是生命周期函数而非工具，worker 的叙述文本被刻意丢弃。
 
 ## 3. resolveRunConfig 与模型可用性检查
 
@@ -279,7 +279,7 @@ function createRunThreadId(): string {
 
 **源码位置**：`src/agent/index.ts:2003-2099`
 
-`installOpenRouterDebugFetch()`（`index.ts:2068-2099`）为每次运行返回一个隔离的失败收集器（sink），并采用**引用计数**安装：`activeOpenRouterSinks` 集合（`index.ts:2003`）非空时复用已安装的全局 `fetch` 包装（`openRouterDebugFetch`，`index.ts:2006-2060`），只有最后一个运行 detach 时才恢复原始 fetch。这修复了旧基线"重叠的 install/restore 会泄漏或丢失补丁"的问题，使并发运行各自捕获失败且互不干扰。非 2xx 响应时，包装器把请求摘要与脱敏后的响应预览记入**当次运行自己的** sink（`index.ts:2030-2049`）。入口处的 `attachOpenRouterDebugInfo`（`index.ts:2101`）在两条路径的 `catch` 里把失败挂到 error 对象上供 CLI 调试 UI 使用。provider 侧细节（何时启用、脱敏规则）归 06 区 02。
+`installOpenRouterDebugFetch()`（`index.ts:2068-2099`）为每次运行返回一个隔离的失败收集器（sink），并采用**引用计数**安装：`activeOpenRouterSinks` 集合（`index.ts:2003`）非空时复用已安装的全局 `fetch` 包装（`openRouterDebugFetch`，`index.ts:2006-2060`），只有最后一个运行 detach 时才恢复原始 fetch。这修复了旧基线"重叠的 install/restore 会泄漏或丢失补丁"的问题——并发运行的**安装/恢复互不干扰**；但失败捕获不是隔离的：`recordFailure` 把每次非 2xx/网络失败**广播写入所有已注册 sink**（`index.ts:2020-2024`，调用点 `:2040,:2053-2056`），并发下某 run 的 sink 也会捕获到其他 run 的失败（单运行场景无差别）。非 2xx 时记入的是请求摘要与脱敏后的响应预览（`index.ts:2030-2049`）。入口处的 `attachOpenRouterDebugInfo`（`index.ts:2101`）在两条路径的 `catch` 里把失败挂到 error 对象上供 CLI 调试 UI 使用。provider 侧细节（何时启用、脱敏规则）归 06 区 02。
 
 ## 9. 关键类型（Key Types）
 

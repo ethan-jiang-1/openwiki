@@ -136,7 +136,7 @@ front matter 尾部（OpenWiki 生成，实例 `openwiki/quickstart.md:6-37`）�
 ```yaml
 sources:
   - id: openwiki-source-8037e2358a2c4f9b2c722a11
-    resource: repo://src/generation/repository-run.ts
+    resource: repo://AGENTS.md
 generated: { by: "openwiki/0.5.0", at: "2026-09-09T08:09:59.193Z" }
 verified:
   - by: openwiki/0.5.1

@@ -155,7 +155,7 @@ re-baseline 后写出的内容文档加 `sync_event: "2026-09-13"`。
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/generation/run-state.ts:14` | `RUN_STATE_PATH` | `.run.json` 检查点路径 |
+| `src/generation/run-state.ts:14` | `REPOSITORY_RUN_STATE_BASENAME` | `.run.json` 检查点路径 |
 | `src/agent/index.ts:1077-1264` | `createModel` | 按 provider 分支的模型工厂 |
 ```
 
