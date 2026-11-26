@@ -8,7 +8,7 @@ updated: "2026-09-13"
 sync_event: "2026-09-13"
 audience: "需要理解 OPENWIKI_REASONING_EFFORT 如何被解析成各 SDK 请求字段、以及 openai 模型可用性校验语义的人；要新增 reasoning 档位/能力条目或可用性适配器的人"
 purpose: "剖析 src/config/reasoning.ts 的推理力度（reasoning effort）档位、三种传输方式（transport）与能力表（capability table），src/model-availability.ts 的三态可用性语义，以及两者在 src/agent/index.ts 的接入点"
-owns: "`src/config/reasoning.ts`（147 行全文）与 `src/model-availability.ts`（85 行全文）的语义体系；两个接入点：`src/agent/index.ts:329-347`（可用性校验）与 `:1101-1124`（reasoning 解析与选项预展开）"
+owns: "`src/config/reasoning.ts`（147 行全文）与 `src/model-availability.ts`（85 行全文）的语义体系；两个接入点：`src/agent/index.ts:346-364`（可用性校验）与 `:1101-1124`（reasoning 解析与选项预展开）"
 update_when:
   - "REASONING_EFFORT_VALUES 档位或 REASONING_CAPABILITIES 能力表条目变化"
   - "ReasoningTransport 新增传输方式，或 :1113-1124 的选项预展开方式变化"
@@ -26,7 +26,7 @@ out_of_scope:
 
 > 本文为 2026-09-13 re-baseline 后新增文档（catch-up-plan §3 处置 ➕），行号对应基线 `e92cc11`（已在 `ethan` 分支 HEAD 逐条复核）。两个被解释文件都是 re-baseline 期的产物：`src/config/reasoning.ts`（147 行，re-baseline 新文件，见报告存档 R3「新增 config/reasoning.ts(147)」）与 `src/model-availability.ts`（85 行）。
 
-一句话定位：**reasoning 体系回答「用户设定的推理力度（reasoning effort）如何变成目标 SDK 认识的请求字段」；可用性校验（availability check）回答「选中的模型对当前凭据是否真的存在」。** 前者全部逻辑在 `src/config/reasoning.ts`，在模型工厂 `createModel()`（`src/agent/index.ts:1077-1264`，06 区 02 篇）内部消费；后者全部逻辑在 `src/model-availability.ts`，在配置解析函数 `resolveRunConfig`（`src/agent/index.ts:283-372`）里消费——**可用性校验先于模型工厂执行**：
+一句话定位：**reasoning 体系回答「用户设定的推理力度（reasoning effort）如何变成目标 SDK 认识的请求字段」；可用性校验（availability check）回答「选中的模型对当前凭据是否真的存在」。** 前者全部逻辑在 `src/config/reasoning.ts`，在模型工厂 `createModel()`（`src/agent/index.ts:1123-1465`，06 区 02 篇）内部消费；后者全部逻辑在 `src/model-availability.ts`，在配置解析函数 `resolveRunConfig`（`src/agent/index.ts:299-394`）里消费——**可用性校验先于模型工厂执行**：
 
 ```
 resolveRunConfig (:283-372)
@@ -48,7 +48,7 @@ createModel 调用点（repository :190 / 主链路 :570）
 
 ## 1. 档位：env 入口与六档取值
 
-配置入口只有一个环境变量 `OPENWIKI_REASONING_EFFORT`，键名常量 `OPENWIKI_REASONING_EFFORT_ENV_KEY` 定义在 `src/config/constants.ts:73`。该键**未设置时整个 reasoning 体系静默跳过**——不会向任何模型请求注入推理力度参数（见 §4 第一步）。
+配置入口只有一个环境变量 `OPENWIKI_REASONING_EFFORT`，键名常量 `OPENWIKI_REASONING_EFFORT_ENV_KEY` 定义在 `src/config/constants.ts:85`。该键**未设置时整个 reasoning 体系静默跳过**——不会向任何模型请求注入推理力度参数（见 §4 第一步）。
 
 合法档位由 `REASONING_EFFORT_VALUES` 枚举（`src/config/reasoning.ts:8-15`）：
 
@@ -64,7 +64,7 @@ createModel 调用点（repository :190 / 主链路 :570）
 
 ## 2. 三种传输方式（transport）与注入点
 
-`ReasoningTransport`（`src/config/reasoning.ts:19-22`）枚举三种把力度写进请求的方式，每种对应 `createModel()` 内一组预展开的选项对象（`src/agent/index.ts:1113-1124`）：
+`ReasoningTransport`（`src/config/reasoning.ts:19-22`）枚举三种把力度写进请求的方式，每种对应 `createModel()` 内一组预展开的选项对象（`src/agent/index.ts:1170-1181`）：
 
 | transport | 选项对象（index.ts） | 注入字段 | 语义 |
 |-----------|---------------------|----------|------|
@@ -74,9 +74,9 @@ createModel 调用点（repository :190 / 主链路 :570）
 
 三组选项**互斥**（各自由 `reasoningConfig?.transport === "..."` 三元判等展开，不匹配即为空对象），最终被三类分支消费：
 
-- `gemini` 分支 → `ChatGoogle` 展开 `geminiThinkingLevelOptions`（`src/agent/index.ts:1133`）；
+- `gemini` 分支 → `ChatGoogle` 展开 `geminiThinkingLevelOptions`（`src/agent/index.ts:1190`）；
 - `openai-chatgpt` 分支 → ChatOpenAI+Responses 展开 `responsesReasoningOptions`（:1201）；
-- 兜底（fallback）ChatOpenAI 分支 → 同时展开 `responsesReasoningOptions` 与 `chatCompletionsReasoningOptions`（:1255-1256）。兜底覆盖 7 个提供商（openai、copilot、baseten、fireworks、nebius、nvidia、openai-compatible），两种协议都有：openai（`responsesApi: true`，`src/config/constants.ts:350`）的 gpt-5.6-* 与开了开关的 openai-compatible 吃前者，nvidia 与未开开关的 openai-compatible 吃后者。
+- 兜底（fallback）ChatOpenAI 分支 → 同时展开 `responsesReasoningOptions` 与 `chatCompletionsReasoningOptions`（:1255-1256）。兜底覆盖 7 个提供商（openai、copilot、baseten、fireworks、nebius、nvidia、openai-compatible），两种协议都有：openai（`responsesApi: true`，`src/config/constants.ts:415`）的 gpt-5.6-* 与开了开关的 openai-compatible 吃前者，nvidia 与未开开关的 openai-compatible 吃后者。
 
 分支体内不再出现任何 reasoning 逻辑——判定全部收敛在工厂开头的预展开段，这是 06 区 02 篇 §3「reasoning 预热」的完整语义版本。
 
@@ -109,7 +109,7 @@ new ChatGoogle({ thinkingLevel: "high", ... })
 | `gemini` | `gemini-3.6-flash` | `gemini-thinking-level` | `low`, `medium`, `high` | :67-69 |
 | `copilot` | （无条目） | — | — | 表中不存在，`OPENWIKI_REASONING_EFFORT` 对 copilot 一律抛「not supported」（06 区 02 篇 §5） |
 
-> copilot 的 gpt-5.* 型号在工厂层面其实会走 Responses（`responsesApi: /^gpt-5/u`，`src/config/constants.ts:301`），但能力表按 provider 查找、copilot 无键，reasoning 在更早的第 3 步就被抛错拦下（§4）——能力表是比 transport 判定更靠前的开关。
+> copilot 的 gpt-5.* 型号在工厂层面其实会走 Responses（`responsesApi: /^gpt-5/u`，`src/config/constants.ts:350`），但能力表按 provider 查找、copilot 无键，reasoning 在更早的第 3 步就被抛错拦下（§4）——能力表是比 transport 判定更靠前的开关。
 
 表查找入口 `getReasoningCapability(provider, modelId, env)`（`src/config/reasoning.ts:72-82`）：`openai-compatible` **不走静态表**，转动态判定（:77-78）：
 
@@ -122,7 +122,7 @@ getOpenAiCompatibleReasoningCapability (:132-147)
      values 恒为全六档
 ```
 
-两个开关的布尔解析复用 14 区 02 篇的 config 层助手：`resolveOpenAiCompatibleReasoningEffortSupported`（`src/config/constants.ts:1032-1040`）与 `resolveOpenAiCompatibleUseResponsesApi`（:1023-1030），都是「trim + 小写后等于 `true`」的严格判定（`TRUE_ENV_VALUE` :76）。openai-compatible 的动态 transport 判定与工厂的 `providerUsesResponsesApi()`（:470-484，对 openai-compatible 分派到同一开关 :475-477）保持一致——工厂在调用解析前先算好 `chatOpenAiUsesResponsesApi`（`src/agent/index.ts:1097-1100`）传入，避免两次读 env 出现竞态歧义。
+两个开关的布尔解析复用 14 区 02 篇的 config 层助手：`resolveOpenAiCompatibleReasoningEffortSupported`（`src/config/constants.ts:1256-1264`）与 `resolveOpenAiCompatibleUseResponsesApi`（:1023-1030），都是「trim + 小写后等于 `true`」的严格判定（`TRUE_ENV_VALUE` :76）。openai-compatible 的动态 transport 判定与工厂的 `providerUsesResponsesApi()`（:470-484，对 openai-compatible 分派到同一开关 :475-477）保持一致——工厂在调用解析前先算好 `chatOpenAiUsesResponsesApi`（`src/agent/index.ts:1154-1157`）传入，避免两次读 env 出现竞态歧义。
 
 **静态表加条目 = 新增 reasoning 支持的唯一动作**（并确认对应分支会展开对应选项对象，见 06 区 02 篇 §9）。
 
@@ -142,7 +142,7 @@ getOpenAiCompatibleReasoningCapability (:132-147)
 
 ## 4. `resolveReasoningConfig`：解析流水线与三种抛错
 
-`resolveReasoningConfig(provider, modelId, env, options)`（`src/config/reasoning.ts:88-130`）是唯一被工厂调用的入口（`src/agent/index.ts:1101-1108`，传入 `process.env` 与 `{ useResponsesApi }`）。四步流水线：
+`resolveReasoningConfig(provider, modelId, env, options)`（`src/config/reasoning.ts:88-130`）是唯一被工厂调用的入口（`src/agent/index.ts:1158-1165`，传入 `process.env` 与 `{ useResponsesApi }`）。四步流水线：
 
 1. **未设置即退出**（:94-98）：`env[OPENWIKI_REASONING_EFFORT_ENV_KEY] === undefined` → 返回 `undefined`。工厂侧 `reasoningConfig?.transport` 全部判空，三组选项全为空对象——**不设置 = 不注入任何 reasoning 字段**，这是默认行为。
 2. **档位合法性**（:100-106）：先 `trim()`，再过 `isReasoningEffort`；非法值抛 `Invalid OPENWIKI_REASONING_EFFORT. Expected one of: none, low, medium, high, xhigh, max.`（:103-105）。这是唯一与 provider/model 无关的抛错。
@@ -180,10 +180,10 @@ getOpenAiCompatibleReasoningCapability (:132-147)
 
 ## 6. 接入点：`resolveRunConfig` 中的阻断/放行策略
 
-可用性校验接在 `resolveRunConfig`（`src/agent/index.ts:283-372`）的凭据/基础 URL 系列检查之后（`ensureProviderCredentials` :310、`ensureProviderBaseUrl` :317 等）、openai-chatgpt 令牌刷新（:321-325）与 `resolveModelId`（:327）之后：
+可用性校验接在 `resolveRunConfig`（`src/agent/index.ts:299-394`）的凭据/基础 URL 系列检查之后（`ensureProviderCredentials` :310、`ensureProviderBaseUrl` :317 等）、openai-chatgpt 令牌刷新（:321-325）与 `resolveModelId`（:327）之后：
 
 - **调用**（:329-334）：传 `provider`/`modelId`/`apiKey`（`getProviderApiKey(provider)`）/`baseUrl`（已解析的 `providerBaseUrl`，未自定义时为 `undefined`）。
-- **`unavailable` → 直接 throw 阻断**（:335-339）：错误信息建议用户改 `OPENWIKI_MODEL_ID`（`src/config/constants.ts:66`）换一个可用模型。整个 run 在进入生成前失败，`resolveRunConfig` 的 catch 统一打上 `tagErrorStage(error, "config")`（:368-370）供遥测分类。
+- **`unavailable` → 直接 throw 阻断**（:335-339）：错误信息建议用户改 `OPENWIKI_MODEL_ID`（`src/config/constants.ts:78`）换一个可用模型。整个 run 在进入生成前失败，`resolveRunConfig` 的 catch 统一打上 `tagErrorStage(error, "config")`（:368-370）供遥测分类。
 - **`unknown` → 仅 debug 放行**（:340-347）：`emitDebug` 输出 `model.availability=unknown reason=...`（:341-346），推理继续。
 
 顺序保证了两个性质：① 校验发生在**任何**模型工厂调用之前——`resolveRunConfig` 的两个调用点 :184/:248（repository 快速路径 / 主链路）都先于对应 `createModel` 调用点 :190/:570，坏模型不会浪费一次完整的 agent 装配；② 校验依赖的 `providerBaseUrl`/apiKey 与工厂后续用的是同一套解析结果，不会出现「校验查 A 端点、调用打 B 端点」的漂移。
@@ -209,31 +209,31 @@ getOpenAiCompatibleReasoningCapability (:132-147)
 
 | env | 定义处 | 作用 |
 |-----|--------|------|
-| `OPENWIKI_REASONING_EFFORT` | `src/config/constants.ts:73` | 设定推理力度档位；不设置则整个体系静默跳过 |
-| `OPENWIKI_OPENAI_COMPATIBLE_REASONING_EFFORT_SUPPORTED` | `src/config/constants.ts:22-23` | openai-compatible reasoning 总开关，须为字面 `true` |
-| `OPENWIKI_OPENAI_COMPATIBLE_USE_RESPONSES_API` | `src/config/constants.ts:20-21` | openai-compatible transport 二选一（Responses ↔ chat-completions） |
-| `OPENWIKI_MODEL_ID` | `src/config/constants.ts:66` | 覆盖模型型号；unavailable 阻断时的推荐出路 |
+| `OPENWIKI_REASONING_EFFORT` | `src/config/constants.ts:85` | 设定推理力度档位；不设置则整个体系静默跳过 |
+| `OPENWIKI_OPENAI_COMPATIBLE_REASONING_EFFORT_SUPPORTED` | `src/config/constants.ts:34-35` | openai-compatible reasoning 总开关，须为字面 `true` |
+| `OPENWIKI_OPENAI_COMPATIBLE_USE_RESPONSES_API` | `src/config/constants.ts:32-33` | openai-compatible transport 二选一（Responses ↔ chat-completions） |
+| `OPENWIKI_MODEL_ID` | `src/config/constants.ts:78` | 覆盖模型型号；unavailable 阻断时的推荐出路 |
 
 | 报错/现象 | 根因 | 去处 |
 |-----------|------|------|
 | `Invalid OPENWIKI_REASONING_EFFORT. Expected one of: ...` | trim 后仍不在六档内（首尾空白被容忍，大小写敏感） | `src/config/reasoning.ts:102-106` |
 | `... is not supported for provider "X" and model "Y"` | 能力表无该 modelId 条目（如 copilot、非 gpt-5.6 的 openai 型号） | :117-121 + §3 能力表 |
 | `Invalid OPENWIKI_REASONING_EFFORT value "max" for provider "gemini" ...` | 档位不在该条目 `values` 子集 | :123-127 |
-| `... does not make model "..." available to the configured credentials. Set OPENWIKI_MODEL_ID ...` | `/v1/models` 查询成功但目录无此型号（`unavailable` 阻断） | `src/agent/index.ts:335-339` |
-| 想确认为何「看起来该报错却放行了」 | `unknown` 仅 debug 放行，开 debug 看 `model.availability=unknown reason=...` | `src/agent/index.ts:340-347` + §5 闸门表 |
+| `... does not make model "..." available to the configured credentials. Set OPENWIKI_MODEL_ID ...` | `/v1/models` 查询成功但目录无此型号（`unavailable` 阻断） | `src/agent/index.ts:352-356` |
+| 想确认为何「看起来该报错却放行了」 | `unknown` 仅 debug 放行，开 debug 看 `model.availability=unknown reason=...` | `src/agent/index.ts:357-364` + §5 闸门表 |
 | openai-compatible 一设 effort 就报 not supported | 未开 `OPENWIKI_OPENAI_COMPATIBLE_REASONING_EFFORT_SUPPORTED=true`（动态能力返回 undefined → throw）；已开但报协议不符时调 `OPENWIKI_OPENAI_COMPATIBLE_USE_RESPONSES_API` 切 transport | `src/config/reasoning.ts:132-147` |
 
 ## Source Anchor
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/config/constants.ts:66` | `OPENWIKI_MODEL_ID_ENV_KEY` | unavailable 报错建议改的 env 键 |
-| `src/config/constants.ts:73` | `OPENWIKI_REASONING_EFFORT_ENV_KEY` | reasoning 唯一配置入口键名 |
-| `src/config/constants.ts:76` | `TRUE_ENV_VALUE` | 开关严格判定值 `"true"` |
-| `src/config/constants.ts:20-23` | `OPENAI_COMPATIBLE_*_ENV_KEY` | openai-compatible 两个 reasoning 相关开关键名 |
-| `src/config/constants.ts:301` / `:350` | copilot / openai 的 `responsesApi` | `/^gpt-5/u` 与 `true`；决定工厂侧 Responses 判定 |
-| `src/config/constants.ts:470-484` | `providerUsesResponsesApi` | Responses API 判定（openai-compatible 分派 :475-477） |
-| `src/config/constants.ts:1023-1040` | `resolveOpenAiCompatibleUseResponsesApi` / `resolveOpenAiCompatibleReasoningEffortSupported` | 两个开关的布尔解析 |
+| `src/config/constants.ts:78` | `OPENWIKI_MODEL_ID_ENV_KEY` | unavailable 报错建议改的 env 键 |
+| `src/config/constants.ts:85` | `OPENWIKI_REASONING_EFFORT_ENV_KEY` | reasoning 唯一配置入口键名 |
+| `src/config/constants.ts:107` | `TRUE_ENV_VALUE` | 开关严格判定值 `"true"` |
+| `src/config/constants.ts:32-35` | `OPENAI_COMPATIBLE_*_ENV_KEY` | openai-compatible 两个 reasoning 相关开关键名 |
+| `src/config/constants.ts:350` / `:350` | copilot / openai 的 `responsesApi` | `/^gpt-5/u` 与 `true`；决定工厂侧 Responses 判定 |
+| `src/config/constants.ts:596-610` | `providerUsesResponsesApi` | Responses API 判定（openai-compatible 分派 :475-477） |
+| `src/config/constants.ts:1247-1264` | `resolveOpenAiCompatibleUseResponsesApi` / `resolveOpenAiCompatibleReasoningEffortSupported` | 两个开关的布尔解析 |
 | `src/config/reasoning.ts:8-15` | `REASONING_EFFORT_VALUES` | 六档：none/low/medium/high/xhigh/max |
 | `src/config/reasoning.ts:19-22` | `ReasoningTransport` | 三种传输方式类型 |
 | `src/config/reasoning.ts:38-46` | 两个共享 capability 常量 | gpt-5.6 全六档 / gemini 三档 |
@@ -245,12 +245,12 @@ getOpenAiCompatibleReasoningCapability (:132-147)
 | `src/model-availability.ts:19` | `OPENAI_API_BASE_URL` | `https://api.openai.com/v1` |
 | `src/model-availability.ts:21-25` | 函数头注释 | 「lookup 失败≠不可用」语义出处 |
 | `src/model-availability.ts:26-84` | `getSelectedModelAvailability` | 三闸门 + `/v1/models` 查询全流程 |
-| `src/agent/index.ts:283-372` | `resolveRunConfig` | 配置解析期接入点（catch 打 config 阶段 :368-370） |
-| `src/agent/index.ts:184` / `:248` | `resolveRunConfig` 调用点 | repository 快速路径 / 主链路 |
-| `src/agent/index.ts:329-347` | `getSelectedModelAvailability` 调用 | unavailable throw :335-339 / unknown debug :340-347 |
-| `src/agent/index.ts:1097-1100` | `chatOpenAiUsesResponsesApi` | 工厂内预计算的 Responses 判定 |
-| `src/agent/index.ts:1101-1108` | `resolveReasoningConfig` 调用 | reasoning 解析在 createModel 内的位置 |
-| `src/agent/index.ts:1110-1124` | 三组选项预展开 | `responses`/`chatCompletions`/`geminiThinkingLevel` 互斥选项 |
-| `src/agent/index.ts:1133` / `:1201` / `:1255-1256` | 选项消费点 | gemini / openai-chatgpt / 兜底分支展开 |
+| `src/agent/index.ts:299-394` | `resolveRunConfig` | 配置解析期接入点（catch 打 config 阶段 :368-370） |
+| `src/agent/index.ts:197` / `:248` | `resolveRunConfig` 调用点 | repository 快速路径 / 主链路 |
+| `src/agent/index.ts:346-364` | `getSelectedModelAvailability` 调用 | unavailable throw :335-339 / unknown debug :340-347 |
+| `src/agent/index.ts:1154-1157` | `chatOpenAiUsesResponsesApi` | 工厂内预计算的 Responses 判定 |
+| `src/agent/index.ts:1158-1165` | `resolveReasoningConfig` 调用 | reasoning 解析在 createModel 内的位置 |
+| `src/agent/index.ts:1167-1181` | 三组选项预展开 | `responses`/`chatCompletions`/`geminiThinkingLevel` 互斥选项 |
+| `src/agent/index.ts:1190` / `:1201` / `:1255-1256` | 选项消费点 | gemini / openai-chatgpt / 兜底分支展开 |
 | `test/model-availability.test.ts` | 可用性测试 | 三态判定 + fetch 注入 |
 | `test/config/constants.test.ts` | config 层测试 | 开关布尔解析等助手 |

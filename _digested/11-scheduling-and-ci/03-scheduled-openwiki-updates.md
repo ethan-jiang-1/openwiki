@@ -33,7 +33,7 @@ out_of_scope:
 
 - 仓库路径常量 `UPDATE_METADATA_PATH = "openwiki/.last-update.json"`（`src/config/constants.ts:3`）
 - local-wiki（个人模式）写入 `cwd/.last-update.json`（`utils.ts:46` 的 `LOCAL_WIKI_METADATA_PATH` 与 `:816-823` 的 `getMetadataFilePath` 分支）；本篇聚焦 repository 模式
-- schema 为 `UpdateMetadata`（`src/agent/types.ts:92-99`）：
+- schema 为 `UpdateMetadata`（`src/agent/types.ts:121-128`）：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -54,14 +54,14 @@ out_of_scope:
 |--------|------|------|
 | `getUpdateNoopStatus` | no-op 判定的全部输入（gitHead/status/language/model） | `utils.ts:126-195` |
 | `createRunContext` | 下一轮的 `lastUpdate` 上下文（语言继承、基线 gitHead） | `utils.ts:74-97` |
-| `runCodeModeConnectors` | `updatedAt` → 连接器拉取的增量窗口小时数 | `src/ingestion/code-mode.ts:111,166-171` |
-| code-mode 模板 checkout | `fetch-depth: 0` 保证 `gitHead` 可 diff（02 篇 §3.2） | `src/ingestion/code-mode.ts:361-366` |
+| `runCodeModeConnectors` | `updatedAt` → 连接器拉取的增量窗口小时数 | `src/ingestion/code-mode.ts:135,166-171` |
+| code-mode 模板 checkout | `fetch-depth: 0` 保证 `gitHead` 可 diff（02 篇 §3.2） | `src/ingestion/code-mode.ts:552-557` |
 
 第 3 行值得强调：**时间戳不只是记录，它就是连接器的增量游标**。这直接解释了 46d437a 为什么必须让 no-op 也刷新时间戳（§3.2）。
 
 ### 2.1 no-op 视图的上层消费
 
-no-op 门通过时 begin 返回的视图不含 run 对象，只带 `status: "noop"`（`repository-run.ts:446-454`）。CLI 唯一驱动方 `runNativeRepositoryGeneration` 对此的处置：发射 `repository_progress` 事件、`stage: "noop"`（`src/agent/repository-runner.ts:205-212`），然后返回 `{ skipped: true }`——即一次「合法的零工作运行」。TUI/`--print` 把它呈现为一行跳过提示；遥测侧它也是一次正常记录的 run（这正是「no-op 也要刷新时间戳」的同一致性要求）。
+no-op 门通过时 begin 返回的视图不含 run 对象，只带 `status: "noop"`（`repository-run.ts:446-454`）。CLI 唯一驱动方 `runNativeRepositoryGeneration` 对此的处置：发射 `repository_progress` 事件、`stage: "noop"`（`src/agent/repository-runner.ts:363-370`），然后返回 `{ skipped: true }`——即一次「合法的零工作运行」。TUI/`--print` 把它呈现为一行跳过提示；遥测侧它也是一次正常记录的 run（这正是「no-op 也要刷新时间戳」的同一致性要求）。
 
 ---
 
@@ -77,7 +77,7 @@ no-op 门通过时 begin 返回的视图不含 run 对象，只带 `status: "noo
 | 3b | `finish`：全部完成 | `complete` | 当前 HEAD | `repository-run.ts:1572-1582`（`persistRunMetadataIfChanged`） | 完整基线，顺带**清除上一轮 interrupted** |
 | 4 | no-op 门通过 | `complete` | preflight 的 head（未变） | `repository-run.ts:438-445` | 「跑过一轮、无需改动」也是有效基线 |
 
-fail-fast 路径上还有第四处：非 repository 入口的失败也写 `interrupted`（`src/agent/index.ts:693-699`）。**规则只有一条：只要一轮 run 真正开始，磁盘上永远留有诚实的 status**——要么 complete，要么 interrupted，不存在「看起来 complete 但其实半截」的中间态。
+fail-fast 路径上还有第四处：非 repository 入口的失败也写 `interrupted`（`src/agent/index.ts:734-740`）。**规则只有一条：只要一轮 run 真正开始，磁盘上永远留有诚实的 status**——要么 complete，要么 interrupted，不存在「看起来 complete 但其实半截」的中间态。
 
 ### 3.1 「总是写时间戳」（46d437a）
 
@@ -220,31 +220,31 @@ function isUpdateMetadataStatusLine(line: string): boolean      // :892-901
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
 | `src/config/constants.ts:3` | `UPDATE_METADATA_PATH` | `openwiki/.last-update.json` 路径常量 |
-| `src/agent/types.ts:90` | `UpdateRunStatus` | `"complete" \| "interrupted"` |
-| `src/agent/types.ts:92-99` | `UpdateMetadata` | 元数据 schema（updatedAt/command/gitHead/model/status/language） |
-| `src/agent/utils.ts:74-97` | `createRunContext` | 读取 lastUpdate、语言继承 |
-| `src/agent/utils.ts:126-195` | `getUpdateNoopStatus` | no-op 判定链（interrupted :137-139、语言 :141-148、工作树 :156-170、HEAD :172-187） |
-| `src/agent/utils.ts:208-239` | `writeLastUpdateMetadata` | 元数据写入（gitHeadOverride null 语义 :218-223） |
-| `src/agent/utils.ts:249-272` | `persistRunMetadataIfChanged` | 总是刷新时间戳（46d437a）；complete 清除 interrupted |
-| `src/agent/utils.ts:277-287` | `createOpenWikiContentSnapshot` | 内容哈希快照 |
-| `src/agent/utils.ts:816-823` | `getMetadataFilePath` | repository vs local-wiki 路径分支 |
-| `src/agent/utils.ts:860-882` | `runGit` | trim 行为——trimmed 状态行的成因 |
-| `src/agent/utils.ts:884-901` | `GIT_STATUS_LINE_PATTERN`, `isUpdateMetadataStatusLine` | 状态行容错（535a543；元数据 + manifest 豁免） |
-| `src/agent/utils.ts:971-981` | `getChangedPathsSinceLastUpdate` | `git diff --name-only <prev>..HEAD` |
-| `src/agent/utils.ts:983-988` | `isOpenWikiPath` | `openwiki/` 前缀豁免 |
-| `src/agent/utils.ts:996-1037` | `lineReferencesIgnoredPath`, `extractGitPaths`, `splitGitPaths` | 忽略路径豁免与 git 行路径抽取 |
-| `src/generation/repository-run.ts:349-352` | `languageChanged` 计算 | 语言变化检测（34eeff7） |
-| `src/generation/repository-run.ts:379-389` | `seedRepositoryPageManifest` | 仅上轮 complete 时播种 |
-| `src/generation/repository-run.ts:405-407` | `hasCompleteBaselineCoverage` | manifest 全覆盖前置 |
-| `src/generation/repository-run.ts:411-458` | no-op 严格前置门 | force 旁路、claims 门、双重指纹稳定检查、noop 视图 |
-| `src/generation/repository-run.ts:438-445` | no-op 元数据写入 | `complete` + 刷新时间戳 |
-| `src/generation/repository-run.ts:470` | `requiredRewritePages` | 语言变化 → 全部初始页必改写 |
-| `src/generation/repository-run.ts:501-509` | begin 写 `interrupted` | 持久性节点（保留上一轮 gitHead） |
+| `src/agent/types.ts:119` | `UpdateRunStatus` | `"complete" \| "interrupted"` |
+| `src/agent/types.ts:121-128` | `UpdateMetadata` | 元数据 schema（updatedAt/command/gitHead/model/status/language） |
+| `src/agent/utils.ts:67-90` | `createRunContext` | 读取 lastUpdate、语言继承 |
+| `src/agent/utils.ts:119-188` | `getUpdateNoopStatus` | no-op 判定链（interrupted :137-139、语言 :141-148、工作树 :156-170、HEAD :172-187） |
+| `src/agent/utils.ts:201-227` | `writeLastUpdateMetadata` | 元数据写入（gitHeadOverride null 语义 :218-223） |
+| `src/agent/utils.ts:237-260` | `persistRunMetadataIfChanged` | 总是刷新时间戳（46d437a）；complete 清除 interrupted |
+| `src/agent/utils.ts:265-275` | `createOpenWikiContentSnapshot` | 内容哈希快照 |
+| `src/agent/utils.ts:804-811` | `getMetadataFilePath` | repository vs local-wiki 路径分支 |
+| `src/agent/utils.ts:867-889` | `runGit` | trim 行为——trimmed 状态行的成因 |
+| `src/agent/utils.ts:891-908` | `GIT_STATUS_LINE_PATTERN`, `isUpdateMetadataStatusLine` | 状态行容错（535a543；元数据 + manifest 豁免） |
+| `src/agent/utils.ts:1128-1138` | `getChangedPathsSinceLastUpdate` | `git diff --name-only <prev>..HEAD` |
+| `src/agent/utils.ts:1140-1145` | `isOpenWikiPath` | `openwiki/` 前缀豁免 |
+| `src/agent/utils.ts:1153-1194` | `lineReferencesIgnoredPath`, `extractGitPaths`, `splitGitPaths` | 忽略路径豁免与 git 行路径抽取 |
+| `src/generation/repository-run.ts:431-434` | `languageChanged` 计算 | 语言变化检测（34eeff7） |
+| `src/generation/repository-run.ts:461-471` | `seedRepositoryPageManifest` | 仅上轮 complete 时播种 |
+| `src/generation/repository-run.ts:487-489` | `hasCompleteBaselineCoverage` | manifest 全覆盖前置 |
+| `src/generation/repository-run.ts:493-540` | no-op 严格前置门 | force 旁路、claims 门、双重指纹稳定检查、noop 视图 |
+| `src/generation/repository-run.ts:520-527` | no-op 元数据写入 | `complete` + 刷新时间戳 |
+| `src/generation/repository-run.ts:552` | `requiredRewritePages` | 语言变化 → 全部初始页必改写 |
+| `src/generation/repository-run.ts:583-591` | begin 写 `interrupted` | 持久性节点（保留上一轮 gitHead） |
 | `src/generation/repository-run.ts:1130-1138` | worker 失败重写 `interrupted` | 快照还原 + skipped |
-| `src/generation/repository-run.ts:1560-1582` | finish 记账 | interrupted（:1562-1571）/ complete（:1572-1582） |
-| `src/generation/repository-run.ts:1485-1590` | `finishRepositoryRun` | 收尾总入口：还原 skipped → finalize → 记账（§3 表 3a/3b） |
-| `src/generation/repository-run.ts:1584-1585` | 最后删 `.run.json` | 删除顺序即恢复语义 |
-| `src/agent/index.ts:693-699` | 失败写 `interrupted` | 非 repository 入口的 fail-fast 记账 |
-| `src/ingestion/code-mode.ts:111,166-171` | `windowHoursSince` | `updatedAt` 作为连接器增量窗口 |
-| `src/ingestion/code-mode.ts:392-394` | 清理 `.run.json` 步骤 | CI 模板的运行态清理 |
-| `src/agent/repository-runner.ts:205-212` | `runNativeRepositoryGeneration` noop 分支 | no-op 视图 → `repository_progress stage:"noop"` + `{skipped: true}` |
+| `src/generation/repository-run.ts:1757-1779` | finish 记账 | interrupted（:1562-1571）/ complete（:1572-1582） |
+| `src/generation/repository-run.ts:1640-1818` | `finishRepositoryRun` | 收尾总入口：还原 skipped → finalize → 记账（§3 表 3a/3b） |
+| `src/generation/repository-run.ts:1781-1782` | 最后删 `.run.json` | 删除顺序即恢复语义 |
+| `src/agent/index.ts:734-740` | 失败写 `interrupted` | 非 repository 入口的 fail-fast 记账 |
+| `src/ingestion/code-mode.ts:135,166-171` | `windowHoursSince` | `updatedAt` 作为连接器增量窗口 |
+| `src/ingestion/code-mode.ts:583-585` | 清理 `.run.json` 步骤 | CI 模板的运行态清理 |
+| `src/agent/repository-runner.ts:363-370` | `runNativeRepositoryGeneration` noop 分支 | no-op 视图 → `repository_progress stage:"noop"` + `{skipped: true}` |

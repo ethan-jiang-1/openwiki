@@ -37,7 +37,7 @@ re-baseline 后的提示词体系从「单文件大模板」变成**内容、装
 两条运行路径各取所需：
 
 - **chat / local-wiki 路径**（`runOpenWikiAgent` → `createOpenWikiAgentGraph`）：内容层 + 装配层，模板由 `outputMode` 决定。
-- **repository init/update 路径**：入口即分流到 `runNativeRepositoryGeneration`（`src/agent/repository-runner.ts:205`，见 01-agent-workflow.md 与 ../../05-generation-lifecycle/01-page-job-state-machine.md），提示词全部来自旁路体系；装配层对它显式抛错拒绝。
+- **repository init/update 路径**：入口即分流到 `runNativeRepositoryGeneration`（`src/agent/repository-runner.ts:363`，见 01-agent-workflow.md 与 ../../05-generation-lifecycle/01-page-job-state-machine.md），提示词全部来自旁路体系；装配层对它显式抛错拒绝。
 
 ## 2. 装配层：`src/agent/prompt.ts`
 
@@ -59,7 +59,7 @@ createSystemPrompt(command, outputMode="local-wiki", language?, openWikiIgnore?)
 | 占位符 | 来源 | 空值行为 |
 |--------|------|---------|
 | `{USER_MESSAGE}` | `userMessage` 参数 | 空时回落 `"Start an OpenWiki chat."` |
-| `{WIKI_GOAL}` | `context.wikiGoal`（repository 读 `/openwiki/INSTRUCTIONS.md`，personal 读 onboarding 配置，`src/agent/utils.ts:99-108`） | 空时回落 `"(not provided)"` |
+| `{WIKI_GOAL}` | `context.wikiGoal`（repository 读 `/openwiki/INSTRUCTIONS.md`，personal 读 onboarding 配置，`src/agent/utils.ts:92-101`） | 空时回落 `"(not provided)"` |
 | `{LAST_UPDATE}` | `context.lastUpdate` 经 `formatLastUpdate()` 序列化为两空格 JSON（:110-116） | null 时显示 `"No previous OpenWiki update metadata was found."` |
 | `{ADDITIONAL_USER_REQUEST}` | userMessage 非空时生成 `Additional user instruction:` 块 | 空串 |
 | `{RUNTIME_CONTEXT}` | `formatRuntimeContext(runtimeRoot, outputMode)`（:187-202） | 无 runtimeRoot 时空串 |
@@ -172,7 +172,7 @@ createRepositoryPlannerPrompt(view: ActiveBeginView, planningContext?: string): 
 - update 专属上下文（:23-37）：逐页已提交更新窗口（`formatPageUpdateWindows` :215-231，基线未知则标 `unknown (full review required)`）+ 待处理 claims 清单（`formatIssues` :198-207）——已推进过的页面不得因基线前变更而重生成。
 - `view.wikiGoal`（`/openwiki/INSTRUCTIONS.md`）以「Repository OpenWiki instructions」注入（:82）。
 
-调用点：`src/agent/repository-runner.ts:351`（`runPlanningAgent`，其 backend 带 `openWikiIgnore` :294-298）。
+调用点：`src/agent/repository-runner.ts:530`（`runPlanningAgent`，其 backend 带 `openWikiIgnore` :294-298）。
 
 ### 5.2 createRepositoryPagePrompt（:114-178）
 
@@ -192,7 +192,7 @@ createRepositoryPagePrompt(job: RepositoryPageWorkerJob, allPages, language): st
 - 待决策清单（:166-167）：本页现有 claim 数 + `JSON.stringify(job.claimsRequiringAttention)`。
 - quickstart 特例（:169-177）：quickstart 页的 worker 额外拿到全计划 page map（path/title/purpose）以产出紧凑任务路由图。
 
-调用点：`src/agent/repository-runner.ts:487`（`runPageAgent`，backend 带 `writableWikiPages: [job.path]` 写白名单 + `openWikiIgnore` :414-418）。
+调用点：`src/agent/repository-runner.ts:1016`（`runPageAgent`，backend 带 `writableWikiPages: [job.path]` 写白名单 + `openWikiIgnore` :414-418）。
 
 ## 6. 捆绑技能同步：`src/agent/skills.ts`（142 行）
 
@@ -205,7 +205,7 @@ createRepositoryPagePrompt(job: RepositoryPageWorkerJob, allPages, language): st
 
 ### 6.1 同步机制
 
-- **时机与目标**：agent 启动即执行 `syncBundledSkills()`（`src/agent/index.ts:174` 与 `:406` 两个入口各一次），把包内 `skills/`（`bundledSkillsDir`，skills.ts:19-21）复制到 `~/.openwiki/skills/`（`openWikiSkillsDir`，`src/config/openwiki-home.ts:47`）；随后以 `skills: ["/skills/"]` 挂进 agent（index.ts:527）。
+- **时机与目标**：agent 启动即执行 `syncBundledSkills()`（`src/agent/index.ts:187` 与 `:406` 两个入口各一次），把包内 `skills/`（`bundledSkillsDir`，skills.ts:19-21）复制到 `~/.openwiki/skills/`（`openWikiSkillsDir`，`src/config/openwiki-home.ts:47`）；随后以 `skills: ["/skills/"]` 挂进 agent（index.ts:527）。
 - **目录级替换**（`replaceSkillDirectories` :30-43）：readdir 只取目录项，逐技能并发替换；目标里**无关技能不受影响**（不做全量镜像删除）。
 - **单技能原子安装**（`replaceSkillDirectory` :53-118）：
   1. `mkdtemp` 建 `.name-staging-*` 暂存目录（:59-61），`cp -r` 复制进去（:64）；
@@ -266,15 +266,15 @@ createRepositoryPagePrompt(job: RepositoryPageWorkerJob, allPages, language): st
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/agent/prompt.ts:21-55` | `createSystemPrompt` | 模板选择 + 4 占位符注入 + link-integrity 追加 |
+| `src/agent/prompt.ts:21-52` | `createSystemPrompt` | 模板选择 + 4 占位符注入 + link-integrity 追加 |
 | `src/agent/prompt.ts:27-29` | repository 守卫 | 共享提示词拒绝 repository init/update |
-| `src/agent/prompt.ts:67-98` | `createUserPrompt` | 5 用户占位符注入 |
-| `src/agent/prompt.ts:100-108` | `formatRuntimeRootInstruction` | 虚拟根语义指令 |
-| `src/agent/prompt.ts:118-131` | `formatLanguageInstructions` | 输出语言纪律 |
-| `src/agent/prompt.ts:133-139` | `createLinkIntegrityInstructions` | 链接完整性自愈协议 |
-| `src/agent/prompt.ts:141-150` | `createDiagramInstructions` | 图纪律（src 无调用点，测试消费） |
-| `src/agent/prompt.ts:152-185` | ignore 相关 formatter | `{GIT_HISTORY_HINT}`/`{DISCOVERY_INSTRUCTION}`/`{OPENWIKIIGNORE_INSTRUCTIONS}` 两态文本 |
-| `src/agent/prompt.ts:187-202` | `formatRuntimeContext` | `{RUNTIME_CONTEXT}` 内容 |
+| `src/agent/prompt.ts:64-96` | `createUserPrompt` | 5 用户占位符注入 |
+| `src/agent/prompt.ts:98-106` | `formatRuntimeRootInstruction` | 虚拟根语义指令 |
+| `src/agent/prompt.ts:116-129` | `formatLanguageInstructions` | 输出语言纪律 |
+| `src/agent/prompt.ts:131-137` | `createLinkIntegrityInstructions` | 链接完整性自愈协议 |
+| `src/agent/prompt.ts:139-148` | `createDiagramInstructions` | 图纪律（src 无调用点，测试消费） |
+| `src/agent/prompt.ts:150-183` | ignore 相关 formatter | `{GIT_HISTORY_HINT}`/`{DISCOVERY_INSTRUCTION}`/`{OPENWIKIIGNORE_INSTRUCTIONS}` 两态文本 |
+| `src/agent/prompt.ts:185-200` | `formatRuntimeContext` | `{RUNTIME_CONTEXT}` 内容 |
 | `src/agent/prompts/code.ts:3-97` | `CODE_SYSTEM_PROMPTS.chat` | repository 维基纪律模板 |
 | `src/agent/prompts/code.ts:63-89` | OKF front matter 段 | OKF v0.2 formatter 与 generated 所有权 |
 | `src/agent/prompts/code.ts:99-103` | `CODE_USER_PROMPTS.chat` | `{USER_MESSAGE}`+`{RUNTIME_CONTEXT}` |
@@ -282,20 +282,20 @@ createRepositoryPagePrompt(job: RepositoryPageWorkerJob, allPages, language): st
 | `src/agent/prompts/personal.ts:135-356` | `PERSONAL_SYSTEM_PROMPTS.init` | 个人库 init 模板（含 synthesis/relationship/质量段） |
 | `src/agent/prompts/personal.ts:357-582` | `PERSONAL_SYSTEM_PROMPTS.update` | 个人库 update 模板（手术式+no-op） |
 | `src/agent/prompts/personal.ts:585-612` | `PERSONAL_USER_PROMPTS` | 三命令 user 模板（chat :586-588 / init :589-598 / update :599-611） |
-| `src/agent/prompt.ts:52-54` | link-integrity 追加分支 | 非 chat 才拼接 |
-| `src/agent/index.ts:469` | `resolveTranslationPlan` 调用 | 翻译 pass 的挂载决策 |
-| `src/agent/index.ts:519` | `createOpenWikiIndexMiddleware` 挂载 | 确定性索引/OKF 修复（模板「index 禁手写」的执行侧） |
-| `src/agent/repository-prompts.ts:19-83` | `createRepositoryPlannerPrompt` | submit_plan 唯一出口的规划提示词 |
-| `src/agent/repository-prompts.ts:114-178` | `createRepositoryPagePrompt` | 单页 worker 提示词（OKF frontmatter :133-140、repo:// 证据 :156-158） |
-| `src/agent/repository-prompts.ts:88-104` | `RepositoryPageWorkerJob` | worker job 上下文类型 |
-| `src/agent/repository-runner.ts:351` | planner 调用点 | `runPlanningAgent` 内 |
-| `src/agent/repository-runner.ts:487` | worker 调用点 | `runPageAgent` 内 |
+| `src/agent/prompt.ts:49-51` | link-integrity 追加分支 | 非 chat 才拼接 |
+| `src/agent/index.ts:491` | `resolveTranslationPlan` 调用 | 翻译 pass 的挂载决策 |
+| `src/agent/index.ts:559` | `createOpenWikiIndexMiddleware` 挂载 | 确定性索引/OKF 修复（模板「index 禁手写」的执行侧） |
+| `src/agent/repository-prompts.ts:24-107` | `createRepositoryPlannerPrompt` | submit_plan 唯一出口的规划提示词 |
+| `src/agent/repository-prompts.ts:138-210` | `createRepositoryPagePrompt` | 单页 worker 提示词（OKF frontmatter :133-140、repo:// 证据 :156-158） |
+| `src/agent/repository-prompts.ts:112-128` | `RepositoryPageWorkerJob` | worker job 上下文类型 |
+| `src/agent/repository-runner.ts:530` | planner 调用点 | `runPlanningAgent` 内 |
+| `src/agent/repository-runner.ts:1016` | worker 调用点 | `runPageAgent` 内 |
 | `src/agent/skills.ts:24-27` | `syncBundledSkills` | 同步入口 |
 | `src/agent/skills.ts:53-118` | `replaceSkillDirectory` | staging+grantOwnerWrite+rename 位移+3 次重试 |
 | `src/agent/skills.ts:127-142` | `grantOwnerWrite` | 只读 bundled 技能修复（#633） |
-| `src/agent/index.ts:174` | `syncBundledSkills()` 调用 | `runOpenWikiAgent` 入口 |
-| `src/agent/index.ts:406` | `syncBundledSkills()` 调用 | `createOpenWikiAgent` |
-| `src/agent/index.ts:527` | `skills: ["/skills/"]` | 技能目录挂载 |
-| `src/agent/index.ts:530-535` | systemPrompt 装配 | `createSystemPrompt` 消费点 |
+| `src/agent/index.ts:187` | `syncBundledSkills()` 调用 | `runOpenWikiAgent` 入口 |
+| `src/agent/index.ts:428` | `syncBundledSkills()` 调用 | `createOpenWikiAgent` |
+| `src/agent/index.ts:568` | `skills: ["/skills/"]` | 技能目录挂载 |
+| `src/agent/index.ts:571-576` | systemPrompt 装配 | `createSystemPrompt` 消费点 |
 | `src/config/openwiki-home.ts:47` | `openWikiSkillsDir` | `~/.openwiki/skills` 路径 |
-| `src/agent/utils.ts:99-108` | `readRunWikiGoal` | `{WIKI_GOAL}` 的来源分支 |
+| `src/agent/utils.ts:92-101` | `readRunWikiGoal` | `{WIKI_GOAL}` 的来源分支 |

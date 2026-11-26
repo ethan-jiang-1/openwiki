@@ -52,7 +52,7 @@ ensureCodeModeRepoSetup(cwd, options)   [:51-63]
 
 | 调用点 | 源码行 | 场景 |
 |--------|--------|------|
-| `src/generation/repository-run.ts:334-335` | `createWorkflow: input.mode === "init"` | repository 生命周期 begin 第一步 |
+| `src/generation/repository-run.ts:416-417` | `createWorkflow: input.mode === "init"` | repository 生命周期 begin 第一步 |
 | `src/cli/runners.ts:300-301` | `createWorkflow: command.command === "init"` | `--print` 非 TTY 路径（CI 跑的就是这条） |
 | `src/cli/app/app.tsx:580-581` | `createWorkflow: resolvedCommand === "init"` | Ink TUI 交互路径 |
 
@@ -99,7 +99,7 @@ permissions:
 ### 3.3 工具链与安装（`:368-375`）
 
 - `actions/setup-node` 锁 SHA `49933ea5… # v4`，Node 22
-- 安装命令：`npm install --global openwiki@${OPENWIKI_VERSION} mermaid@11.16.0 jsdom@29.1.1`。`OPENWIKI_VERSION` 是生成时刻的 CLI 版本（`src/config/constants.ts:1233` re-export 自 `src/version.ts`）——模板把**生成时**的版本钉进 CI，不追 latest；mermaid + jsdom 是可选 peer 依赖，用于 finalize 阶段的图校验（无图 wiki 可删）
+- 安装命令：`npm install --global openwiki@${OPENWIKI_VERSION} mermaid@11.16.0 jsdom@29.1.1`。`OPENWIKI_VERSION` 是生成时刻的 CLI 版本（`src/config/constants.ts:1457` re-export 自 `src/version.ts`）——模板把**生成时**的版本钉进 CI，不追 latest；mermaid + jsdom 是可选 peer 依赖，用于 finalize 阶段的图校验（无图 wiki 可删）
 
 ### 3.4 运行步骤：continue-on-error + 失败传播（`:377-390`，upstream 8e60470）
 
@@ -250,23 +250,23 @@ OpenWiki 有两条定时链路，解决不同问题，选型先分清「更新�
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/ingestion/code-mode.ts:20` | `DEFAULT_CODE_MODE_CRON` | 新建工作流默认 cron `0 8 * * *` |
-| `src/ingestion/code-mode.ts:28-44` | `CodeModeRepoSetupOptions` | `createWorkflow`/`cronExpression`/`env` 三开关 |
-| `src/ingestion/code-mode.ts:51-63` | `ensureCodeModeRepoSetup` | code-mode 仓库初始化入口 |
-| `src/ingestion/code-mode.ts:70-97` | `ensureCodeModeWorkflow` | create-only-when-missing（:82-89 提前返回） |
-| `src/ingestion/code-mode.ts:105-148` | `runCodeModeConnectors` | code-mode 连接器拉取（fail-open，增量窗口） |
-| `src/ingestion/code-mode.ts:177-190` | `readLastUpdatedAt` | 从 `.last-update.json` 读增量起点 |
-| `src/ingestion/code-mode.ts:287-339` | `createWorkflowProviderEnv` | provider 派生 env 块（239f810） |
-| `src/ingestion/code-mode.ts:341-421` | `createCodeModeWorkflow` | 工作流模板本体 |
-| `src/ingestion/code-mode.ts:361-366` | checkout + `fetch-depth: 0` | 全量历史（c30edbc） |
-| `src/ingestion/code-mode.ts:377-390` | Run OpenWiki 步骤 | `continue-on-error` + `--update --print` + env 块 |
-| `src/ingestion/code-mode.ts:392-419` | 清理/PR/失败传播步骤 | `!cancelled()`、add-paths、outcome、exit 1 |
-| `src/ingestion/code-mode.ts:398` | create-pull-request SHA | `22a9089… # v7`（ca6fd04 锁定） |
-| `src/generation/repository-run.ts:334-335` | `ensureCodeModeRepoSetup` 调用 | 仅 init 打开 `createWorkflow` |
+| `src/ingestion/code-mode.ts:24` | `DEFAULT_CODE_MODE_CRON` | 新建工作流默认 cron `0 8 * * *` |
+| `src/ingestion/code-mode.ts:52-68` | `CodeModeRepoSetupOptions` | `createWorkflow`/`cronExpression`/`env` 三开关 |
+| `src/ingestion/code-mode.ts:75-87` | `ensureCodeModeRepoSetup` | code-mode 仓库初始化入口 |
+| `src/ingestion/code-mode.ts:94-121` | `ensureCodeModeWorkflow` | create-only-when-missing（:82-89 提前返回） |
+| `src/ingestion/code-mode.ts:129-172` | `runCodeModeConnectors` | code-mode 连接器拉取（fail-open，增量窗口） |
+| `src/ingestion/code-mode.ts:201-214` | `readLastUpdatedAt` | 从 `.last-update.json` 读增量起点 |
+| `src/ingestion/code-mode.ts:469-530` | `createWorkflowProviderEnv` | provider 派生 env 块（239f810） |
+| `src/ingestion/code-mode.ts:532-623` | `createCodeModeWorkflow` | 工作流模板本体 |
+| `src/ingestion/code-mode.ts:552-557` | checkout + `fetch-depth: 0` | 全量历史（c30edbc） |
+| `src/ingestion/code-mode.ts:568-581` | Run OpenWiki 步骤 | `continue-on-error` + `--update --print` + env 块 |
+| `src/ingestion/code-mode.ts:583-621` | 清理/PR/失败传播步骤 | `!cancelled()`、add-paths、outcome、exit 1 |
+| `src/ingestion/code-mode.ts:600` | create-pull-request SHA | `22a9089… # v7`（ca6fd04 锁定） |
+| `src/generation/repository-run.ts:416-417` | `ensureCodeModeRepoSetup` 调用 | 仅 init 打开 `createWorkflow` |
 | `src/cli/runners.ts:300-301` | 同上 | `--print` 路径（CI 实际走的入口） |
 | `src/cli/app/app.tsx:580-581` | 同上 | TUI 路径 |
-| `src/config/constants.ts:1233` | `OPENWIKI_VERSION` | 模板钉版本的来源（re-export 自 version.ts） |
-| `src/ingestion/ingestion.ts:227-237` | `resolveIngestionSourceInstances` | `--scheduled` 调度门（对比表引用） |
+| `src/config/constants.ts:1457` | `OPENWIKI_VERSION` | 模板钉版本的来源（re-export 自 version.ts） |
+| `src/ingestion/ingestion.ts:229-239` | `resolveIngestionSourceInstances` | `--scheduled` 调度门（对比表引用） |
 | `.github/workflows/openwiki-update.yml:14-19` | fork guard `if:` | 手工维护的 job 级守卫 |
 | `.github/workflows/openwiki-update.yml:54` | dogfood 运行命令 | `node dist/cli/cli.js code --update --print` |
 | `.github/workflows/openwiki-update.yml:68-76` | Restore protected workflow file | `git checkout --` 纵深防御步骤 |

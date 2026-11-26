@@ -19,7 +19,7 @@ out_of_scope:
 
 > 原 `05-model-providers/`，2026-09-13 re-baseline 改号。
 
-13 个提供商（新增 GitHub Copilot，经 `gh` CLI 外部认证）是 OpenWiki 的核心差异化能力。提供商常量与配置集中在 `src/config/constants.ts`（1233 行，原 `src/constants.ts` 已删除），模型客户端工厂在 `src/agent/index.ts:1077-1264`，reasoning 体系在 `src/config/reasoning.ts`。
+13 个提供商（新增 GitHub Copilot，经 `gh` CLI 外部认证）是 OpenWiki 的核心差异化能力。提供商常量与配置集中在 `src/config/constants.ts`（1233 行，原 `src/constants.ts` 已删除），模型客户端工厂在 `src/agent/index.ts:1123-1465`，reasoning 体系在 `src/config/reasoning.ts`。
 
 ## 文档
 

@@ -509,7 +509,7 @@ const programArguments = [
 
 `process.argv[1]` 是当前 Node.js 进程的入口脚本路径。`path.resolve()` 将其转为绝对路径。如果 `argv[1]` 为空（例如 REPL 模式），`cliPath` 为空字符串。
 
-`--scheduled` 不只是标记：`ingest` 命令解析后一路传到 `ingestion.ts` 的 `resolveIngestionSourceInstances`（`src/ingestion/ingestion.ts:227-237`）——`scheduledOnly` 为真时，若配置中无 `ingestionSchedule` 或其 `pausedAt` 非空（已暂停），所有源实例都被过滤掉，即**暂停 LaunchAgent 的同时，手动误跑同款命令也不会执行摄取**。
+`--scheduled` 不只是标记：`ingest` 命令解析后一路传到 `ingestion.ts` 的 `resolveIngestionSourceInstances`（`src/ingestion/ingestion.ts:229-239`）——`scheduledOnly` 为真时，若配置中无 `ingestionSchedule` 或其 `pausedAt` 非空（已暂停），所有源实例都被过滤掉，即**暂停 LaunchAgent 的同时，手动误跑同款命令也不会执行摄取**。
 
 ### 6.4 StartCalendarInterval（`:860-868`）
 
@@ -789,4 +789,4 @@ stdout 和 stderr 都输出到同一个日志文件（`:856-859`）。
 | `src/scheduling/schedules.ts:948-955` | `escapePlist` | XML 5 字符实体转义 |
 | `src/config/openwiki-home.ts:6` | `OPENWIKI_CONFIG_DIR_ENV_KEY` | plist EnvironmentVariables 注入的键名 |
 | `src/setup/onboarding.ts:21-29` | `OnboardingSourceScheduleConfig` | 持久化到配置文件的调度数据类型 |
-| `src/ingestion/ingestion.ts:227-237` | `resolveIngestionSourceInstances` | `--scheduled` 的调度门（暂停时过滤源实例） |
+| `src/ingestion/ingestion.ts:229-239` | `resolveIngestionSourceInstances` | `--scheduled` 的调度门（暂停时过滤源实例） |

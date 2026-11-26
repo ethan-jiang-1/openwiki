@@ -176,5 +176,5 @@ OPENWIKI_DEV=1 openwiki --dry-run
 | `README.md:506-523` | Command reference：`openwiki --help` 等 | 安装验证与命令面 |
 | `DEVELOPMENT.md:5-61` | `pnpm setup` → `install` → `build` → `link --global`、alias、重建生效 | 源码运行完整步骤 |
 | `DEVELOPMENT.md:63-66` | 真实运行写入 `openwiki/` 与 `~/.openwiki/.env` | 源码运行的副作用提示 |
-| `src/ingestion/code-mode.ts:373-375` | 生成的 CI 工作流安装行与注释 | mermaid + jsdom 的官方安装示例 |
+| `src/ingestion/code-mode.ts:564-566` | 生成的 CI 工作流安装行与注释 | mermaid + jsdom 的官方安装示例 |
 | `src/mermaid/validate.ts:45-62` | `loadMermaid` 动态 `import("mermaid")` | 可选 peer 缺失时回退轻量检查 |

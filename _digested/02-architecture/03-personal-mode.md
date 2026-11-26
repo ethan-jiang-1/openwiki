@@ -29,13 +29,13 @@ out_of_scope:
 
 ## 1. Personal Mode 做什么
 
-Personal Mode 是 OpenWiki 的两大运行模式之一（`src/cli/commands.ts:26` 的 `OpenWikiRunMode = "personal" | "code"`），但**不是默认值**：命令行默认解析为 code（`src/cli/commands.ts:530`），且非 chat 命令在默认 modeSource 下强制 code（`src/cli/commands.ts:980-982`）——personal 需要显式选择。它的核心目标：**从用户连接的外部数据源（Gmail、Slack、Notion 等）定期拉取数据，由 Agent 消化整理后，写回 `~/.openwiki/wiki/`，形成一个持续更新的个人知识 brain**。
+Personal Mode 是 OpenWiki 的两大运行模式之一（`src/cli/commands.ts:26` 的 `OpenWikiRunMode = "personal" | "code"`），但**不是默认值**：命令行默认解析为 code（`src/cli/commands.ts:625`），且非 chat 命令在默认 modeSource 下强制 code（`src/cli/commands.ts:1075-1077`）——personal 需要显式选择。它的核心目标：**从用户连接的外部数据源（Gmail、Slack、Notion 等）定期拉取数据，由 Agent 消化整理后，写回 `~/.openwiki/wiki/`，形成一个持续更新的个人知识 brain**。
 
 ```
 外部数据源 → 认证层 → 摄取流水线 → Agent 处理 → ~/.openwiki/wiki/
 ```
 
-与 Code Mode 的不同：Code Mode 以"理解一个代码仓库并生成文档"为目标，而 Personal Mode 以"理解一个人的信息流并持续维护知识库"为目标。两者共享同一套 Agent 引擎 (`src/agent/index.ts:154-274` 的 `runOpenWikiAgent`)，但使用不同的提示词（prompt）模板和输出格式。
+与 Code Mode 的不同：Code Mode 以"理解一个代码仓库并生成文档"为目标，而 Personal Mode 以"理解一个人的信息流并持续维护知识库"为目标。两者共享同一套 Agent 引擎 (`src/agent/index.ts:167-290` 的 `runOpenWikiAgent`)，但使用不同的提示词（prompt）模板和输出格式。
 
 ## 2. 一张图看懂
 
@@ -102,7 +102,7 @@ parseIngestionTarget() → resolveIngestionSourceInstances() → for each source
 
 ### 3.4 Agent 处理层
 
-Personal Mode 和 Code Mode 共享同一个 Agent 引擎（`src/agent/index.ts:154-274` 的 `runOpenWikiAgent()`），但 Personal Mode 使用 `outputMode: "local-wiki"`，会触发 personal 模板（`src/agent/prompts/personal.ts`，612 行）。
+Personal Mode 和 Code Mode 共享同一个 Agent 引擎（`src/agent/index.ts:167-290` 的 `runOpenWikiAgent()`），但 Personal Mode 使用 `outputMode: "local-wiki"`，会触发 personal 模板（`src/agent/prompts/personal.ts`，612 行）。
 
 **Personal Mode 特有的合成策略**（定义在 `src/ingestion/ingestion.ts` 的 `createSourceSynthesisPolicy()` `:349` 与 `createConnectorSynthesisGuidance()` `:364`）：
 
@@ -155,16 +155,16 @@ Personal Mode 支持通过 macOS LaunchAgent 实现定时自动摄取（`src/sch
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/ingestion/ingestion.ts:34` | `INGESTION_WINDOW_HOURS` | 24 小时摄取窗口 |
-| `src/ingestion/ingestion.ts:65-105` | `runOpenWikiIngestion()` | 摄取流水线总入口，遍历 source instances |
-| `src/ingestion/ingestion.ts:107-122` | `parseIngestionTarget()` | 解析摄取目标（"all" / connector ID / source instance ID） |
-| `src/ingestion/ingestion.ts:124` | `runSourceIngestion()` | 单 source 摄取：确定性拉取 + Agent 更新 |
-| `src/ingestion/ingestion.ts:190-198` | `withRunTelemetry` 边界 | 单源 agent 更新的唯一遥测记录边界 |
-| `src/ingestion/ingestion.ts:209-218` | 单源失败隔离 | catch → `status: "error"`，不阻断其他源 |
-| `src/ingestion/ingestion.ts:222` | `resolveIngestionSourceInstances()` | 从 onboarding 配置解析已连接的源实例 |
-| `src/ingestion/ingestion.ts:270` | `createSourceUpdateMessage()` | 按 source 生成 agent 用户消息 |
-| `src/ingestion/ingestion.ts:349` | `createSourceSynthesisPolicy()` | 跨源综合策略（5 个信心标签 + Contested 纪律 `:352-353`） |
-| `src/ingestion/ingestion.ts:364` | `createConnectorSynthesisGuidance()` | 按连接器定制的合成指南（Gmail 分类、Slack 路由等） |
+| `src/ingestion/ingestion.ts:36` | `INGESTION_WINDOW_HOURS` | 24 小时摄取窗口 |
+| `src/ingestion/ingestion.ts:67-107` | `runOpenWikiIngestion()` | 摄取流水线总入口，遍历 source instances |
+| `src/ingestion/ingestion.ts:109-124` | `parseIngestionTarget()` | 解析摄取目标（"all" / connector ID / source instance ID） |
+| `src/ingestion/ingestion.ts:126` | `runSourceIngestion()` | 单 source 摄取：确定性拉取 + Agent 更新 |
+| `src/ingestion/ingestion.ts:192-200` | `withRunTelemetry` 边界 | 单源 agent 更新的唯一遥测记录边界 |
+| `src/ingestion/ingestion.ts:211-220` | 单源失败隔离 | catch → `status: "error"`，不阻断其他源 |
+| `src/ingestion/ingestion.ts:224` | `resolveIngestionSourceInstances()` | 从 onboarding 配置解析已连接的源实例 |
+| `src/ingestion/ingestion.ts:272` | `createSourceUpdateMessage()` | 按 source 生成 agent 用户消息 |
+| `src/ingestion/ingestion.ts:351` | `createSourceSynthesisPolicy()` | 跨源综合策略（5 个信心标签 + Contested 纪律 `:352-353`） |
+| `src/ingestion/ingestion.ts:366` | `createConnectorSynthesisGuidance()` | 按连接器定制的合成指南（Gmail 分类、Slack 路由等） |
 | `src/connectors/registry.ts:24` | `createConnectorRegistry()` | 注册全部 9 个连接器 |
 | `src/connectors/types.ts:1-10` | `ConnectorId` | 连接器 ID 联合类型（9 个取值） |
 | `src/connectors/types.ts:20` | `ConnectorDefinition.mode` | `"code" \| "personal"` 模式轴 |
@@ -180,8 +180,8 @@ Personal Mode 支持通过 macOS LaunchAgent 实现定时自动摄取（`src/sch
 | `src/scheduling/schedules.ts:327` | `deleteConnectorSchedules()` | 完全移除 schedule 配置 |
 | `src/scheduling/schedules.ts:357` | `installOpenWikiPowerSchedule()` | 配置 pmset 唤醒/sleep 与调度对齐 |
 | `src/scheduling/schedules.ts:812` | `createLaunchAgentPlist()` | 生成 LaunchAgent plist XML（含 `EnvironmentVariables` `:836-839`） |
-| `src/agent/index.ts:154-274` | `runOpenWikiAgent()` | Agent 运行入口（Personal 和 Code Mode 共享） |
+| `src/agent/index.ts:167-290` | `runOpenWikiAgent()` | Agent 运行入口（Personal 和 Code Mode 共享） |
 | `src/agent/prompt.ts:21` | `createSystemPrompt()` | Agent 系统提示词，`outputMode: "local-wiki"` 选 personal 模板 |
 | `src/agent/prompts/personal.ts:223-229` | 信心标签与 Contested 纪律 | 5 个信心标签 + 双主张保留规则（提示词侧） |
-| `src/agent/types.ts:101-105` | `RunContext` | 运行上下文（`lastUpdate` + `language` + `wikiGoal`） |
+| `src/agent/types.ts:130-134` | `RunContext` | 运行上下文（`lastUpdate` + `language` + `wikiGoal`） |
 | `src/cli/commands.ts:26` | `OpenWikiRunMode` | `"personal" \| "code"` 运行模式联合类型 |

@@ -32,16 +32,16 @@ out_of_scope:
 
 关键设计决策（Key Design Decisions）：
 
-- **单一注册表（Single Registry）**：所有提供商信息存储在 `PROVIDER_CONFIGS: Record<OpenWikiProvider, ProviderConfig>`（`src/config/constants.ts:255`）。TUI、CLI、agent 启动都从同一个数据源读取；`Record<...>` 键类型约束保证每个联合成员必有配置，遗漏即编译错误。
+- **单一注册表（Single Registry）**：所有提供商信息存储在 `PROVIDER_CONFIGS: Record<OpenWikiProvider, ProviderConfig>`（`src/config/constants.ts:296`）。TUI、CLI、agent 启动都从同一个数据源读取；`Record<...>` 键类型约束保证每个联合成员必有配置，遗漏即编译错误。
 - **环境变量驱动（Env-Var-Driven）**：运行时提供商通过 `OPENWIKI_PROVIDER` 显式指定，或由回退链（fallback chain，见 §6）自动检测已设置的凭据环境变量确定。
-- **声明式认证方式（Declarative Auth Methods）**：`ProviderAuthMethod`（`src/config/constants.ts:129-130`）为四元联合类型 `"api-key" | "aws-sdk" | "external-cli" | "oauth"`。粘贴式 API key 只是默认情形；`bedrock` 把认证整体委托给 AWS SDK 凭据链，`openai-chatgpt` 走浏览器 OAuth，`copilot` 声明 `authMethod: "external-cli"` 由外部 CLI（`gh`）持有凭据。
-- **凭据门控（Credential Gating）**：启动时 `getMissingProviderEnvKey()`（`src/config/constants.ts:524`）检查所需凭据是否就绪，缺失时阻塞并给出明确提示（见 §7）。
+- **声明式认证方式（Declarative Auth Methods）**：`ProviderAuthMethod`（`src/config/constants.ts:162-163`）为四元联合类型 `"api-key" | "aws-sdk" | "external-cli" | "oauth"`。粘贴式 API key 只是默认情形；`bedrock` 把认证整体委托给 AWS SDK 凭据链，`openai-chatgpt` 走浏览器 OAuth，`copilot` 声明 `authMethod: "external-cli"` 由外部 CLI（`gh`）持有凭据。
+- **凭据门控（Credential Gating）**：启动时 `getMissingProviderEnvKey()`（`src/config/constants.ts:657`）检查所需凭据是否就绪，缺失时阻塞并给出明确提示（见 §7）。
 
 ## 2. 提供商标识与认证类型 (Provider Identity and Auth Types)
 
 ### 2.1 OpenWikiProvider 联合类型
 
-`src/config/constants.ts:108-121` 定义全部 13 个提供商标识符（按字母序）：
+`src/config/constants.ts:139-154` 定义全部 13 个提供商标识符（按字母序）：
 
 ```typescript
 export type OpenWikiProvider =
@@ -60,18 +60,18 @@ export type OpenWikiProvider =
   | "openrouter";
 ```
 
-`SelectableOpenWikiProvider = OpenWikiProvider`（`src/config/constants.ts:139`）目前是恒等别名；TUI 选择列表 `SELECTABLE_OPENWIKI_PROVIDERS`（`src/config/constants.ts:239-253`）以 `as const satisfies readonly SelectableOpenWikiProvider[]` 断言保证数组与类型编译期同步。**注意数组顺序不是字母序**，当前为：
+`SelectableOpenWikiProvider = OpenWikiProvider`（`src/config/constants.ts:172`）目前是恒等别名；TUI 选择列表 `SELECTABLE_OPENWIKI_PROVIDERS`（`src/config/constants.ts:278-294`）以 `as const satisfies readonly SelectableOpenWikiProvider[]` 断言保证数组与类型编译期同步。**注意数组顺序不是字母序**，当前为：
 
 ```
 openai, openai-chatgpt, anthropic, copilot, gemini, gemini-enterprise,
 openrouter, openai-compatible, bedrock, fireworks, baseten, nebius, nvidia
 ```
 
-`copilot` 位于第 4 位（`src/config/constants.ts:243`）。
+`copilot` 位于第 4 位（`src/config/constants.ts:283`）。
 
 ### 2.2 ProviderAuthMethod 与 ExternalCliAuthAdapter
 
-`ProviderAuthMethod`（`src/config/constants.ts:129-130`）：
+`ProviderAuthMethod`（`src/config/constants.ts:162-163`）：
 
 | 值 | 含义 | 使用者 |
 |----|------|--------|
@@ -80,11 +80,11 @@ openrouter, openai-compatible, bedrock, fireworks, baseten, nebius, nvidia
 | `"aws-sdk"` | 认证委托给 AWS SDK 凭据提供链（credential provider chain） | bedrock |
 | `"external-cli"` | 凭据由外部 CLI 持有并执行交互式登录 | copilot |
 
-`ExternalCliAuthAdapter`（`src/config/constants.ts:137`）当前只有一个成员 `"github-cli"`。提供商配置只声明适配器名；其实现位于声明式注册表之外（`src/auth/external-cli-auth.ts`，见 §7.3）。
+`ExternalCliAuthAdapter`（`src/config/constants.ts:170`）当前只有一个成员 `"github-cli"`。提供商配置只声明适配器名；其实现位于声明式注册表之外（`src/auth/external-cli-auth.ts`，见 §7.3）。
 
 ## 3. ProviderConfig 类型定义 (ProviderConfig Type)
 
-`src/config/constants.ts:174-237` 定义每条提供商配置的完整字段：
+`src/config/constants.ts:207-276` 定义每条提供商配置的完整字段：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -106,7 +106,7 @@ openrouter, openai-compatible, bedrock, fireworks, baseten, nebius, nvidia
 
 ## 4. PROVIDER_CONFIGS：提供商注册表 (Provider Registry)
 
-`PROVIDER_CONFIGS` 定义在 `src/config/constants.ts:255-412`。以下按注册表内的键序逐条列出。
+`PROVIDER_CONFIGS` 定义在 `src/config/constants.ts:296-479`。以下按注册表内的键序逐条列出。
 
 ### 4.1 baseten（:256-265）
 
@@ -186,7 +186,7 @@ copilot 一次订阅即可访问 GPT-5、Claude、Gemini 三族模型（经 Copi
 | `responsesApi` | `true` |
 | `modelOptions` | `OPENAI_MODEL_OPTIONS`（§5.1） |
 
-OpenAI 是**默认提供商**（`DEFAULT_PROVIDER = "openai"`，`src/config/constants.ts:105`）。
+OpenAI 是**默认提供商**（`DEFAULT_PROVIDER = "openai"`，`src/config/constants.ts:136`）。
 
 ### 4.8 openai-chatgpt（:352-357）
 
@@ -268,19 +268,19 @@ OpenAI 是**默认提供商**（`DEFAULT_PROVIDER = "openai"`，`src/config/cons
 
 ### 5.1 共享模型常量
 
-- **`OPENAI_MODEL_OPTIONS`**（`src/config/constants.ts:151-157`）：`gpt-5.6-terra`（5.6 Terra）、`gpt-5.6-luna`（5.6 Luna）、`gpt-5.6-sol`（5.6 Sol）、`gpt-5.5`（5.5）、`gpt-5.4-mini`（5.4 mini）。被 `openai` 与 `openai-chatgpt` 共享。
-- **`GEMINI_MODELS`**（`src/config/constants.ts:165-172`）：`gemini-3.6-flash`、`gemini-3.5-flash-lite`、`gemini-3.5-flash`、`gemini-3.1-pro`、`gemini-3-flash`、`gemini-3.1-flash-lite`。被 `gemini` 与 `gemini-enterprise` 共享（enterprise 侧追加 Claude Model Garden ID，见 §4.12）。
+- **`OPENAI_MODEL_OPTIONS`**（`src/config/constants.ts:184-190`）：`gpt-5.6-terra`（5.6 Terra）、`gpt-5.6-luna`（5.6 Luna）、`gpt-5.6-sol`（5.6 Sol）、`gpt-5.5`（5.5）、`gpt-5.4-mini`（5.4 mini）。被 `openai` 与 `openai-chatgpt` 共享。
+- **`GEMINI_MODELS`**（`src/config/constants.ts:198-205`）：`gemini-3.6-flash`、`gemini-3.5-flash-lite`、`gemini-3.5-flash`、`gemini-3.1-pro`、`gemini-3-flash`、`gemini-3.1-flash-lite`。被 `gemini` 与 `gemini-enterprise` 共享（enterprise 侧追加 Claude Model Garden ID，见 §4.12）。
 - **copilot 的 `modelOptions`** 是独立的 12 条列表（§4.3），不与其他提供商共享。
 
 ### 5.2 默认模型与推荐模型
 
-- `DEFAULT_MODEL_ID`（`src/config/constants.ts:414-415`）= 默认提供商（openai）首个模型选项，当前 `gpt-5.6-terra`；`?? "gpt-5.6-terra"` 是 modelOptions 为空时的防御性回退。
+- `DEFAULT_MODEL_ID`（`src/config/constants.ts:481-482`）= 默认提供商（openai）首个模型选项，当前 `gpt-5.6-terra`；`?? "gpt-5.6-terra"` 是 modelOptions 为空时的防御性回退。
 - `SUGGESTED_MODEL_IDS`（:417-419）= 默认提供商全部模型 ID，用于 TUI 推荐。
 - `getDefaultModelId(provider)`（:769-771）返回该提供商 modelOptions 首项，空则回退 `DEFAULT_MODEL_ID`；`getProviderModelOptions()`（:763-767）是列表访问器。
 
 ### 5.3 模型 ID 校验（:1213-1228）
 
-`normalizeModelId()`（:1213-1215）做 `trim()`；`isValidModelId()`（**`src/config/constants.ts:1217`**）规则：
+`normalizeModelId()`（:1213-1215）做 `trim()`；`isValidModelId()`（**`src/config/constants.ts:1441`**）规则：
 
 1. trim 后长度 > 0 且 ≤ 120；
 2. 匹配 `/^[@A-Za-z0-9][A-Za-z0-9._:/@+,-]*$/u`——首字符可为 `@`（Cloudflare Workers AI 的 `@cf/...`），后续可含内部 `@`（Vertex AI 的 `claude-sonnet-4-5@20250929` 形态）；
@@ -288,13 +288,13 @@ OpenAI 是**默认提供商**（`DEFAULT_PROVIDER = "openai"`，`src/config/cons
 
 ### 5.4 跨提供商模型误配告警
 
-`getProvidersForKnownModelId()`（:780-801）按精确匹配找出哪些**其他**提供商的已知模型列表包含该 ID；`isModelIdForOtherProvider()`（:805-819）判定「属于别家、不属于当前提供商」的明确误配。精确匹配避免了 OpenRouter 命名空间（`anthropic/claude-...`）造成的误报；自定义/未知模型 ID 永远不告警。消费方是 `src/agent/index.ts:1053-1075` 的 `warnOnProviderModelMismatch()`——**非致命**，只发 stderr/事件警告，因为自定义端点可能合法提供该模型。
+`getProvidersForKnownModelId()`（:780-801）按精确匹配找出哪些**其他**提供商的已知模型列表包含该 ID；`isModelIdForOtherProvider()`（:805-819）判定「属于别家、不属于当前提供商」的明确误配。精确匹配避免了 OpenRouter 命名空间（`anthropic/claude-...`）造成的误报；自定义/未知模型 ID 永远不告警。消费方是 `src/agent/index.ts:1099-1121` 的 `warnOnProviderModelMismatch()`——**非致命**，只发 stderr/事件警告，因为自定义端点可能合法提供该模型。
 
 ## 6. 提供商解析：回退链 (Provider Resolution: Fallback Chain)
 
 ### 6.1 resolveConfiguredProvider()
 
-`src/config/constants.ts:837-869`。解析优先级从高到低：
+`src/config/constants.ts:993-1027`。解析优先级从高到低：
 
 1. **显式指定**：`OPENWIKI_PROVIDER`（常量 :65）经 `normalizeProvider()` 规范化后若有效则直接采用；
 2. **凭据检测链**：依次检查以下环境变量，命中即选中对应提供商——
@@ -317,12 +317,12 @@ OpenAI 是**默认提供商**（`DEFAULT_PROVIDER = "openai"`，`src/config/cons
 
 ### 6.2 规范化与类型守卫
 
-- `normalizeProvider(value)`（**`src/config/constants.ts:821`**）：`trim().toLowerCase()` 后交给 `isValidProvider()`，无效返回 `null`。
+- `normalizeProvider(value)`（**`src/config/constants.ts:977`**）：`trim().toLowerCase()` 后交给 `isValidProvider()`，无效返回 `null`。
 - `isValidProvider(value)`（:833-835）：类型守卫（type guard），`value in PROVIDER_CONFIGS`。
 
 ### 6.3 诊断接入
 
-`src/config/env.ts:543-545` 的 `getProviderWarnings()` 对 `OPENWIKI_PROVIDER` 值调用 `normalizeProvider()`，返回 `null` 时在凭据诊断面板显示 `"invalid provider"`。
+`src/config/env.ts:577-579` 的 `getProviderWarnings()` 对 `OPENWIKI_PROVIDER` 值调用 `normalizeProvider()`，返回 `null` 时在凭据诊断面板显示 `"invalid provider"`。
 
 ## 7. 认证方式与凭据门控 (Auth Methods and Credential Gating)
 
@@ -330,7 +330,7 @@ OpenAI 是**默认提供商**（`DEFAULT_PROVIDER = "openai"`，`src/config/cons
 
 | 函数 | 锚 | 逻辑 |
 |------|----|------|
-| `getProviderAuthMethod()` | `src/config/constants.ts:435-439` | 读 `authMethod`，缺省补 `"api-key"` |
+| `getProviderAuthMethod()` | `src/config/constants.ts:502-506` | 读 `authMethod`，缺省补 `"api-key"` |
 | `providerUsesOAuth()` | :441-443 | `=== "oauth"` |
 | `providerUsesAwsSdkCredentials()` | :445-449 | `=== "aws-sdk"` |
 | `providerUsesExternalCliAuth()` | :451-455 | `=== "external-cli"` |
@@ -339,7 +339,7 @@ OpenAI 是**默认提供商**（`DEFAULT_PROVIDER = "openai"`，`src/config/cons
 
 ### 7.2 getMissingProviderEnvKey() — 凭据就绪检查
 
-`src/config/constants.ts:524-575`。返回第一个必需但未设置的环境变量名，或 `null` 表示就绪。检查顺序：
+`src/config/constants.ts:657-712`。返回第一个必需但未设置的环境变量名，或 `null` 表示就绪。检查顺序：
 
 1. **aws-sdk 特判（:530-564）**：bedrock 走专用路径——
    - `AWS_BEARER_TOKEN_BEDROCK` 非空 → 直接放行（`@langchain/aws` 给 bearer token 最高优先级）；
@@ -360,11 +360,11 @@ OpenAI 是**默认提供商**（`DEFAULT_PROVIDER = "openai"`，`src/config/cons
 - `validateExternalCliCredential()`（:177-188）：命中 `/^(ghp_|github_pat_)/u` 即抛错——**Copilot API 拒绝个人访问令牌（Personal Access Token, PAT）**，要求 `gh auth login` 的 OAuth 会话 token。
 - `runExternalCliLogin()`（:158-175）与 `isExternalCliAvailable()`（:88-104）供 TUI/凭据向导发起交互登录与可用性探测。
 
-运行时接线在 `resolveRunConfig()`（`src/agent/index.ts:305`，:307-309 校验）：先尝试 CLI 注入，再做 PAT 校验，最后才到凭据门控。
+运行时接线在 `resolveRunConfig()`（`src/agent/index.ts:322`，:307-309 校验）：先尝试 CLI 注入，再做 PAT 校验，最后才到凭据门控。
 
 ### 7.4 启动门控序列（agent 侧）
 
-`resolveRunConfig()`（`src/agent/index.ts:283-372`）在构建模型前依次执行：
+`resolveRunConfig()`（`src/agent/index.ts:299-394`）在构建模型前依次执行：
 
 ```
 resolveExternalCliCredential(provider)      # :305  external-cli 注入（仅 copilot）
@@ -379,17 +379,17 @@ ensureProviderRegion(provider)              # :319 → index.ts:1004-1018（bedr
 
 ### 7.5 凭据提示 getProviderCredentialHint()
 
-`src/config/constants.ts:603-631`。为凭据在 OpenWiki env 之外的提供商追加人话提示：gemini-enterprise → ADC 登录指引；aws-sdk → AWS 凭据链说明；external-cli + `github-cli` → 「用 Copilot-enabled 账号 `gh auth login`，或为 CI 设置 `COPILOT_API_KEY`」。
+`src/config/constants.ts:740-777`。为凭据在 OpenWiki env 之外的提供商追加人话提示：gemini-enterprise → ADC 登录指引；aws-sdk → AWS 凭据链说明；external-cli + `github-cli` → 「用 Copilot-enabled 账号 `gh auth login`，或为 CI 设置 `COPILOT_API_KEY`」。
 
 ## 8. Base URL 解析 (Base URL Resolution)
 
 ### 8.1 resolveProviderBaseUrl()
 
-`src/config/constants.ts:639-652`。解析顺序：`baseUrlEnvKey` 对应环境变量的非空 trim 值 → `config.baseURL` → `undefined`（调用方回退 SDK 内置端点）。`getProviderBaseUrlEnvKey()`（:654-658）是覆盖变量名访问器。
+`src/config/constants.ts:785-798`。解析顺序：`baseUrlEnvKey` 对应环境变量的非空 trim 值 → `config.baseURL` → `undefined`（调用方回退 SDK 内置端点）。`getProviderBaseUrlEnvKey()`（:654-658）是覆盖变量名访问器。
 
 ### 8.2 校验
 
-- `isValidBaseUrl()`（**`src/config/constants.ts:714`**）：必须是可解析 URL 且协议为 `http:`/`https:`。
+- `isValidBaseUrl()`（**`src/config/constants.ts:870`**）：必须是可解析 URL 且协议为 `http:`/`https:`。
 - `getProviderBaseUrlWarnings()`（:730-743）：在合法基础上，对 openai-compatible 额外检测端点误填——路径以 `/chat/completions` 结尾（`isChatCompletionsEndpointUrl` :752-761）时警告「应填 API 根 URL，而非 chat/completions 端点」。
 - `isValidProviderBaseUrl()`（:745-750）= 警告列表为空。
 
@@ -413,24 +413,24 @@ ensureProviderRegion(provider)              # :319 → index.ts:1004-1018（bedr
 
 ## 9. 位置与区域解析 (Location and Region Resolution)
 
-- `resolveProviderLocation()`（`src/config/constants.ts:582-597`）：`locationEnvKey`（gemini-enterprise 为 `GOOGLE_CLOUD_LOCATION`）非空 trim 值优先，否则 `defaultLocation`（`"global"`）；无位置概念的提供商返回 `undefined`。
+- `resolveProviderLocation()`（`src/config/constants.ts:719-734`）：`locationEnvKey`（gemini-enterprise 为 `GOOGLE_CLOUD_LOCATION`）非空 trim 值优先，否则 `defaultLocation`（`"global"`）；无位置概念的提供商返回 `undefined`。
 - `resolveProviderRegion()`（:699-712）：按 `getProviderRegionEnvKeys()`（:683-689，即 `regionEnvKey` + `regionFallbackEnvKeys` 的有序列表）逐个取非空值。bedrock 的列表是 `BEDROCK_AWS_REGION` → `AWS_REGION` → `AWS_DEFAULT_REGION`；全空返回 `undefined`，由 `ensureProviderRegion()`（§7.4）抛错。
 
 ## 10. 传输层开关 (Transport Switches)
 
 ### 10.1 providerUsesStreaming() — 强制流式
 
-`src/config/constants.ts:486-503`。返回该提供商是否强制 SSE 流式传输：
+`src/config/constants.ts:612-636`。返回该提供商是否强制 SSE 流式传输：
 
 - `openai-compatible`：读 `OPENWIKI_OPENAI_COMPATIBLE_STREAMING` 环境开关（`resolveOpenAiCompatibleStreaming` :1077-1084，opt-in——第三方端点的 SSE 不保证穿过代理/负载均衡）。
 - **`copilot` 恒 `true`（:498-500）**：Copilot API 对非流式请求拒绝或返回空内容，会导致 repository worker 不调 `submit_plan`/`submit_page` 就退出；对 GPT-5 的 Responses 路径强制流式冗余但无害，与 openai-chatgpt 的 Codex 后端同一模式。
 - 其余一律 `false`。
 
-消费点在模型工厂兜底分支的展开式注入 `src/agent/index.ts:1261`（见 02 篇 §4.7——用展开而非布尔赋值，因为 `streaming: false` 会被 LangChain 转成 `disableStreaming`）。
+消费点在模型工厂兜底分支的展开式注入 `src/agent/index.ts:1354`（见 02 篇 §4.7——用展开而非布尔赋值，因为 `streaming: false` 会被 LangChain 转成 `disableStreaming`）。
 
 ### 10.2 providerUsesResponsesApi()
 
-`src/config/constants.ts:470-484`。判定模型是否经 OpenAI Responses API 访问：`openai` 配置 `responsesApi: true`；`copilot` 配置 `/^gpt-5/u`（仅 GPT-5 族）；其余未配置即 `false`；`openai-compatible` 交给 env 开关（§10.3）。
+`src/config/constants.ts:596-610`。判定模型是否经 OpenAI Responses API 访问：`openai` 配置 `responsesApi: true`；`copilot` 配置 `/^gpt-5/u`（仅 GPT-5 族）；其余未配置即 `false`；`openai-compatible` 交给 env 开关（§10.3）。
 
 ### 10.3 openai-compatible 专属环境开关（:18-25、:1023-1084）
 
@@ -461,14 +461,14 @@ HTTP 传输（SSE 与否）与 LangGraph 流模式（"messages"/"updates"）是�
 
 ## 12. 环境变量持久化与诊断 (Env Persistence and Diagnostics)
 
-提供商 env 常量（`src/config/constants.ts:1-104` 声明）与持久化层的接缝在 `src/config/env.ts`：
+提供商 env 常量（`src/config/constants.ts:1-135` 声明）与持久化层的接缝在 `src/config/env.ts`：
 
-- `openWikiEnvPath` = `~/.openwiki/.env`（`src/config/env.ts:81-82`）；
-- **`MANAGED_ENV_KEYS`**（`src/config/env.ts:102`）：会读写到 `.env` 的环境变量权威列表，所有提供商 env key 都在其中；
+- `openWikiEnvPath` = `~/.openwiki/.env`（`src/config/env.ts:90-91`）；
+- **`MANAGED_ENV_KEYS`**（`src/config/env.ts:111`）：会读写到 `.env` 的环境变量权威列表，所有提供商 env key 都在其中；
 - `CREDENTIAL_DIAGNOSTIC_ENV_KEYS`（:183）与 `DEBUG_ENV_KEYS`（:196）派生自 `MANAGED_ENV_KEYS`，分别用于凭据诊断面板与启动调试日志；
 - `loadOpenWikiEnv()`（:267）启动时加载 `.env`（process.env 已有值优先）；`saveOpenWikiEnv()`（:305）经串行队列（serial queue）写入并同步 process.env；
 - 诊断函数 `getModelWarnings()` / `getProviderWarnings()` / `getRetryAttemptsWarnings()`（:539/:543/:553）分别调用 `isValidModelId` / `normalizeProvider` / `resolveProviderRetryAttempts`。
-- 版本标识 `OPENWIKI_VERSION` 在 `src/config/constants.ts:1233` 由 `src/version.ts` 再导出（运行时从 package.json 派生，不再是硬编码常量）。
+- 版本标识 `OPENWIKI_VERSION` 在 `src/config/constants.ts:1457` 由 `src/version.ts` 再导出（运行时从 package.json 派生，不再是硬编码常量）。
 
 ## 13. 扩展配方：新增一个提供商 (Extension Recipe: Adding a New Provider)
 
@@ -487,7 +487,7 @@ HTTP 传输（SSE 与否）与 LangGraph 流模式（"messages"/"updates"）是�
 
 ### Step 4 — 注册 MANAGED_ENV_KEYS
 
-在 `src/config/env.ts:102` 的列表中加入新 env key 常量，使凭据可持久化、可诊断。
+在 `src/config/env.ts:111` 的列表中加入新 env key 常量，使凭据可持久化、可诊断。
 
 ### Step 5 —（可选）加入回退链
 
@@ -496,7 +496,7 @@ HTTP 传输（SSE 与否）与 LangGraph 流模式（"messages"/"updates"）是�
 ### Step 6 —（可选）认证方式特殊化
 
 - **OpenAI 兼容 API**：无需改 `createModel()`，兜底分支自动覆盖（02 篇 §4.7）；只需配好 `baseURL`/`baseUrlEnvKey`。
-- **专用 SDK**：在 `createModel()`（`src/agent/index.ts:1077-1264`）兜底分支前加 `if` 块（02 篇 §9）。
+- **专用 SDK**：在 `createModel()`（`src/agent/index.ts:1123-1465`）兜底分支前加 `if` 块（02 篇 §9）。
 - **external-cli 型**（copilot 模式）：设 `authMethod: "external-cli"` + `externalCliAuthAdapter`；适配器实现加进 `src/auth/external-cli-auth.ts` 的适配器表（:49-70），并在 `validateExternalCliCredential()`（:177-188）补该适配器的凭据形态校验。模型创建侧同样无需新分支。
 - **reasoning 支持**：在 `src/config/reasoning.ts:48-70` 的能力表加条目（06 区 03 篇）。
 
@@ -508,47 +508,47 @@ HTTP 传输（SSE 与否）与 LangGraph 流模式（"messages"/"updates"）是�
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/config/constants.ts:1-104` | 各 `*_ENV_KEY` 常量 | 提供商与全局配置的 env key 声明区（含 `OPENWIKI_PROVIDER:65`、`DEFAULT_PROVIDER_RETRY_ATTEMPTS:74`、`BEDROCK_DEFAULT_MAX_TOKENS:43`） |
-| `src/config/constants.ts:70` | `NEBIUS_BASE_URL` | Nebius 默认端点 |
-| `src/config/constants.ts:105` | `DEFAULT_PROVIDER` | 默认提供商 = `"openai"` |
-| `src/config/constants.ts:106` | `OPENROUTER_BASE_URL` | OpenRouter API endpoint |
-| `src/config/constants.ts:108-121` | `OpenWikiProvider` | 13 个提供商标识符联合类型（含 copilot:112） |
-| `src/config/constants.ts:129-130` | `ProviderAuthMethod` | 四元认证方式（api-key/aws-sdk/external-cli/oauth） |
-| `src/config/constants.ts:137` | `ExternalCliAuthAdapter` | 外部 CLI 适配器 = `"github-cli"` |
-| `src/config/constants.ts:139` | `SelectableOpenWikiProvider` | 可选择提供商类型别名 |
-| `src/config/constants.ts:151-157` | `OPENAI_MODEL_OPTIONS` | openai + openai-chatgpt 共享模型列表 |
-| `src/config/constants.ts:165-172` | `GEMINI_MODELS` | gemini + gemini-enterprise 共享模型列表 |
-| `src/config/constants.ts:174-237` | `ProviderConfig` | 提供商配置类型（含 externalCliAuthAdapter/responsesApi/regionFallbackEnvKeys） |
-| `src/config/constants.ts:239-253` | `SELECTABLE_OPENWIKI_PROVIDERS` | TUI 选择列表（非字母序，copilot 第 4 位） |
-| `src/config/constants.ts:255-412` | `PROVIDER_CONFIGS` | **核心注册表**：13 个提供商完整配置（copilot :280-302） |
-| `src/config/constants.ts:414-419` | `DEFAULT_MODEL_ID`, `SUGGESTED_MODEL_IDS` | 默认/推荐模型派生 |
-| `src/config/constants.ts:435-468` | `getProviderAuthMethod`, `providerUses*`, `providerRequiresApiKey` | 认证方式访问器 |
-| `src/config/constants.ts:470-484` | `providerUsesResponsesApi` | Responses API 判定（openai 全量 / copilot /^gpt-5/u） |
-| `src/config/constants.ts:486-503` | `providerUsesStreaming` | 强制流式开关（copilot 恒 true :498-500） |
-| `src/config/constants.ts:524-575` | `getMissingProviderEnvKey` | **凭据门控**（aws-sdk 特判 + apiKey + project） |
-| `src/config/constants.ts:582-597` | `resolveProviderLocation` | 云位置解析（env 覆盖 > 默认） |
-| `src/config/constants.ts:603-631` | `getProviderCredentialHint` | 非 env 凭据提供商的人话提示 |
-| `src/config/constants.ts:639-652` | `resolveProviderBaseUrl` | Base URL 解析（env 覆盖 > 默认 > undefined） |
-| `src/config/constants.ts:660-712` | `providerRequiresBaseUrl` / secret / region 系列 | 其余门控谓词与区域解析 |
-| `src/config/constants.ts:714-761` | `isValidBaseUrl`, `getProviderBaseUrlWarnings` | Base URL 校验与 openai-compatible 端点误填警告 |
-| `src/config/constants.ts:763-771` | `getProviderModelOptions`, `getDefaultModelId` | 模型列表访问器 |
-| `src/config/constants.ts:780-819` | `getProvidersForKnownModelId`, `isModelIdForOtherProvider` | 跨提供商模型误配判定 |
-| `src/config/constants.ts:821-835` | `normalizeProvider`, `isValidProvider` | 标识规范化与类型守卫 |
-| `src/config/constants.ts:837-869` | `resolveConfiguredProvider` | **回退链**：显式 > 9 级凭据检测 > 默认 |
-| `src/config/constants.ts:878-909` | `inspectCredentialPair` | 成对凭据完整性检查（bedrock 用） |
-| `src/config/constants.ts:911-1004` | `resolveMaxOutputTokens`, `resolveStreamIdleTimeout*`, `resolveProviderRetryAttempts` | 数值型配置解析 |
-| `src/config/constants.ts:1023-1084` | `resolveOpenAiCompatible*` | openai-compatible 四个行为开关 |
-| `src/config/constants.ts:1102-1211` | `resolveOpenRouterMaxTokens`, `resolveConfiguredMaxOutputTokens`, `resolveBedrockMaxTokens` | 输出上限统一入口与 bedrock 默认 16000 |
-| `src/config/constants.ts:1217-1228` | `isValidModelId` | 模型 ID 校验（长度/字符集/禁 URL） |
-| `src/config/constants.ts:1233` | `OPENWIKI_VERSION` | 由 src/version.ts 再导出 |
-| `src/agent/index.ts:283-372` | `resolveRunConfig` | 启动门控序列与解析结果五元组 |
-| `src/agent/index.ts:954-1018` | `ensureProviderCredentials/BaseUrl/SecretKey/Region` | 四个抛错型门控 |
-| `src/agent/index.ts:1053-1075` | `warnOnProviderModelMismatch` | 跨提供商模型误配非致命告警 |
+| `src/config/constants.ts:1-135` | 各 `*_ENV_KEY` 常量 | 提供商与全局配置的 env key 声明区（含 `OPENWIKI_PROVIDER:65`、`DEFAULT_PROVIDER_RETRY_ATTEMPTS:74`、`BEDROCK_DEFAULT_MAX_TOKENS:43`） |
+| `src/config/constants.ts:82` | `NEBIUS_BASE_URL` | Nebius 默认端点 |
+| `src/config/constants.ts:136` | `DEFAULT_PROVIDER` | 默认提供商 = `"openai"` |
+| `src/config/constants.ts:137` | `OPENROUTER_BASE_URL` | OpenRouter API endpoint |
+| `src/config/constants.ts:139-154` | `OpenWikiProvider` | 13 个提供商标识符联合类型（含 copilot:112） |
+| `src/config/constants.ts:162-163` | `ProviderAuthMethod` | 四元认证方式（api-key/aws-sdk/external-cli/oauth） |
+| `src/config/constants.ts:170` | `ExternalCliAuthAdapter` | 外部 CLI 适配器 = `"github-cli"` |
+| `src/config/constants.ts:172` | `SelectableOpenWikiProvider` | 可选择提供商类型别名 |
+| `src/config/constants.ts:184-190` | `OPENAI_MODEL_OPTIONS` | openai + openai-chatgpt 共享模型列表 |
+| `src/config/constants.ts:198-205` | `GEMINI_MODELS` | gemini + gemini-enterprise 共享模型列表 |
+| `src/config/constants.ts:207-276` | `ProviderConfig` | 提供商配置类型（含 externalCliAuthAdapter/responsesApi/regionFallbackEnvKeys） |
+| `src/config/constants.ts:278-294` | `SELECTABLE_OPENWIKI_PROVIDERS` | TUI 选择列表（非字母序，copilot 第 4 位） |
+| `src/config/constants.ts:296-479` | `PROVIDER_CONFIGS` | **核心注册表**：13 个提供商完整配置（copilot :280-302） |
+| `src/config/constants.ts:481-486` | `DEFAULT_MODEL_ID`, `SUGGESTED_MODEL_IDS` | 默认/推荐模型派生 |
+| `src/config/constants.ts:502-594` | `getProviderAuthMethod`, `providerUses*`, `providerRequiresApiKey` | 认证方式访问器 |
+| `src/config/constants.ts:596-610` | `providerUsesResponsesApi` | Responses API 判定（openai 全量 / copilot /^gpt-5/u） |
+| `src/config/constants.ts:612-636` | `providerUsesStreaming` | 强制流式开关（copilot 恒 true :498-500） |
+| `src/config/constants.ts:657-712` | `getMissingProviderEnvKey` | **凭据门控**（aws-sdk 特判 + apiKey + project） |
+| `src/config/constants.ts:719-734` | `resolveProviderLocation` | 云位置解析（env 覆盖 > 默认） |
+| `src/config/constants.ts:740-777` | `getProviderCredentialHint` | 非 env 凭据提供商的人话提示 |
+| `src/config/constants.ts:785-798` | `resolveProviderBaseUrl` | Base URL 解析（env 覆盖 > 默认 > undefined） |
+| `src/config/constants.ts:806-868` | `providerRequiresBaseUrl` / secret / region 系列 | 其余门控谓词与区域解析 |
+| `src/config/constants.ts:870-917` | `isValidBaseUrl`, `getProviderBaseUrlWarnings` | Base URL 校验与 openai-compatible 端点误填警告 |
+| `src/config/constants.ts:919-927` | `getProviderModelOptions`, `getDefaultModelId` | 模型列表访问器 |
+| `src/config/constants.ts:936-975` | `getProvidersForKnownModelId`, `isModelIdForOtherProvider` | 跨提供商模型误配判定 |
+| `src/config/constants.ts:977-991` | `normalizeProvider`, `isValidProvider` | 标识规范化与类型守卫 |
+| `src/config/constants.ts:993-1027` | `resolveConfiguredProvider` | **回退链**：显式 > 9 级凭据检测 > 默认 |
+| `src/config/constants.ts:1036-1067` | `inspectCredentialPair` | 成对凭据完整性检查（bedrock 用） |
+| `src/config/constants.ts:1069-1228` | `resolveMaxOutputTokens`, `resolveStreamIdleTimeout*`, `resolveProviderRetryAttempts` | 数值型配置解析 |
+| `src/config/constants.ts:1247-1308` | `resolveOpenAiCompatible*` | openai-compatible 四个行为开关 |
+| `src/config/constants.ts:1326-1435` | `resolveOpenRouterMaxTokens`, `resolveConfiguredMaxOutputTokens`, `resolveBedrockMaxTokens` | 输出上限统一入口与 bedrock 默认 16000 |
+| `src/config/constants.ts:1441-1452` | `isValidModelId` | 模型 ID 校验（长度/字符集/禁 URL） |
+| `src/config/constants.ts:1457` | `OPENWIKI_VERSION` | 由 src/version.ts 再导出 |
+| `src/agent/index.ts:299-394` | `resolveRunConfig` | 启动门控序列与解析结果五元组 |
+| `src/agent/index.ts:995-1059` | `ensureProviderCredentials/BaseUrl/SecretKey/Region` | 四个抛错型门控 |
+| `src/agent/index.ts:1099-1121` | `warnOnProviderModelMismatch` | 跨提供商模型误配非致命告警 |
 | `src/auth/external-cli-auth.ts:31-70` | `resolveGithubCliHostname`, `buildExternalCliAuthAdapters` | gh CLI 适配器声明（token 命令 :64） |
 | `src/auth/external-cli-auth.ts:134-156` | `resolveExternalCliCredential` | 会话 token 注入进程 env，不落盘 |
 | `src/auth/external-cli-auth.ts:177-188` | `validateExternalCliCredential` | 拒绝 PAT（ghp_/github_pat_） |
-| `src/config/env.ts:81-102` | `openWikiEnvPath`, `MANAGED_ENV_KEYS` | .env 路径与持久化权威列表 |
-| `src/config/env.ts:183-196` | `CREDENTIAL_DIAGNOSTIC_ENV_KEYS`, `DEBUG_ENV_KEYS` | 派生诊断/调试列表 |
-| `src/config/env.ts:267,305` | `loadOpenWikiEnv`, `saveOpenWikiEnv` | env 加载与串行队列写入 |
-| `src/config/env.ts:539-559` | `getModelWarnings` 等 | 诊断面板警告（调用本文件校验函数） |
+| `src/config/env.ts:90-111` | `openWikiEnvPath`, `MANAGED_ENV_KEYS` | .env 路径与持久化权威列表 |
+| `src/config/env.ts:200-213` | `CREDENTIAL_DIAGNOSTIC_ENV_KEYS`, `DEBUG_ENV_KEYS` | 派生诊断/调试列表 |
+| `src/config/env.ts:284,305` | `loadOpenWikiEnv`, `saveOpenWikiEnv` | env 加载与串行队列写入 |
+| `src/config/env.ts:573-605` | `getModelWarnings` 等 | 诊断面板警告（调用本文件校验函数） |
 | `src/config/reasoning.ts:48-70` | `REASONING_CAPABILITIES` | reasoning 能力表（新提供商扩展点，06 区 03 篇详述） |

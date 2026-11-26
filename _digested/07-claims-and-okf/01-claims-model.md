@@ -192,7 +192,7 @@ claims 的错误族是一条单继承链（`src/claims/core/errors.ts:4` 的基�
 
 ### 5.2 reconcilePageClaims 的裁决语义
 
-`reconcilePageClaims`（`src/generation/page-jobs.ts:402`）把稀疏载荷翻译成稠密操作序列再交给 `session.resolveClaims`（`page-jobs.ts:518`）。流程（R1 存档引用 `:402` 核对一致）：
+`reconcilePageClaims`（`src/generation/page-jobs.ts:417`）把稀疏载荷翻译成稠密操作序列再交给 `session.resolveClaims`（`page-jobs.ts:518`）。流程（R1 存档引用 `:402` 核对一致）：
 
 1. 检视页上全部既有 claim（`page-jobs.ts:408`），建 id 索引；`targetExisting` 闭包（`page-jobs.ts:414-431`）统一裁决两类错误：id 不属于本页（`page-jobs.ts:417-422`）、同一 id 拿到多个裁决（`page-jobs.ts:423-428`）。
 2. `confirmedClaimIds` 逐个转成 `{op:"confirm"}`（`page-jobs.ts:433-436`）。
@@ -213,12 +213,12 @@ claims 的错误族是一条单继承链（`src/claims/core/errors.ts:4` 的基�
 
 ### 5.4 模型工具面
 
-生成 worker 的模型可见工具白名单是页文件工具 + 三个 claims 工具（`src/agent/repository-runner.ts:81-87` 的 `WORKER_TOOL_NAMES`）。与对账直接相关的两个：
+生成 worker 的模型可见工具白名单是页文件工具 + 三个 claims 工具（`src/agent/repository-runner.ts:98-104` 的 `WORKER_TOOL_NAMES`）。与对账直接相关的两个：
 
-- `inspect_claims`（`repository-runner.ts:429`）：返回本页完整当前 claim 集、不含不透明版本；工具描述明确它只应在「有意修订或移除 otherwise-current 内容」之前使用，stale/unresolved 已随任务下发。同一标准也被 MCP 集成复用（`src/integrations/mcp/server.ts:25`）。
+- `inspect_claims`（`repository-runner.ts:429`）：返回本页完整当前 claim 集、不含不透明版本；工具描述明确它只应在「有意修订或移除 otherwise-current 内容」之前使用，stale/unresolved 已随任务下发。同一标准也被 MCP 集成复用（`src/integrations/mcp/server.ts:51`）。
 - `submit_page`（`repository-runner.ts:437`）：每页 worker 至多成功调用一次（`if (submitted)` 守卫 `repository-runner.ts:442`，成功即置位 `:450`）。协议错误（`RepositoryRunError` 且 code `invalid_input`）不会终结 worker，而是结构化拒绝并提示「改正后重新调用 submit_page」（`createSubmissionRejection` 返回，`repository-runner.ts:457-461`）；其他错误置致命标志并上抛（`repository-runner.ts:465-466`）——模型有机会修正稀疏裁决而非整页重做。
 
-提示词侧的装配点：实质/对账标准注入 `src/agent/repository-prompts.ts:162-164`，`submit_page` 的稀疏决策语义写在 `src/agent/repository-prompts.ts:150-154`。
+提示词侧的装配点：实质/对账标准注入 `src/agent/repository-prompts.ts:194-196`，`submit_page` 的稀疏决策语义写在 `src/agent/repository-prompts.ts:182-186`。
 
 ### 5.5 一个稀疏载荷的走查
 
@@ -302,7 +302,7 @@ claim id 的唯一性是**跨页全局**的。`claimOwners` 映射（`session.ts
 1. **脏页复检**（`session.ts:319-346`）：仍带 issue 的页先拒绝（`Unresolved evidence debt remains`，`session.ts:326-330`）；`assertEvidenceStillCurrent`（`session.ts:473`）把每条 dirty 证据对当前源码重解析——证据消失（`session.ts:484-488`）或版本漂移（`session.ts:489-493`）都抛错；通过后哈希页 Markdown 并进入 ready 队列（`session.ts:332`）。
 2. **孤儿清理**（`session.ts:348-358`）：预检发现的孤儿边车逐个 `deletePage`。
 3. **缺失页清理**（`session.ts:359-369`）：第 1 阶段里 Markdown 消失的页（`ClaimsPageMissingError`，`session.ts:337-341`）删除其边车。
-4. **已删除页清理**（`session.ts:370-382`）：`recordDeletion`（`session.ts:283`）登记的生命周期删除页（调用点 `src/generation/repository-run.ts:1627`）删除边车。
+4. **已删除页清理**（`session.ts:370-382`）：`recordDeletion`（`session.ts:283`）登记的生命周期删除页（调用点 `src/generation/repository-run.ts:1855`）删除边车。
 5. **写脏页**（`session.ts:383-402`）：ready 页写 `PageClaims`；**claims 为空的页不写 verification**（`session.ts:384-385`）——与 §5.2 的 ≥1 claim 底线呼应。写成功才清除 dirty（`session.ts:395`）。
 
 最后计算 `verificationByPage`（`session.ts:404-417`）：页拿到非 null verification 当且仅当 `persisted && !dirty && claims > 0 && 无 issue && verification 存在`（`session.ts:407-412`）。这个映射是 OKF `verified` 投影的资格表（详见 03-okf-frontmatter-and-projections.md）。
@@ -331,7 +331,7 @@ claim id 的唯一性是**跨页全局**的。`claimOwners` 映射（`session.ts
 2. **init 空状态起步**：`command === "init"` 且非恢复时（`runtime.ts:82`），跳过 preflight，以空 `persisted`、空 `issues` 构造会话，仅继承孤儿清单（`runtime.ts:84-92`）——init 从零重建，但旧边车仍在 finalize 时被清理。
 3. **update/resume 走 preflight**：其余情况先 `runClaimsPreflight`（`runtime.ts:94`），再把 `persisted/issues/orphanPages` 全量注入会话（`runtime.ts:95-101`）。preflight 机制本身见 02 篇 §7。
 
-构造点在生命周期内共三处：`src/generation/repository-run.ts:364`（begin/init 路径）、`:639`（update 路径）、`:1117`（resume 恢复路径）。
+构造点在生命周期内共三处：`src/generation/repository-run.ts:446`（begin/init 路径）、`:639`（update 路径）、`:1117`（resume 恢复路径）。
 
 | 场景 | persisted | issues | orphanPages |
 |------|-----------|--------|-------------|
@@ -347,12 +347,12 @@ claims 拥有「事实状态」，生命周期（05 区）拥有「何时动它�
 
 | 动作 | 位置 | 说明 |
 |------|------|------|
-| 准备 runtime | `src/generation/repository-run.ts:364/639/1117` | begin/update/resume 三入口（§8） |
+| 准备 runtime | `src/generation/repository-run.ts:446/639/1117` | begin/update/resume 三入口（§8） |
 | 页对账 | `repository-run.ts:1251` | 页事务序：写页 → frontmatter 确定性修复（`:1232`）→ `reconcilePageClaims` → `claimsRuntime.finalize`（`:1255`，页级先落盘）→ `assertPageClaimsDurable`（`:1256`；函数定义 `:1307`）→ 才记录任务完成（`:1265`） |
 | update no-op 前置 | `repository-run.ts:411-423` | 跳过整轮更新要求 `issueCount === 0` 且基线全覆盖（`:419-420`）——干净的 Git 状态不能掩盖证据债（`:409-410` 注释） |
 | run 收尾 | `repository-run.ts:1551` | 全部页完成后以 skipped 页为排除集做最终 finalize；`:1431-1442` 对非空 claims 页补最终持久性断言 |
 
-planning 侧对 issue 的消费（issue → 必做页作业）与 preflight 机制见 `02-evidence-versions-and-preflight.md` §7-§8；页事务序与状态机的完整叙事见 `../05-generation-lifecycle/01-page-job-state-machine.md`，manifest 与 claims pageVersion 的一致性要求见 `../05-generation-lifecycle/02-page-manifest-and-fast-forward.md`。反向依赖不存在：`src/claims/` 不 import `src/generation/`。另注：对模型而言 `.claims` 路径整体不可见/不可写（`isClaimsStatePath`，`src/agent/docs-only-backend.ts:644-645`）；`src/ingestion/ingestion.ts:353` 的 "contested claims" 是提示词层的争议事实保全，与本子系统同名不同义（见 ../10-ingestion-and-personal-mode/）。
+planning 侧对 issue 的消费（issue → 必做页作业）与 preflight 机制见 `02-evidence-versions-and-preflight.md` §7-§8；页事务序与状态机的完整叙事见 `../05-generation-lifecycle/01-page-job-state-machine.md`，manifest 与 claims pageVersion 的一致性要求见 `../05-generation-lifecycle/02-page-manifest-and-fast-forward.md`。反向依赖不存在：`src/claims/` 不 import `src/generation/`。另注：对模型而言 `.claims` 路径整体不可见/不可写（`isClaimsStatePath`，`src/agent/docs-only-backend.ts:711-712`）；`src/ingestion/ingestion.ts:355` 的 "contested claims" 是提示词层的争议事实保全，与本子系统同名不同义（见 ../10-ingestion-and-personal-mode/）。
 
 ## 10. 排错抓手
 
@@ -404,10 +404,10 @@ planning 侧对 issue 的消费（issue → 必做页作业）与 preflight 机�
 | `src/claims/brains/code/runtime.ts:64` | `prepareClaimsRuntime` | repository-only 运行时装配 |
 | `src/claims/brains/code/runtime.ts:123` | `buildClaimsRuntime.finalize` | 严格收尾（警告即失败） |
 | `src/generation/page-jobs.ts:87` | `ProposedPageClaimReconciliation` | 稀疏对账三字段载荷 |
-| `src/generation/page-jobs.ts:402` | `reconcilePageClaims` | 稀疏裁决 → 稠密操作 |
-| `src/generation/page-jobs.ts:596` | `claimFingerprint` | 命题+证据集的去重指纹 |
+| `src/generation/page-jobs.ts:417` | `reconcilePageClaims` | 稀疏裁决 → 稠密操作 |
+| `src/generation/page-jobs.ts:611` | `claimFingerprint` | 命题+证据集的去重指纹 |
 | `src/generation/repository-run.ts:1251` | 页事务中的对账调用 | 写页→修复→对账→落盘→断言 |
-| `src/agent/repository-runner.ts:429` | `inspect_claims` 工具 | 模型检视当前页 claim 集 |
-| `src/agent/repository-runner.ts:437` | `submit_page` 工具 | 稀疏裁决提交（单次成功） |
-| `src/agent/repository-prompts.ts:162` | guidance 注入 | 两条对账/实质标准进入提示词 |
-| `src/agent/docs-only-backend.ts:644` | `isClaimsStatePath` | 对模型隐藏 `.claims` 状态 |
+| `src/agent/repository-runner.ts:956` | `inspect_claims` 工具 | 模型检视当前页 claim 集 |
+| `src/agent/repository-runner.ts:964` | `submit_page` 工具 | 稀疏裁决提交（单次成功） |
+| `src/agent/repository-prompts.ts:194` | guidance 注入 | 两条对账/实质标准进入提示词 |
+| `src/agent/docs-only-backend.ts:711` | `isClaimsStatePath` | 对模型隐藏 `.claims` 状态 |

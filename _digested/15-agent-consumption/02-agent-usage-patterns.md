@@ -54,7 +54,7 @@ grep -rn "tags: \[.*claims" openwiki --include="*.md" # 按稳定英文 tag 找�
 cat openwiki/index.md                                 # # Files + # Directories 全清单
 ```
 
-**为什么可行**：`description` 的契约就是「检索导向摘要」、`tags` 契约要求稳定英文词（`integrations/openwiki/SKILL.md:92-104`）——元数据就是为 grep 而设计的；`index.md` 由管线确定性重生成（`src/okf/index-sync.ts:14`），永远与磁盘一致。
+**为什么可行**：`description` 的契约就是「检索导向摘要」、`tags` 契约要求稳定英文词（`integrations/openwiki/SKILL.md:144-156`）——元数据就是为 grep 而设计的；`index.md` 由管线确定性重生成（`src/okf/index-sync.ts:15`），永远与磁盘一致。
 
 **何时用**：任务横跨多页（写综述、盘点某主题全部页）、或路由表没覆盖你的角度。比模式 1 多花一轮扫描，但换来全局视野。
 
@@ -67,7 +67,7 @@ openwiki visualize --export <目录>   # 静态导出五件套之一就是 graph
 # 然后直接读 <目录>/graph.json —— 一次拿到全 wiki 的结构化图
 ```
 
-`graph.json` 是给人看的可视化器的产物，但**天然机器可读**（`src/visualize/static-export.ts:46-70`，2 空格缩进 JSON + 换行）：`WikiGraph` 含每页 `WikiNode`（`id`=相对路径去 `.md`、`title`（frontmatter→首个标题→文件名兜底）、`type`，`src/visualize/graph.ts:40-56`）与链接边（`linkNodes` 三重过滤后写入 links + backlinks，`src/visualize/graph.ts:302-320`）。
+`graph.json` 是给人看的可视化器的产物，但**天然机器可读**（`src/visualize/static-export.ts:46-70`，2 空格缩进 JSON + 换行）：`WikiGraph` 含每页 `WikiNode`（`id`=相对路径去 `.md`、`title`（frontmatter→首个标题→文件名兜底）、`type`，`src/visualize/graph.ts:40-56`）与链接边（`linkNodes` 三重过滤后写入 links + backlinks，`src/visualize/graph.ts:181-206`）。
 
 **何时用**：
 - 「改了 X，wiki 里哪些页会受影响」——查 backlinks 一次拿全，不用逐页 grep；
@@ -86,9 +86,9 @@ openwiki visualize --export <目录>   # 静态导出五件套之一就是 graph
 
 | 看起来该有 | 实际 | 证据 |
 |-----------|------|------|
-| read/search 类 MCP 工具 | **没有**——6 个工具全是生产协议 | `src/integrations/core/protocol.ts:14-20` |
+| read/search 类 MCP 工具 | **没有**——6 个工具全是生产协议 | `src/integrations/core/protocol.ts:14-24` |
 | wiki 检索/查询 API 或服务 | **没有**——无服务器、无向量库 | 01 号 §6 的取舍论证 |
-| CLI 读/查询命令 | **没有**——9 个命令 kind（integrations/mcp/auth/ngrok/visualize/ingest/cron/help/run，另有解析失败的 error 变体）无一面向消费 | `src/cli/commands.ts:107-164` |
+| CLI 读/查询命令 | **没有**——9 个命令 kind（integrations/mcp/auth/ngrok/visualize/ingest/cron/help/run，另有解析失败的 error 变体）无一面向消费 | `src/cli/commands.ts:169-228` |
 | 人类网页通道（agent 该用吗） | **不用**——`openwiki visualize` 是人类界面 | `openwiki/quickstart.md:44-45` |
 
 上游 `codex/openwiki-retrieval-tools` 探索分支表明检索工具是候选演进方向；合入前，「没有读 API」不是缺陷而是设计立场：文件系统直读零集成、逐字节确定、与代码同 git 化（01 号 §6）。
@@ -107,11 +107,11 @@ openwiki visualize --export <目录>   # 静态导出五件套之一就是 graph
 
 | 源文件 | 关键符号/内容 | 说明 |
 |--------|--------------|------|
-| `integrations/openwiki/SKILL.md:92-104` | 页面文件契约 | description/tags 为 grep 而设计 |
-| `src/okf/index-sync.ts:14` | `INDEX_FILE` | index.md 确定性生成 |
+| `integrations/openwiki/SKILL.md:144-156` | 页面文件契约 | description/tags 为 grep 而设计 |
+| `src/okf/index-sync.ts:15` | `INDEX_FILE` | index.md 确定性生成 |
 | `src/visualize/static-export.ts:46-70` | `exportStaticVisualizer` | graph.json 机器可读五件套之一 |
 | `src/visualize/graph.ts:40-56` | `WikiNode` | id/title/type 字段形状 |
-| `src/visualize/graph.ts:302-320` | `linkNodes` | 链接边 + backlinks 三重过滤 |
-| `src/integrations/core/protocol.ts:14-20` | `ProtocolToolName` | 6 工具全为生产协议 |
-| `src/cli/commands.ts:107-164` | `CliCommand` 联合 | 9 命令 kind 无一面向消费 |
+| `src/visualize/graph.ts:181-206` | `linkNodes` | 链接边 + backlinks 三重过滤 |
+| `src/integrations/core/protocol.ts:14-24` | `ProtocolToolName` | 6 工具全为生产协议 |
+| `src/cli/commands.ts:169-228` | `CliCommand` 联合 | 9 命令 kind 无一面向消费 |
 | `openwiki/quickstart.md:44-45` | "agents to read as memory" | 可视化器是人类的，agent 不走网页 |

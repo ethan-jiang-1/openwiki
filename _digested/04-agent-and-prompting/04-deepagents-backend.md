@@ -23,15 +23,15 @@ out_of_scope:
 
 # 04 — DeepAgents 后端安全边界 (DeepAgents Backend Security Boundaries)
 
-OpenWiki 的 doc-generation agent 运行在 DeepAgents 框架之上，所有文件系统与 shell 访问都经过 `OpenWikiLocalShellBackend`（`src/agent/docs-only-backend.ts:166`）。它继承 deepagents 的 `LocalShellBackend`，以「全覆写 + 检查前置」的方式把每一条模型可达的访问入口都纳入边界检查。
+OpenWiki 的 doc-generation agent 运行在 DeepAgents 框架之上，所有文件系统与 shell 访问都经过 `OpenWikiLocalShellBackend`（`src/agent/docs-only-backend.ts:220`）。它继承 deepagents 的 `LocalShellBackend`，以「全覆写 + 检查前置」的方式把每一条模型可达的访问入口都纳入边界检查。
 
-> **为什么这是安全边界而不是普通校验**：仓库内容是模型可见的外部输入，可能携带提示词注入（prompt injection）。类的文档注释（`src/agent/docs-only-backend.ts:147-165`）明确声明：三层约束都是针对「可能被不可信仓库内容注入的 agent」的安全边界（security boundary），因此所有路径检查在匹配前先做规范化（canonicalize）——`./x`、`a/../x`、反斜杠等等价拼写不能绕过规则。
+> **为什么这是安全边界而不是普通校验**：仓库内容是模型可见的外部输入，可能携带提示词注入（prompt injection）。类的文档注释（`src/agent/docs-only-backend.ts:148-219`）明确声明：三层约束都是针对「可能被不可信仓库内容注入的 agent」的安全边界（security boundary），因此所有路径检查在匹配前先做规范化（canonicalize）——`./x`、`a/../x`、反斜杠等等价拼写不能绕过规则。
 
 ## 1. 概览：从 2 个覆写到 11 个全覆写
 
 基线 `d4e94ab` 时的旧版（`git show d4e94ab:src/agent/docs-only-backend.ts`，90 行）只覆写 `write`/`edit` 两个方法，构造选项只有 `docsOnly` 和 `outputMode`，实现「repository 模式下只能写 `openwiki/` 树」这一条约束。
 
-2026-09-13 re-baseline 后（基线 `e92cc11`），该文件扩为 **689 行、11 个方法全覆写**（`src/agent/docs-only-backend.ts:200-509`）：`read`/`readRaw`/`write`/`edit`/`delete`/`ls`/`grep`/`glob`/`uploadFiles`/`downloadFiles`/`execute`。构造选项同步扩为四个（`src/agent/docs-only-backend.ts:29-59`）：
+2026-09-13 re-baseline 后（基线 `e92cc11`），该文件扩为 **689 行、11 个方法全覆写**（`src/agent/docs-only-backend.ts:255-576`）：`read`/`readRaw`/`write`/`edit`/`delete`/`ls`/`grep`/`glob`/`uploadFiles`/`downloadFiles`/`execute`。构造选项同步扩为四个（`src/agent/docs-only-backend.ts:29-59`）：
 
 | 选项 | 默认 | 作用 |
 |------|------|------|
@@ -76,12 +76,12 @@ OpenWiki 的 doc-generation agent 运行在 DeepAgents 框架之上，所有文�
 
 | 构造点 | 位置 | docsOnly | writableWikiPages | 用途 |
 |--------|------|----------|-------------------|------|
-| chat/local-wiki 共享工厂 | `src/agent/index.ts:454-462` | `command !== "chat"` | 不传（不限） | chat 与 local-wiki 路径的低层工厂 `createOpenWikiAgentGraph` |
-| repository 规划 worker | `src/agent/repository-runner.ts:295-304` | `true` | `[]`（生成文档只读） | 只跑 `submit_plan` 的 planner |
-| repository 页 worker | `src/agent/repository-runner.ts:415-424` | `true` | `[job.path]`（单页） | 每页一个受限 worker |
-| generation 确定性后端 | `src/generation/repository-run.ts:742-755` | `true` | 不传（`openwiki/` 全树可写） | 生命周期自身的确定性读写（快照、还原、删页、finalize 产物） |
+| chat/local-wiki 共享工厂 | `src/agent/index.ts:476-484` | `command !== "chat"` | 不传（不限） | chat 与 local-wiki 路径的低层工厂 `createOpenWikiAgentGraph` |
+| repository 规划 worker | `src/agent/repository-runner.ts:458-467` | `true` | `[]`（生成文档只读） | 只跑 `submit_plan` 的 planner |
+| repository 页 worker | `src/agent/repository-runner.ts:942-951` | `true` | `[job.path]`（单页） | 每页一个受限 worker |
+| generation 确定性后端 | `src/generation/repository-run.ts:824-837` | `true` | 不传（`openwiki/` 全树可写） | 生命周期自身的确定性读写（快照、还原、删页、finalize 产物） |
 
-四处构造共享同一组底层参数：`maxOutputBytes: 100_000`、`timeout: 120`、`virtualMode: true`、`rootDir` 为仓库根（或 local-wiki 输出目录）。`.openwikiignore` 在 repository 路径由 `OpenWikiIgnore.load(root)` 加载后注入（`src/agent/repository-runner.ts:294,414`、`src/generation/repository-run.ts:744-749`）；chat/local-wiki 共享路径以 `outputMode === "repository"` 为条件加载，否则落入空规则集 `new OpenWikiIgnore([])`（`src/agent/index.ts:232-235`；输出模式缺省为 `local-wiki`、根目录随之切到 `~/.openwiki/wiki/`，`src/agent/index.ts:160-161`）。
+四处构造共享同一组底层参数：`maxOutputBytes: 100_000`、`timeout: 120`、`virtualMode: true`、`rootDir` 为仓库根（或 local-wiki 输出目录）。`.openwikiignore` 在 repository 路径由 `OpenWikiIgnore.load(root)` 加载后注入（`src/agent/repository-runner.ts:457,414`、`src/generation/repository-run.ts:826-831`）；chat/local-wiki 共享路径以 `outputMode === "repository"` 为条件加载，否则落入空规则集 `new OpenWikiIgnore([])`（`src/agent/index.ts:247-250`；输出模式缺省为 `local-wiki`、根目录随之切到 `~/.openwiki/wiki/`，`src/agent/index.ts:173-174`）。
 
 ## 2. 三层安全边界（核心叙事）
 
@@ -128,11 +128,11 @@ write(path)
 
 | 注入点 | 位置 | 消费方式 |
 |--------|------|---------|
-| repository begin/resume | `src/generation/repository-run.ts:353,584` | 存入 `run.ignore`，构造 `createRepositoryBackend`（`:744-749`），并驱动源指纹的 ignore 过滤 |
-| planner / 页 worker | `src/agent/repository-runner.ts:294,414` | 每个 worker 启动时重新 `load`，注入各自的后端（`:298`、`:418`） |
-| chat/local-wiki 共享路径 | `src/agent/index.ts:232-235`、`:408-411` | 仅 `outputMode === "repository"` 时加载，否则空规则集 |
+| repository begin/resume | `src/generation/repository-run.ts:435,584` | 存入 `run.ignore`，构造 `createRepositoryBackend`（`:744-749`），并驱动源指纹的 ignore 过滤 |
+| planner / 页 worker | `src/agent/repository-runner.ts:457,414` | 每个 worker 启动时重新 `load`，注入各自的后端（`:298`、`:418`） |
+| chat/local-wiki 共享路径 | `src/agent/index.ts:247-250`、`:408-411` | 仅 `outputMode === "repository"` 时加载，否则空规则集 |
 | 启动 no-op 预检 | `src/cli/startup.ts:136` | `getUpdateNoopStatus` 用同一规则集过滤变更清单，与后端口径一致 |
-| 提示词侧（配合，非强制） | `src/agent/prompt.ts:44,47-48` | `{OPENWIKIIGNORE_INSTRUCTIONS}` 占位符注入规则说明，让模型提前知道边界在哪 |
+| 提示词侧（配合，非强制） | `src/agent/prompt.ts:42,47-48` | `{OPENWIKIIGNORE_INSTRUCTIONS}` 占位符注入规则说明，让模型提前知道边界在哪 |
 
 链路的两端是配合关系：提示词层（`src/agent/prompt.ts` 装配，见本区 02 号）告知模型规则内容、引导其绕开被排除路径；后端层（本文件）不信任提示词的劝说效果，逐请求强制执行。同一份规则文件同时喂给「模型的自觉」与「后端的强制」，后者是唯一的安全承诺。
 
@@ -176,7 +176,7 @@ repository 模式下，`openwiki/.claims/` 是 claims 子系统的持久化 side
 
 `isClaimsDiscoveryPath` 值得一提：glob 的返回条目是相对于搜索根的，若搜索根非根目录，会把 `searchPath + filePath` 拼接成完整虚拟路径后再判一次（`:588-594`），防止「搜索根合法 + 相对条目落进 `.claims`」的组合逃逸。`referencesClaimsState` 的正则允许路径前后出现引号、空白、`=`、`;` 等分隔符（`:142-144`），因此 `cat openwiki/.claims/x.json`、`grep foo "openwiki/.claims"`、`ls openwiki/.claims` 都会被拦；其注释（`:130-135`）明说这是对「已在文件系统发现层隐藏的状态」的纵深防御（defense in depth），不是通用 shell 解析器——复杂的间接引用（变量拼接、base64 管道）不在此层承诺范围内，靠的是 §5 的白名单把任意 shell 整体关掉。
 
-**划界说明**：模型侧访问 claims 的唯一合法通道是专用工具——`inspect_claims` 读取当前页的 claims（`src/agent/repository-runner.ts:428` 起）与 `submit_page` 的 claims 载荷提交；sidecar 的持久化由 `claims/` 子系统（`ClaimsStore`）直接落盘。后端只负责「把通用入口焊死」，不参与 claims 数据本身。
+**划界说明**：模型侧访问 claims 的唯一合法通道是专用工具——`inspect_claims` 读取当前页的 claims（`src/agent/repository-runner.ts:955` 起）与 `submit_page` 的 claims 载荷提交；sidecar 的持久化由 `claims/` 子系统（`ClaimsStore`）直接落盘。后端只负责「把通用入口焊死」，不参与 claims 数据本身。
 
 ## 5. 第 3 层：shell 白名单（ignore 激活时）
 
@@ -219,10 +219,10 @@ const allowedIgnoredShellCommands = [
 
 repository 生成采用 page-job 状态机（见 `05-generation-lifecycle/01-page-job-state-machine.md`，计划中）：规划 worker 经 `submit_plan` 提交有序 PageJob 队列，随后每页派一个全新受限 worker。两个 worker 的后端白名单在构造时锁死：
 
-- **planner**：`writableWikiPages: []`（`src/agent/repository-runner.ts:297`）——规划者只读仓库、产出计划，一个字节都写不进 wiki。
+- **planner**：`writableWikiPages: []`（`src/agent/repository-runner.ts:460`）——规划者只读仓库、产出计划，一个字节都写不进 wiki。
 - **页 worker**：`writableWikiPages: [job.path]`（`:417`）——本次任务只能改自己那一页。
 
-分工边界是：**「这个 worker 允许写哪些路径」归本文件（后端），「页任务按什么顺序推进、写完之后做什么」归 generation 层。** 页的事务序（写页 → frontmatter 校验 → claims 对账 → 失败还原）在 `src/generation/repository-run.ts`；后端不感知队列与状态机，状态机也不重复做路径检查——它直接复用同一个后端类（`createRepositoryBackend`，`src/generation/repository-run.ts:742-755`，不传 `writableWikiPages`），供页快照读取（`:1060`）、失败还原写/删（`:1161-1162`）、计划作废后的废弃页删除（`:1621`）与计划内删除（`:1643`）等确定性代码使用。同一套三层边界同时罩住模型和确定性代码，只是后者的写范围更宽（整棵 `openwiki/`），因为它要替崩溃的 worker 擦屁股；而它永远不需要「突破」ignore 或 claims 层——确定性代码对 `.claims` 的读写走 `claims/` 子系统的直接文件访问，不经过后端。
+分工边界是：**「这个 worker 允许写哪些路径」归本文件（后端），「页任务按什么顺序推进、写完之后做什么」归 generation 层。** 页的事务序（写页 → frontmatter 校验 → claims 对账 → 失败还原）在 `src/generation/repository-run.ts`；后端不感知队列与状态机，状态机也不重复做路径检查——它直接复用同一个后端类（`createRepositoryBackend`，`src/generation/repository-run.ts:824-837`，不传 `writableWikiPages`），供页快照读取（`:1060`）、失败还原写/删（`:1161-1162`）、计划作废后的废弃页删除（`:1621`）与计划内删除（`:1643`）等确定性代码使用。同一套三层边界同时罩住模型和确定性代码，只是后者的写范围更宽（整棵 `openwiki/`），因为它要替崩溃的 worker 擦屁股；而它永远不需要「突破」ignore 或 claims 层——确定性代码对 `.claims` 的读写走 `claims/` 子系统的直接文件访问，不经过后端。
 
 ### 6.3 markMutation：把「改了哪个文件」带出后端
 
@@ -230,7 +230,7 @@ repository 生成采用 page-job 状态机（见 `05-generation-lifecycle/01-pag
 
 ### 6.4 页 worker 是 shell-free 的：后端层的意义
 
-repository worker 不给 `execute` 工具：planner 的文件工具只有 `read_file/ls/glob/grep`（`PLANNER_FILESYSTEM_TOOLS`，`src/agent/repository-runner.ts:74`），页 worker 加 `write_file/edit_file`（`PAGE_FILESYSTEM_TOOLS`，`:75-79`），且 worker 工具集里没有 shell（`WORKER_TOOL_NAMES`，`:80-85`）。既然模型拿不到 shell 工具，为什么后端还要维护 shell 白名单？因为**工具清单决定模型「看到」什么能力，后端决定这些能力「即使被滥用也走不出」什么范围**——两层由不同模块持有、独立演进，这正是纵深防御：若未来某个 worker 恢复 shell 工具，或上游 deepagents 注入新的默认工具，后端边界已经在位。
+repository worker 不给 `execute` 工具：planner 的文件工具只有 `read_file/ls/glob/grep`（`PLANNER_FILESYSTEM_TOOLS`，`src/agent/repository-runner.ts:91`），页 worker 加 `write_file/edit_file`（`PAGE_FILESYSTEM_TOOLS`，`:75-79`），且 worker 工具集里没有 shell（`WORKER_TOOL_NAMES`，`:80-85`）。既然模型拿不到 shell 工具，为什么后端还要维护 shell 白名单？因为**工具清单决定模型「看到」什么能力，后端决定这些能力「即使被滥用也走不出」什么范围**——两层由不同模块持有、独立演进，这正是纵深防御：若未来某个 worker 恢复 shell 工具，或上游 deepagents 注入新的默认工具，后端边界已经在位。
 
 ## 7. glob 防护与 worktree 容错
 
@@ -240,17 +240,17 @@ repository worker 不给 `execute` 工具：planner 的文件工具只有 `read_
 2. **`.git` 目标拒绝**：`targetsGitMetadata`（`:106-110`）检查 pattern 与 searchPath 是否含 `.git` 路径组件，命中即拒绝（`:368-373`）。Git 私有元数据对 glob 不可见；需要当前 commit 时，错误消息指引走 `git rev-parse HEAD`——与 §5 的白名单互为接口。注意这只在 glob 层：`.git` 下的具体文件若用户没写 ignore 规则，`read`/`grep` 并不自动排除；「`.git` 完全不可见」不是本层承诺。
 3. **worktree ENOTDIR 容错**：git worktree 的 `.git` 是文件不是目录；上游 scandir 它会抛 `ENOTDIR`。`isWorktreeGitScandirError`（`:120-128`）识别「`code === "ENOTDIR"` 且 `path` 以 `.git` 结尾」，`glob` 捕获后转成可读的降级指引而非裸异常（`:385-396`）；其余错误原样上抛。
 
-与之相邻但在**组合层**的防护：`createAgentBackend`（`src/agent/agent-backend.ts:52-69`）把 wikiBackend 与 `/skills/`、`/conversation_history/` 两个只读 `FilesystemBackend` 挂载组合，其 `OpenWikiCompositeBackend.glob`（`src/agent/agent-backend.ts:75-98`）额外兜底上游另一类溢出——深递归导致 `RangeError: Maximum call stack size exceeded` 时转成「搜索过宽，请缩小范围」。两个后端层各管一类溢出：wikiBackend 管语义性拒绝（无界/`.git`/ENOTDIR），Composite 管资源性溢出。`/skills/**` 与 `/conversation_history/**` 的写拒绝则由模型工具权限层承担（`AGENT_FILESYSTEM_PERMISSIONS`，`src/agent/agent-backend.ts:21-28`）——那是 DeepAgents 权限系统在工具调用层的检查，位于本文件所有路径检查之前，两层叠加而非互相替代。
+与之相邻但在**组合层**的防护：`createAgentBackend`（`src/agent/agent-backend.ts:84-101`）把 wikiBackend 与 `/skills/`、`/conversation_history/` 两个只读 `FilesystemBackend` 挂载组合，其 `OpenWikiCompositeBackend.glob`（`src/agent/agent-backend.ts:107-137`）额外兜底上游另一类溢出——深递归导致 `RangeError: Maximum call stack size exceeded` 时转成「搜索过宽，请缩小范围」。两个后端层各管一类溢出：wikiBackend 管语义性拒绝（无界/`.git`/ENOTDIR），Composite 管资源性溢出。`/skills/**` 与 `/conversation_history/**` 的写拒绝则由模型工具权限层承担（`AGENT_FILESYSTEM_PERMISSIONS`，`src/agent/agent-backend.ts:53-60`）——那是 DeepAgents 权限系统在工具调用层的检查，位于本文件所有路径检查之前，两层叠加而非互相替代。
 
 ## 8. 边界归属标注：不在本文件的相关机制
 
 ### 8.1 06eedd1 的 human-readable not-found 容错 → generation 层
 
-deepagents 的部分后端对不存在的文件返回人类可读的 `Error: File '...' not found` 字符串而非结构化 `file_not_found` 错误码（上游 #765）。容错修复（commit `06eedd1`，#767）**不在本文件**：判定函数 `isNotFoundBackendError` 位于 `src/generation/repository-run.ts:546-555`（`error === "file_not_found" || error.includes("not found")`），四个调用点全部在 generation 生命周期里——页快照读取（`:1061`）、失败还原时容忍「删一个已不存在的页」（`:1165`）、计划作废后删除废弃页（`:1621`）、计划内删除（`:1643`）。本文件不引入这个容错是有意的：后端对模型侧保持严格报错，「not-found 有时是字符串」属于生命周期代码消费后端结果时的适配问题。
+deepagents 的部分后端对不存在的文件返回人类可读的 `Error: File '...' not found` 字符串而非结构化 `file_not_found` 错误码（上游 #765）。容错修复（commit `06eedd1`，#767）**不在本文件**：判定函数 `isNotFoundBackendError` 位于 `src/generation/repository-run.ts:628-637`（`error === "file_not_found" || error.includes("not found")`），四个调用点全部在 generation 生命周期里——页快照读取（`:1061`）、失败还原时容忍「删一个已不存在的页」（`:1165`）、计划作废后删除废弃页（`:1621`）、计划内删除（`:1643`）。本文件不引入这个容错是有意的：后端对模型侧保持严格报错，「not-found 有时是字符串」属于生命周期代码消费后端结果时的适配问题。
 
 ### 8.2 jsdom 全局与 AnthropicVertex 浏览器守卫 → 模型工厂层
 
-可选 peer 依赖 mermaid 的校验路径会经 `src/mermaid/dom-shim.ts` 把 jsdom 的 `window/document/navigator` **进程级**装进全局。Anthropic SDK（`AnthropicVertex` 的基类）构造时探测到这些全局会拒绝启动——它的浏览器凭据暴露守卫把 Node CLI 误判成浏览器环境，整个 run 在生成任何文档前就会中断。修复在模型工厂：Vertex-on-Anthropic 分支经 `createClient` 钩子显式传 `dangerouslyAllowBrowser: true`（注释 `src/agent/index.ts:1379-1389`，构造 `:1393-1397`），且只转发给 `AnthropicVertex`、不触碰 `ANTHROPIC_*` 认证选项。
+可选 peer 依赖 mermaid 的校验路径会经 `src/mermaid/dom-shim.ts` 把 jsdom 的 `window/document/navigator` **进程级**装进全局。Anthropic SDK（`AnthropicVertex` 的基类）构造时探测到这些全局会拒绝启动——它的浏览器凭据暴露守卫把 Node CLI 误判成浏览器环境，整个 run 在生成任何文档前就会中断。修复在模型工厂：Vertex-on-Anthropic 分支经 `createClient` 钩子显式传 `dangerouslyAllowBrowser: true`（注释 `src/agent/index.ts:1580-1590`，构造 `:1393-1397`），且只转发给 `AnthropicVertex`、不触碰 `ANTHROPIC_*` 认证选项。
 
 **与后端的关系**：没有直接耦合——`OpenWikiLocalShellBackend` 不感知 DOM 全局，该守卫也只影响模型构造。放在一起讲的理由是「可选依赖的全局副作用破坏 agent 启动」是同一类问题；机制细节归 `06-model-providers/`（`createModel`）与 mermaid 校验降级协议（`05-generation-lifecycle/03-finalize-pipeline.md`，计划中）。
 
@@ -292,11 +292,11 @@ deepagents 的部分后端对不存在的文件返回人类可读的 `Error: Fil
 | `OpenWiki Claims state is implementation-owned and unavailable to shell execute.` | shell 命令引用 `.claims` | `:488-495` |
 | `Shell execute is restricted while .openwikiignore is active.` | ignore 激活时白名单外命令 | `:497-506` |
 | `permission_denied` | upload/download 逐文件拒绝 | `:433`、`:468` |
-| `Glob search was too broad. Retry with a narrower path or pattern.` | 组合层 RangeError 兜底 | `src/agent/agent-backend.ts:91-94` |
+| `Glob search was too broad. Retry with a narrower path or pattern.` | 组合层 RangeError 兜底 | `src/agent/agent-backend.ts:130-133` |
 
 ## 12. 测试佐证
 
-`test/agent/docs-only-backend.test.ts`（309 行）覆盖三层边界与写白名单的行为契约，包括：mutation metadata 回传（`:56`、`:94`）、`writableWikiPages: []` 创建只读生成文档后端（`:254`）、单页白名单放行与拒绝（`:282`）。中间件侧的 metadata 消费见 `test/agent/frontmatter-validator.test.ts:33`、`test/agent/index-middleware.test.ts:660`。
+`test/agent/docs-only-backend.test.ts`（309 行）覆盖三层边界与写白名单的行为契约，包括：mutation metadata 回传（`:56`、`:94`）、`writableWikiPages: []` 创建只读生成文档后端（`:254`）、单页白名单放行与拒绝（`:282`）。中间件侧的 metadata 消费见 `test/agent/frontmatter-validator.test.ts:33`、`test/agent/index-middleware.test.ts:686`。
 
 用例名与本文小节的对应关系：`..` 逃逸拒绝（`:35`，对应 §2 规范化）、worktree glob 不崩溃（`:116`，§7）、claims 隐藏但普通 shell 检查保留（`:138`，§4）、personal-brain 的 `.claims` 不误伤（`:209`，`isClaimsPath` 的 repository 限定）、删除也记 mutation（`:223`，§6.3 的 `DeleteResult` 扩展）、planner 全 mutation 路径只读（`:245`，§6.2）、先规范化再执行单页白名单（`:275`，§6.1）。
 
@@ -310,41 +310,41 @@ deepagents 的部分后端对不存在的文件返回人类可读的 `Error: Fil
 | `src/agent/docs-only-backend.ts:29-59` | `OpenWikiBackendOptions` | 四个构造选项（docsOnly/openWikiIgnore/outputMode/writableWikiPages） |
 | `src/agent/docs-only-backend.ts:52-58` | `writableWikiPages` | 页 worker 写白名单选项（undefined/[]/非空） |
 | `src/agent/docs-only-backend.ts:62-77` | `allowedIgnoredShellCommands` | shell 白名单及 allowlist-not-denylist 论证 |
-| `src/agent/docs-only-backend.ts:90-96` | `isBroadRootGlob` | 根 `**`/`**/*`/`**/**` 无界 glob 判定 |
-| `src/agent/docs-only-backend.ts:106-110` | `targetsGitMetadata` | `.git` 路径组件判定 |
-| `src/agent/docs-only-backend.ts:120-128` | `isWorktreeGitScandirError` | worktree `.git` ENOTDIR 识别 |
-| `src/agent/docs-only-backend.ts:130-145` | `referencesClaimsState` | shell 命令的 `.claims` 引用判定（纵深防御） |
-| `src/agent/docs-only-backend.ts:147-165` | 类文档注释 | 三层边界的权威声明 |
-| `src/agent/docs-only-backend.ts:166-195` | `OpenWikiLocalShellBackend` / constructor | 类声明与选项规范化 |
-| `src/agent/docs-only-backend.ts:200-509` | 11 个 override 方法 | read/readRaw/write/edit/delete/ls/grep/glob/uploadFiles/downloadFiles/execute |
-| `src/agent/docs-only-backend.ts:516-533` | `getDocsOnlyWriteError` | docs-only 两段式写判定（含页白名单） |
-| `src/agent/docs-only-backend.ts:539-562` | `getIgnoredPathError` / `getClaimsOwnershipError` | 第 1/2 层拒绝消息 |
-| `src/agent/docs-only-backend.ts:570-595` | `isClaimsPath` / `isClaimsDiscoveryPath` | claims 生效域与 glob 相对条目判定 |
-| `src/agent/docs-only-backend.ts:603-609` | `isWriteBlocked` | 批量上传的三查合一 |
-| `src/agent/docs-only-backend.ts:615-629` | `markMutation` | mutation 路径回传（签名含 DeleteResult） |
-| `src/agent/docs-only-backend.ts:637-647` | `isClaimsStatePath` | `/openwiki/.claims` 归一化判定 |
-| `src/agent/docs-only-backend.ts:656-666` | `isOpenWikiDocsPath` | `openwiki/` 前缀判定（含 `..` 折叠） |
-| `src/agent/docs-only-backend.ts:674-689` | `normalizeVirtualPath` / `isAllowedShellCommandWithIgnore` | 路径规范化与白名单匹配 |
+| `src/agent/docs-only-backend.ts:91-97` | `isBroadRootGlob` | 根 `**`/`**/*`/`**/**` 无界 glob 判定 |
+| `src/agent/docs-only-backend.ts:107-111` | `targetsGitMetadata` | `.git` 路径组件判定 |
+| `src/agent/docs-only-backend.ts:121-129` | `isWorktreeGitScandirError` | worktree `.git` ENOTDIR 识别 |
+| `src/agent/docs-only-backend.ts:131-146` | `referencesClaimsState` | shell 命令的 `.claims` 引用判定（纵深防御） |
+| `src/agent/docs-only-backend.ts:148-219` | 类文档注释 | 三层边界的权威声明 |
+| `src/agent/docs-only-backend.ts:220-250` | `OpenWikiLocalShellBackend` / constructor | 类声明与选项规范化 |
+| `src/agent/docs-only-backend.ts:255-576` | 11 个 override 方法 | read/readRaw/write/edit/delete/ls/grep/glob/uploadFiles/downloadFiles/execute |
+| `src/agent/docs-only-backend.ts:583-600` | `getDocsOnlyWriteError` | docs-only 两段式写判定（含页白名单） |
+| `src/agent/docs-only-backend.ts:606-629` | `getIgnoredPathError` / `getClaimsOwnershipError` | 第 1/2 层拒绝消息 |
+| `src/agent/docs-only-backend.ts:637-662` | `isClaimsPath` / `isClaimsDiscoveryPath` | claims 生效域与 glob 相对条目判定 |
+| `src/agent/docs-only-backend.ts:670-676` | `isWriteBlocked` | 批量上传的三查合一 |
+| `src/agent/docs-only-backend.ts:682-696` | `markMutation` | mutation 路径回传（签名含 DeleteResult） |
+| `src/agent/docs-only-backend.ts:704-714` | `isClaimsStatePath` | `/openwiki/.claims` 归一化判定 |
+| `src/agent/docs-only-backend.ts:723-733` | `isOpenWikiDocsPath` | `openwiki/` 前缀判定（含 `..` 折叠） |
+| `src/agent/docs-only-backend.ts:741-755` | `normalizeVirtualPath` / `isAllowedShellCommandWithIgnore` | 路径规范化与白名单匹配 |
 | `src/agent/openwiki-ignore.ts:8` | `OPENWIKI_IGNORE_FILE` | `.openwikiignore` 文件名 |
 | `src/agent/openwiki-ignore.ts:218-231` | `OpenWikiIgnore.load` | 规则装载（缺失 = 空规则集，非错误） |
 | `src/agent/openwiki-ignore.ts:255-287` | `isActive` / `ignores` | 规则激活开关与 last-match-wins 匹配 |
 | `src/agent/openwiki-ignore.ts:306-311` | `normalizeIgnorePath` | ignore 路径规范化（安全边界） |
-| `src/agent/prompt.ts:44,47-48` | `formatDiscoveryInstruction` 等 | ignore 规则的提示词侧注入（配合层） |
+| `src/agent/prompt.ts:42,47-48` | `formatDiscoveryInstruction` 等 | ignore 规则的提示词侧注入（配合层） |
 | `src/cli/startup.ts:136` | no-op 预检装载 | `getUpdateNoopStatus` 消费同一规则集 |
-| `src/agent/index.ts:160-161` | `outputMode` 缺省 / `runtimeCwd` | 非 repository 输出默认 local-wiki、根切 `~/.openwiki/wiki/` |
-| `src/agent/index.ts:179` | `isRepositoryGeneration` | repository init/update 入口分流判定 |
-| `src/agent/index.ts:232-235` | `openWikiIgnore` 加载条件 | 仅 `outputMode === "repository"` 时加载，否则空规则集 |
-| `src/agent/index.ts:400-404` | 低层工厂拒绝组合 | repository 输出 + 非 chat 命令抛错（init/update 走原生路径） |
-| `src/agent/index.ts:454-462` | `createOpenWikiAgentGraph` 后端构造 | chat/local-wiki 共享工厂的选项 |
-| `src/agent/index.ts:1379-1397` | AnthropicVertex `dangerouslyAllowBrowser` | jsdom 全局 vs 浏览器守卫（归属模型工厂层） |
-| `src/agent/agent-backend.ts:21-28` | `AGENT_FILESYSTEM_PERMISSIONS` | `/skills/**`、`/conversation_history/**` 写拒绝（模型权限层） |
-| `src/agent/agent-backend.ts:52-98` | `createAgentBackend` / `OpenWikiCompositeBackend.glob` | 组合挂载与 RangeError 兜底 |
-| `src/agent/repository-runner.ts:74-85` | `PLANNER_FILESYSTEM_TOOLS` 等 | worker 工具清单（页 worker 无 shell） |
-| `src/agent/repository-runner.ts:295-304` | planner 后端构造 | `writableWikiPages: []` 生成文档只读 |
-| `src/agent/repository-runner.ts:415-424` | 页 worker 后端构造 | `writableWikiPages: [job.path]` 单页白名单 |
-| `src/agent/repository-runner.ts:428` | `inspect_claims` 工具 | claims 的模型侧专用只读通道 |
+| `src/agent/index.ts:173-174` | `outputMode` 缺省 / `runtimeCwd` | 非 repository 输出默认 local-wiki、根切 `~/.openwiki/wiki/` |
+| `src/agent/index.ts:192` | `isRepositoryGeneration` | repository init/update 入口分流判定 |
+| `src/agent/index.ts:247-250` | `openWikiIgnore` 加载条件 | 仅 `outputMode === "repository"` 时加载，否则空规则集 |
+| `src/agent/index.ts:422-426` | 低层工厂拒绝组合 | repository 输出 + 非 chat 命令抛错（init/update 走原生路径） |
+| `src/agent/index.ts:476-484` | `createOpenWikiAgentGraph` 后端构造 | chat/local-wiki 共享工厂的选项 |
+| `src/agent/index.ts:1580-1598` | AnthropicVertex `dangerouslyAllowBrowser` | jsdom 全局 vs 浏览器守卫（归属模型工厂层） |
+| `src/agent/agent-backend.ts:53-60` | `AGENT_FILESYSTEM_PERMISSIONS` | `/skills/**`、`/conversation_history/**` 写拒绝（模型权限层） |
+| `src/agent/agent-backend.ts:84-137` | `createAgentBackend` / `OpenWikiCompositeBackend.glob` | 组合挂载与 RangeError 兜底 |
+| `src/agent/repository-runner.ts:91-102` | `PLANNER_FILESYSTEM_TOOLS` 等 | worker 工具清单（页 worker 无 shell） |
+| `src/agent/repository-runner.ts:458-467` | planner 后端构造 | `writableWikiPages: []` 生成文档只读 |
+| `src/agent/repository-runner.ts:942-951` | 页 worker 后端构造 | `writableWikiPages: [job.path]` 单页白名单 |
+| `src/agent/repository-runner.ts:955` | `inspect_claims` 工具 | claims 的模型侧专用只读通道 |
 | `src/agent/okf-middleware.ts:140` | mutation metadata 消费 | frontmatter 校验器读回被改路径 |
-| `src/generation/repository-run.ts:546-555` | `isNotFoundBackendError` | 06eedd1 not-found 容错（归属 generation 层） |
-| `src/generation/repository-run.ts:742-755` | `createRepositoryBackend` | 生命周期确定性后端（不传页白名单） |
-| `src/generation/repository-run.ts:1061,1165,1621,1643` | `isNotFoundBackendError` 调用点 | 快照读/还原删/废弃页删/计划删 |
-| `test/agent/docs-only-backend.test.ts:254,282` | `writableWikiPages` 用例 | 只读后端与单页白名单契约 |
+| `src/generation/repository-run.ts:628-637` | `isNotFoundBackendError` | 06eedd1 not-found 容错（归属 generation 层） |
+| `src/generation/repository-run.ts:824-837` | `createRepositoryBackend` | 生命周期确定性后端（不传页白名单） |
+| `src/generation/repository-run.ts:1161,1165,1621,1643` | `isNotFoundBackendError` 调用点 | 快照读/还原删/废弃页删/计划删 |
+| `test/agent/docs-only-backend.test.ts:344,282` | `writableWikiPages` 用例 | 只读后端与单页白名单契约 |

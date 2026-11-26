@@ -37,12 +37,12 @@ flowchart TD
 ## 1. 前置条件
 
 - Node.js 22+，`openwiki` 已安装（`npm install --global openwiki`，或源码 `pnpm run dev`）。
-- **provider 凭据**：13 个 provider 之一（`src/config/constants.ts:105` `DEFAULT_PROVIDER="openai"`；全表与回退链见 06/01）。凭据进 env 或由向导写入受管配置。
-- 模型工厂按 provider 七分支创建模型（`src/agent/index.ts:1077-1264`，06/02）；**强制 streaming 仅限 openai-chatgpt 与 copilot**（后端拒绝非流式，`src/agent/index.ts:1195-1199`、`src/config/constants.ts:491-500`），openai-compatible 可选开启（`src/config/constants.ts:486-489`），其余 provider 默认非流式；推理力度经 `OPENWIKI_REASONING_EFFORT` 等入口可调（06/03）。
+- **provider 凭据**：13 个 provider 之一（`src/config/constants.ts:136` `DEFAULT_PROVIDER="openai"`；全表与回退链见 06/01）。凭据进 env 或由向导写入受管配置。
+- 模型工厂按 provider 七分支创建模型（`src/agent/index.ts:1123-1465`，06/02）；**强制 streaming 仅限 openai-chatgpt 与 copilot**（后端拒绝非流式，`src/agent/index.ts:1258-1262`、`src/config/constants.ts:617-633`），openai-compatible 可选开启（`src/config/constants.ts:612-615`），其余 provider 默认非流式；推理力度经 `OPENWIKI_REASONING_EFFORT` 等入口可调（06/03）。
 
 ## 2. 首跑：交互式向导
 
-第一次运行会触发向导（启动门 `needsCredentialSetup()`，`src/setup/credentials/steps.ts:68-92`），步骤顺序（`orderedSetupSteps`，`src/setup/credentials/steps.ts:201-249`；先选 provider，再按其推导后续步骤）：
+第一次运行会触发向导（启动门 `needsCredentialSetup()`，`src/setup/credentials/steps.ts:74-98`），步骤顺序（`orderedSetupSteps`，`src/setup/credentials/steps.ts:229-290`；先选 provider，再按其推导后续步骤）：
 
 1. **provider**——13 个 provider 之一；
 2. **凭据**——API key / OAuth（需要的 provider 追加 secret-key、gcp-project/gcp-location、base-url、region 条件步）；
@@ -51,7 +51,7 @@ flowchart TD
 5. **wiki brief**——这份 wiki 该覆盖什么（写入 `INSTRUCTIONS.md`，生成与后续更新都读它）；
 6. **cron**——是否顺手配定时更新。
 
-向导内部**没有「选模式」屏**：CLI 以 `allowModeSelection={false}` 挂载（`src/cli/app/app.tsx:743-749`），模式完全由命令行决定（`--mode personal|code`，`src/cli/commands.ts:814-829`）。
+向导内部**没有「选模式」屏**：CLI 以 `allowModeSelection={false}` 挂载（`src/cli/app/app.tsx:743-749`），模式完全由命令行决定（`--mode personal|code`，`src/cli/commands.ts:909-924`）。
 
 ## 3. 两种运行形态
 
@@ -73,36 +73,36 @@ openwiki code --update --print # 非交互一次性（CI 即用这个；-p 等�
 openwiki --mode personal      # 模式轴切换（personal|code）
 ```
 
-`--init` 额外做的事：写 `AGENTS.md`/`CLAUDE.md` 管理块（15 区 L0 引导层）+ **生成 CI workflow**（`createWorkflow` 只在 init 设 true，`src/generation/repository-run.ts:334-335`；`--update` 与 chat 运行绝不覆盖既有 workflow，`src/ingestion/code-mode.ts:82-89`）。`--print` 走 `runPrintCommand`（`src/cli/runners.ts:261`），无 TUI、跑完即退。
+`--init` 额外做的事：写 `AGENTS.md`/`CLAUDE.md` 管理块（15 区 L0 引导层）+ **生成 CI workflow**（`createWorkflow` 只在 init 设 true，`src/generation/repository-run.ts:416-417`；`--update` 与 chat 运行绝不覆盖既有 workflow，`src/ingestion/code-mode.ts:106-113`）。`--print` 走 `runPrintCommand`（`src/cli/runners.ts:261`），无 TUI、跑完即退。
 
 ## 5. no-op 门与 fast-forward：update 为什么经常「什么都不做」
 
-`--update` 且未 `--force` 时有严格前置门（`src/generation/repository-run.ts:409-458`）：**preflight 判定可跳过 + claims 零问题 + 基线覆盖完整**三者同时成立才直接 finalize 完成——注意 claims 校验先于 no-op 检测，「Git 干净」骗不过过期的证据状态。反语义保护：上次 run 是 `interrupted` 时**拒绝** no-op（`src/agent/utils.ts:137-139`）。
+`--update` 且未 `--force` 时有严格前置门（`src/generation/repository-run.ts:491-540`）：**preflight 判定可跳过 + claims 零问题 + 基线覆盖完整**三者同时成立才直接 finalize 完成——注意 claims 校验先于 no-op 检测，「Git 干净」骗不过过期的证据状态。反语义保护：上次 run 是 `interrupted` 时**拒绝** no-op（`src/agent/utils.ts:130-132`）。
 
-真正要跑时，已完成且仍然有效的页 fast-forward 跳过重写（三条件，`src/generation/repository-run.ts:846-874`，详见 05/02）。源漂移使计划失效 → 计划作废、重新规划（`src/generation/repository-run.ts:608-616`）。
+真正要跑时，已完成且仍然有效的页 fast-forward 跳过重写（三条件，`src/generation/repository-run.ts:933-968`，详见 05/02）。源漂移使计划失效 → 计划作废、重新规划（`src/generation/repository-run.ts:690-698`）。
 
 ## 6. 运行内部（30 行版）
 
-自研驱动方 `src/agent/repository-runner.ts:205-254` 起 DeepAgents 文档 agent（docs-only backend，11 个工具覆写划界，04/04），走与 host 路径**同一个** `beginRepositoryRun` 生命周期；页任务产出后 finalize 五步定序：mermaid → index_sync → link_validation → claims_sources → generated_provenance（`src/agent/wiki-finalizer.ts:263-284`）。机制细节全部在 05 区，此处不重复。
+自研驱动方 `src/agent/repository-runner.ts:363-417` 起 DeepAgents 文档 agent（docs-only backend，11 个工具覆写划界，04/04），走与 host 路径**同一个** `beginRepositoryRun` 生命周期；页任务产出后 finalize 五步定序：mermaid → index_sync → link_validation → claims_sources → generated_provenance（`src/agent/wiki-finalizer.ts:263-284`）。机制细节全部在 05 区，此处不重复。
 
 ## 7. 自动化层
 
 ### 7.1 GitHub Actions（`--init` 生成的 `openwiki-update.yml`）
 
-模板由 `createCodeModeWorkflow` 生成（`src/ingestion/code-mode.ts:341-421`），逐段：
+模板由 `createCodeModeWorkflow` 生成（`src/ingestion/code-mode.ts:532-623`），逐段：
 
 - checkout：**SHA 锁定** action + `fetch-depth: 0`（diff HEAD 需要全历史，`:361,366`）；
 - 安装：`npm install --global openwiki@<版本> mermaid@… jsdom@…`（`:375`）；
 - provider env 块：init 时从本机凭据推导 secrets/vars（`:287-339`）——**CI 跑的是本路径，所以必须有 provider secrets**；
 - 执行：`openwiki code --update --print`（`:380`）；
 - 收尾：`rm -f -- openwiki/.run.json`（`:392-394`）、create-pull-request 提 PR（`:398`）、失败显式 `exit 1`（`:417-419`）；
-- fork guard：**生成模板不含恢复步骤**——`Restore protected workflow file` 只存在于手工维护的 dogfood workflow（`.github/workflows/openwiki-update.yml:68-76`；该文件注释自述 CLI 模板丢弃了该守卫，upstream issue #423 待修）。当前防线只剩 CLI 侧「文件存在即 early-return」保证再生成不冲掉手工补丁（`src/ingestion/code-mode.ts:82-89`，11/02）；需要 fork guard 时须手工把恢复步骤加进生成的 workflow。
+- fork guard：**生成模板不含恢复步骤**——`Restore protected workflow file` 只存在于手工维护的 dogfood workflow（`.github/workflows/openwiki-update.yml:68-76`；该文件注释自述 CLI 模板丢弃了该守卫，upstream issue #423 待修）。当前防线只剩 CLI 侧「文件存在即 early-return」保证再生成不冲掉手工补丁（`src/ingestion/code-mode.ts:106-113`，11/02）；需要 fork guard 时须手工把恢复步骤加进生成的 workflow。
 
-`.last-update.json` 记 complete/interrupted：中断写入四处（begin/worker 失败/finish 部分完成/fail-fast，`src/generation/repository-run.ts:501-509,:1130-1138,:1562-1571`），成功 finish 清除（`:1572-1582`）。
+`.last-update.json` 记 complete/interrupted：中断写入四处（begin/worker 失败/finish 部分完成/fail-fast，`src/generation/repository-run.ts:583-591,:1130-1138,:1562-1571`），成功 finish 清除（`:1572-1582`）。
 
 ### 7.2 本地定时
 
-cron / macOS LaunchAgent（`src/scheduling/schedules.ts`；由首跑向导安装，日常用 `openwiki cron list|pause|resume|delete` 管理，`src/cli/commands.ts:1150-1167`）；LaunchAgent 的 day+weekday 双限制语义与 plist `EnvironmentVariables` 注入见 11/01。定时任务与 CI 一样跑 `ingest all --scheduled --print` 形态（11/01）。
+cron / macOS LaunchAgent（`src/scheduling/schedules.ts`；由首跑向导安装，日常用 `openwiki cron list|pause|resume|delete` 管理，`src/cli/commands.ts:1258-1275`）；LaunchAgent 的 day+weekday 双限制语义与 plist `EnvironmentVariables` 注入见 11/01。定时任务与 CI 一样跑 `ingest all --scheduled --print` 形态（11/01）。
 
 ## 8. 断点续传
 
@@ -125,16 +125,16 @@ cron / macOS LaunchAgent（`src/scheduling/schedules.ts`；由首跑向导安装
 
 | 源文件 | 关键符号/内容 | 说明 |
 |--------|--------------|------|
-| `src/config/constants.ts:105` | `DEFAULT_PROVIDER` | 13 provider 体系入口（06/01） |
-| `src/agent/index.ts:1077-1264` | `createModel` 七分支 | streaming 仅 chatgpt/copilot 强制（06/02） |
-| `src/setup/credentials/steps.ts:68-92,201-249` | 启动门 / 有序步骤 | 向导触发与步骤序 |
+| `src/config/constants.ts:136` | `DEFAULT_PROVIDER` | 13 provider 体系入口（06/01） |
+| `src/agent/index.ts:1123-1465` | `createModel` 七分支 | streaming 仅 chatgpt/copilot 强制（06/02） |
+| `src/setup/credentials/steps.ts:74-98,201-249` | 启动门 / 有序步骤 | 向导触发与步骤序 |
 | `src/cli/app/app.tsx:743-749` | `allowModeSelection={false}` | 模式只由命令行决定 |
-| `src/cli/commands.ts:814-829` | `--mode personal\|code` | 模式轴旗标 |
+| `src/cli/commands.ts:909-924` | `--mode personal\|code` | 模式轴旗标 |
 | `src/cli/runners.ts:261` | `runPrintCommand` | `--print` 非交互形态 |
-| `src/generation/repository-run.ts:334-335` | `createWorkflow: mode==="init"` | 仅 init 生成 workflow |
-| `src/generation/repository-run.ts:409-458,846-874,608-616` | no-op 门 / fast-forward / 漂移作废 | update 语义三件 |
+| `src/generation/repository-run.ts:416-417` | `createWorkflow: mode==="init"` | 仅 init 生成 workflow |
+| `src/generation/repository-run.ts:491-540,846-874,608-616` | no-op 门 / fast-forward / 漂移作废 | update 语义三件 |
 | `src/generation/run-state.ts:14` | `REPOSITORY_RUN_STATE_BASENAME` | `.run.json` 检查点 |
-| `src/agent/repository-runner.ts:205-254` | 自研驱动方 | DeepAgents 驱动同一生命周期 |
+| `src/agent/repository-runner.ts:363-417` | 自研驱动方 | DeepAgents 驱动同一生命周期 |
 | `src/agent/wiki-finalizer.ts:263-284` | finalize 五步 | mermaid→index_sync→link_validation→claims_sources→provenance |
-| `src/ingestion/code-mode.ts:82-89,287-339,341-421` | workflow 守卫 / provider env / 模板 | CI 自动化层全部出处 |
-| `src/agent/utils.ts:137-139` | interrupted 拒绝 no-op | `.last-update.json` 语义 |
+| `src/ingestion/code-mode.ts:106-113,287-339,341-421` | workflow 守卫 / provider env / 模板 | CI 自动化层全部出处 |
+| `src/agent/utils.ts:130-132` | interrupted 拒绝 no-op | `.last-update.json` 语义 |

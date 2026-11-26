@@ -134,7 +134,7 @@ readOpenWikiOnboardingConfig()
 
 - **文件缺失不是错误**：`isFileNotFoundError`（:476-482，检查 `code === "ENOENT"`）区分「尚未引导」与「配置损坏」。首次运行返回空配置而非抛错，让向导可以正常进入。
 - **wikiGoal 生命周期独立**：即使 onboarding.json 已被删除，只要 INSTRUCTIONS.md 还在，读取结果仍带 wikiGoal——用户目标比引导状态更持久。
-- **每次读取都重新归一化**：调用方（摄取 `src/ingestion/ingestion.ts:72`、agent 的 `readRunWikiGoal`、调度侧）拿到的永远是过完 normalize 规则链的规范形态，不需要各自兼容旧格式。
+- **每次读取都重新归一化**：调用方（摄取 `src/ingestion/ingestion.ts:74`、agent 的 `readRunWikiGoal`、调度侧）拿到的永远是过完 normalize 规则链的规范形态，不需要各自兼容旧格式。
 
 ---
 
@@ -218,7 +218,7 @@ export function isOnboardingComplete(config: OpenWikiOnboardingConfig): boolean 
 
 两个 sync 变体都遵循同一防御姿态：onboarding.json 不存在、JSON 解析失败、或归一化抛错时**一律返回 false**（:183-185、:202-204、:220-222）——「无法确认完成」等价于「未完成」，让启动流程安全地回落到向导。
 
-最典型的消费方是向导的启动门（`src/setup/credentials/steps.ts:90-91`）：
+最典型的消费方是向导的启动门（`src/setup/credentials/steps.ts:96-97`）：
 
 ```typescript
 return mode === "code"
@@ -240,8 +240,8 @@ return mode === "code"
 
 消费方地图：
 
-- `src/agent/utils.ts:104`：agent 运行的 `readRunWikiGoal` 在 `outputMode === "repository"` 时读仓库级文件，否则读全局 onboarding 配置的 wikiGoal——同一套 agent 消息装配在两种模式下拿到正确的用户目标。
-- `src/setup/credentials/use-init-setup.ts:2553`：向导在代码模式保存时，把 wikiGoal 写进仓库，同时在 onboarding.json 里将 `wikiGoal` 置 `undefined`（:2555-2558）——与第 5 节的拆分持久化互补，代码模式的「真相源」彻底落到仓库里。
+- `src/agent/utils.ts:97`：agent 运行的 `readRunWikiGoal` 在 `outputMode === "repository"` 时读仓库级文件，否则读全局 onboarding 配置的 wikiGoal——同一套 agent 消息装配在两种模式下拿到正确的用户目标。
+- `src/setup/credentials/use-init-setup.ts:2689`：向导在代码模式保存时，把 wikiGoal 写进仓库，同时在 onboarding.json 里将 `wikiGoal` 置 `undefined`（:2555-2558）——与第 5 节的拆分持久化互补，代码模式的「真相源」彻底落到仓库里。
 - `src/connectors/sources/langsmith/repo-config.ts:211-214`：LangSmith 仓库配置的写入注释明确说明它**模仿** `saveRepositoryWikiInstructions` 的「固定路径直写」模式，使路径包含（containment）成立。
 
 ---
@@ -283,7 +283,7 @@ custom-mcp 是本次新增（:461）。它是通用只读 MCP（Model Context Pr
 
 一条实用的阅读规则：**向导代码里出现的每个 `saveOpenWikiOnboardingConfig` / `isOnboardingComplete*` 调用点，语义都要回到本文件的第 4-7 节来找**；反过来，本文件从不 import 向导的任何模块，依赖方向严格单向（UI → 数据层）。
 
-除向导外，本文件的其余消费方：摄取主入口（`src/ingestion/ingestion.ts:72`，读 sourceInstances）、调度管理（`src/scheduling/schedules.ts:15`，读 ingestionSchedule/powerManagement）、CLI 非交互路径（`src/cli/runners.ts:115`，保存向导产出的配置）、agent 的 wikiGoal 读取（`src/agent/utils.ts:104`）。
+除向导外，本文件的其余消费方：摄取主入口（`src/ingestion/ingestion.ts:74`，读 sourceInstances）、调度管理（`src/scheduling/schedules.ts:15`，读 ingestionSchedule/powerManagement）、CLI 非交互路径（`src/cli/runners.ts:115`，保存向导产出的配置）、agent 的 wikiGoal 读取（`src/agent/utils.ts:97`）。
 
 ---
 
@@ -325,10 +325,10 @@ custom-mcp 是本次新增（:461）。它是通用只读 MCP（Model Context Pr
 | `src/config/openwiki-home.ts:73` | `ensureOpenWikiHome()` | 目录确保 |
 | `src/connectors/registry.ts:12-22` | `CONNECTOR_IDS` | 运行时连接器清单（9 个，含 langsmith） |
 | `src/connectors/sources/langsmith/index.ts:92` | `mode: "code"` | LangSmith 为代码模式连接器（不进 onboarding 白名单） |
-| `src/setup/credentials/steps.ts:90-91` | 启动门 | 向导进入条件调用两个完成判定 |
-| `src/setup/credentials/use-init-setup.ts:2553` | `saveRepositoryWikiInstructions` 调用 | 代码模式 wikiGoal 落仓库 |
-| `src/setup/credentials/use-init-setup.ts:2555-2558` | `saveOpenWikiOnboardingConfig` 调用 | 代码模式下 JSON 内 wikiGoal 置空 |
-| `src/agent/utils.ts:104` | `readRunWikiGoal` 分支 | repository 模式读仓库级指令 |
-| `src/ingestion/ingestion.ts:72` | `readOpenWikiOnboardingConfig()` 调用 | 摄取主入口读配置 |
+| `src/setup/credentials/steps.ts:96-97` | 启动门 | 向导进入条件调用两个完成判定 |
+| `src/setup/credentials/use-init-setup.ts:2689` | `saveRepositoryWikiInstructions` 调用 | 代码模式 wikiGoal 落仓库 |
+| `src/setup/credentials/use-init-setup.ts:2691-2694` | `saveOpenWikiOnboardingConfig` 调用 | 代码模式下 JSON 内 wikiGoal 置空 |
+| `src/agent/utils.ts:97` | `readRunWikiGoal` 分支 | repository 模式读仓库级指令 |
+| `src/ingestion/ingestion.ts:74` | `readOpenWikiOnboardingConfig()` 调用 | 摄取主入口读配置 |
 | `src/cli/runners.ts:115` | `saveOpenWikiOnboardingConfig()` 调用 | CLI 非交互路径保存配置 |
 | `src/scheduling/schedules.ts:15` | 类型导入 | 调度侧消费 onboarding 类型 |

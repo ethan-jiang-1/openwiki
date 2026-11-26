@@ -40,8 +40,8 @@ flowchart TD
 
 ```
 host MCP config 条目 {"command":"openwiki","args":["mcp","--host",<target>]}   ← 01 号 §3.2，registry.ts:106-113 装入
-  → parseMcpCommand        src/cli/commands.ts:658-705
-  → cli.tsx 分支            src/cli/cli.tsx:49-50        # mcp 与 integrations 同走独立分支，不加载模型环境
+  → parseMcpCommand        src/cli/commands.ts:753-800
+  → cli.tsx 分支            src/cli/cli.tsx:50-51        # mcp 与 integrations 同走独立分支，不加载模型环境
   → runMcpCommand          src/cli/integrations.ts:88-95 # 查 registry 拿 producerActor，缺省退回 host 名
   → runOpenWikiMcp         src/integrations/mcp/stdio.ts:27-33
       HostSessionManager.create(options)                 # 校验 host/producerActor 身份
@@ -51,7 +51,7 @@ host MCP config 条目 {"command":"openwiki","args":["mcp","--host",<target>]}  
 
 解析层（`parseMcpCommand`）的行为：
 
-- 只认 `--host`（或 `--host=`），重复出现报错（`src/cli/commands.ts:664-671`）；
+- 只认 `--host`（或 `--host=`），重复出现报错（`src/cli/commands.ts:759-766`）；
 - 值必须非空、不以 `-` 开头（`:674-680`），且过 `isValidHostId`——1-64 个小写字母/数字/连字符（`:681-688`，模式定义在 `src/integrations/core/protocol.ts:3` 的 `HOST_ID_PATTERN`）；
 - 任何其他选项/位置参数都报错（`:695-701`），**不猜测**——这是 host 自动拉起的进程，错误要尽早暴露；
 - 未提供 `--host` 时 host 名落 `"unknown"`（`:659`）——协议允许它启动（身份校验对 `unknown` 合法），溯源上会如实记录为 `host-agent/unknown`。
@@ -60,7 +60,7 @@ host MCP config 条目 {"command":"openwiki","args":["mcp","--host",<target>]}  
 
 ## 2. MCP server 组装：INSTRUCTIONS 引导与错误有界化
 
-组装在 `createOpenWikiMcpServer`（`src/integrations/mcp/server.ts:50-68`）：new 一个官方 SDK 的 `McpServer`（name `openwiki`、version 取包版本），把初始化握手时的 `instructions` 设为一段引导文本，然后遍历 `provider.tools()` 逐个 `registerTool`——注册顺序即 `tools()` 数组顺序，也就是生命周期顺序。
+组装在 `createOpenWikiMcpServer`（`src/integrations/mcp/server.ts:76-94`）：new 一个官方 SDK 的 `McpServer`（name `openwiki`、version 取包版本），把初始化握手时的 `instructions` 设为一段引导文本，然后遍历 `provider.tools()` 逐个 `registerTool`——注册顺序即 `tools()` 数组顺序，也就是生命周期顺序。
 
 ### 2.1 INSTRUCTIONS 引导
 
@@ -93,7 +93,7 @@ host MCP config 条目 {"command":"openwiki","args":["mcp","--host",<target>]}  
 
 ## 3. 六工具协议（core/protocol.ts）
 
-工具名集合是封闭的 6 值联合 `ProtocolToolName`（`src/integrations/core/protocol.ts:14-20`）：
+工具名集合是封闭的 6 值联合 `ProtocolToolName`（`src/integrations/core/protocol.ts:14-24`）：
 
 ```
 openwiki_begin → openwiki_submit_plan → (openwiki_next_page ⇄ openwiki_submit_page
@@ -147,7 +147,7 @@ sequenceDiagram
 
 ### 4.1 单 run 语义
 
-`HostSessionManager`（`src/integrations/core/session-manager.ts:53`）进程内只持有一个活动 run（`active: ActiveRepositoryRun | null`，`:57`——类型来自 `src/generation/repository-run.ts:115`），且同一时刻只允许一个操作在途：`startOperation` 的 `operationInProgress` 守卫拒绝并发（`:306-314`），`runOperation` 在 finally 里释放（`:292-301`）。这匹配真实 host 行为：一次对话推一轮 wiki 生成，而不是并行开三轮。
+`HostSessionManager`（`src/integrations/core/session-manager.ts:55`）进程内只持有一个活动 run（`active: ActiveRepositoryRun | null`，`:57`——类型来自 `src/generation/repository-run.ts:123`），且同一时刻只允许一个操作在途：`startOperation` 的 `operationInProgress` 守卫拒绝并发（`:306-314`），`runOperation` 在 finally 里释放（`:292-301`）。这匹配真实 host 行为：一次对话推一轮 wiki 生成，而不是并行开三轮。
 
 所有后续工具必须用 `openwiki_begin` 返回的 `runId` 调用，`requireSession` 严格比对进程内 run 的 durable id，不匹配即 `invalid_state`「先调 openwiki_begin」（`:276-284`）。也就是说 **runId 不是用来寻址任意 run 的句柄，而是防错配的对照值**；真正的可恢复性由磁盘检查点保证——跨进程/跨会话恢复 = 对同一仓库重新 begin，生命周期核心自己接上未完的 run。
 
@@ -263,7 +263,7 @@ tags: [<稳定英文 tag>, ...]
 |---|---|---|
 | 位置 | 顶层 `integrations/openwiki/` | 顶层 `skills/`（当前仅 mermaid-diagrams、write-connector） |
 | 装到哪 | host 领地：`~/.claude/skills/openwiki` 等（01 号 §2） | OpenWiki 自己的家：`~/.openwiki/skills/`（`src/config/openwiki-home.ts:14,47`） |
-| 谁消费 | host 内的第三方 agent | OpenWiki 自研 agent 运行时（启动时同步，`src/agent/index.ts:174,406`） |
+| 谁消费 | host 内的第三方 agent | OpenWiki 自研 agent 运行时（启动时同步，`src/agent/index.ts:187,406`） |
 | 何时落盘 | 用户显式 `openwiki integrations install`（01 号 §4） | agent 进程启动时自动同步（同上调用点） |
 | 安装机制 | 事务安装器（receipt/回滚，01 号 §4） | `syncBundledSkills`（`src/agent/skills.ts:24-27`）：staging 目录 + `grantOwnerWrite`（只读 Nix 商店修复，`:127-142`）+ rename 位移旧副本 + 3 次重试容忍并发，幂等且不删无关 skill（`replaceSkillDirectory` `:53-118`） |
 | 契约 | MCP 生命周期协议（本文 §3） | 连接器/图技能（见 04 区 02 号） |
@@ -304,38 +304,38 @@ SKILL.md 内容契约由 `skill.test.ts` 守护（canonical skill 断言，`:39`
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/cli/commands.ts:658-705` | `parseMcpCommand` | `--host` 解析与 isValidHostId 校验 |
-| `src/cli/cli.tsx:47-53` | 分发分支 | integrations/mcp 独立分支、不加载模型环境 |
+| `src/cli/commands.ts:753-800` | `parseMcpCommand` | `--host` 解析与 isValidHostId 校验 |
+| `src/cli/cli.tsx:48-54` | 分发分支 | integrations/mcp 独立分支、不加载模型环境 |
 | `src/cli/integrations.ts:88-95` | `runMcpCommand` | host→registry producerActor 传入 |
 | `src/integrations/mcp/stdio.ts:27-33` | `runOpenWikiMcp` | create → assemble → StdioServerTransport（`:32`） |
 | `src/integrations/mcp/server.ts:11-30` | `INSTRUCTIONS` | initialize 阶段的操作引导文本 |
-| `src/integrations/mcp/server.ts:35-42` | `HostToolProvider` | 传输解耦接口 |
-| `src/integrations/mcp/server.ts:50-68` | `createOpenWikiMcpServer` | McpServer 组装与 6 工具注册 |
-| `src/integrations/mcp/server.ts:77-95` | `executeTool` | 错误有界化（未知异常折叠 `:92-93`） |
+| `src/integrations/mcp/server.ts:61-68` | `HostToolProvider` | 传输解耦接口 |
+| `src/integrations/mcp/server.ts:76-94` | `createOpenWikiMcpServer` | McpServer 组装与 6 工具注册 |
+| `src/integrations/mcp/server.ts:103-121` | `executeTool` | 错误有界化（未知异常折叠 `:92-93`） |
 | `src/claims/guidance.ts:18` | `CLAIMS_RECONCILIATION_GUIDANCE` | 与自研 agent 共享的对账纪律文本 |
 | `src/version.ts:73` | `OPENWIKI_VERSION` | MCP server name/version 与安装回执 version 的共同来源 |
 | `src/integrations/core/protocol.ts:3,14-20` | `HOST_ID_PATTERN` / `ProtocolToolName` | id 模式与 6 工具名封闭集合 |
-| `src/integrations/core/protocol.ts:64-109` | `BeginInput` / `SubmitPlanInput` 等 | begin/plan 侧 zod strict schema |
-| `src/integrations/core/protocol.ts:119-148` | `InspectPageClaimsInput` / `SubmitPageInput` | claims 侧 zod strict schema |
-| `src/integrations/core/protocol.ts:174-176` | `isValidHostId` | host/producer 身份白名单 |
-| `src/integrations/core/protocol.ts:181-204` | `ProtocolTool` | 传输无关工具契约 |
-| `src/integrations/core/session-manager.ts:53-119` | `HostSessionManager` / `create` | 单 run 适配器与身份校验（producerActor 缺省 `:106`） |
-| `src/integrations/core/session-manager.ts:127-215` | `begin` … `finish` | 六操作，直接委托 generation 函数 |
-| `src/integrations/core/session-manager.ts:222-268` | `tools()` | 6 工具定义与 description |
-| `src/integrations/core/session-manager.ts:276-314` | `requireSession` / 守卫 | runId 对照与操作串行化 |
-| `src/integrations/core/session-manager.ts:323-335` | `mapRepositoryRunError` | RepositoryRunError → 稳定三码 |
-| `src/integrations/core/session-manager.ts:343-345` | `getHostAgentIdentity` | `host-agent/<host>` 元数据身份 |
+| `src/integrations/core/protocol.ts:68-114` | `BeginInput` / `SubmitPlanInput` 等 | begin/plan 侧 zod strict schema |
+| `src/integrations/core/protocol.ts:124-153` | `InspectPageClaimsInput` / `SubmitPageInput` | claims 侧 zod strict schema |
+| `src/integrations/core/protocol.ts:179-181` | `isValidHostId` | host/producer 身份白名单 |
+| `src/integrations/core/protocol.ts:186-209` | `ProtocolTool` | 传输无关工具契约 |
+| `src/integrations/core/session-manager.ts:55-121` | `HostSessionManager` / `create` | 单 run 适配器与身份校验（producerActor 缺省 `:106`） |
+| `src/integrations/core/session-manager.ts:129-218` | `begin` … `finish` | 六操作，直接委托 generation 函数 |
+| `src/integrations/core/session-manager.ts:225-272` | `tools()` | 6 工具定义与 description |
+| `src/integrations/core/session-manager.ts:280-318` | `requireSession` / 守卫 | runId 对照与操作串行化 |
+| `src/integrations/core/session-manager.ts:327-339` | `mapRepositoryRunError` | RepositoryRunError → 稳定三码 |
+| `src/integrations/core/session-manager.ts:347-349` | `getHostAgentIdentity` | `host-agent/<host>` 元数据身份 |
 | `src/integrations/core/repository-root.ts:20-34,122-133` | `resolveRepositoryRoot` / `assertSafeRepositoryRoot` | Git 根解析与 fs root/home 拒绝 |
 | `src/integrations/core/errors.ts:4-5,10-26` | `HostIntegrationErrorCode` / `HostIntegrationError` | 稳定错误三码 |
-| `src/generation/repository-run.ts:115,319,883,976,1022,1183,1485` | `ActiveRepositoryRun` 与生命周期六函数 | 适配器直接委托的目标（语义见 05 区 01 号） |
+| `src/generation/repository-run.ts:123,319,883,976,1022,1183,1485` | `ActiveRepositoryRun` 与生命周期六函数 | 适配器直接委托的目标（语义见 05 区 01 号） |
 | `src/generation/repository-run.ts:1280,1522-1543` | `completedBy` / producerActor 汇总 | producerActor 进入溯源的消费点 |
 | `integrations/openwiki/SKILL.md:1-4` | front matter | name 与触发式 description |
-| `integrations/openwiki/SKILL.md:12-69` | Required sequence | 8 步操作纪律与漂移处置 |
-| `integrations/openwiki/SKILL.md:71-104` | 质量契约 / 文件契约 | 页面覆盖子集与 OKF frontmatter |
-| `integrations/openwiki/SKILL.md:106-144` | Claims contract | repo:// 证据、稀疏对账、页/Claim 一致性 |
-| `integrations/openwiki/SKILL.md:146-158` | Non-negotiable boundaries | 不改源码/不碰控制文件/禁子 agent 等 |
+| `integrations/openwiki/SKILL.md:52-121` | Required sequence | 8 步操作纪律与漂移处置 |
+| `integrations/openwiki/SKILL.md:123-156` | 质量契约 / 文件契约 | 页面覆盖子集与 OKF frontmatter |
+| `integrations/openwiki/SKILL.md:158-196` | Claims contract | repo:// 证据、稀疏对账、页/Claim 一致性 |
+| `integrations/openwiki/SKILL.md:198-210` | Non-negotiable boundaries | 不改源码/不碰控制文件/禁子 agent 等 |
 | `integrations/openwiki/agents/openai.yaml:1-4` | interface 元数据 | Codex 展示名与默认 prompt |
 | `src/agent/skills.ts:19-21,24-27,53-118,127-142` | `bundledSkillsDir` / `syncBundledSkills` / `replaceSkillDirectory` / `grantOwnerWrite` | bundled skills 同步（划界对照，机制详见 04 区 02 号） |
 | `src/config/openwiki-home.ts:14,47` | home / `openWikiSkillsDir` | `~/.openwiki/skills/` 目标路径 |
-| `src/agent/index.ts:174,406` | `syncBundledSkills` 调用点 | agent 启动时同步 bundled skills |
+| `src/agent/index.ts:187,406` | `syncBundledSkills` 调用点 | agent 启动时同步 bundled skills |
 | `test/integrations/protocol.test.ts` 等 4 件 | — | 协议面测试 |

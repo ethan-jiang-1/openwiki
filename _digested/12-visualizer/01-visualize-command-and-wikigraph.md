@@ -29,47 +29,47 @@ out_of_scope:
 
 ### 1.1 CliCommand variant 与解析入口
 
-`visualize` 是 `CliCommand` 联合类型的 9 个 variant 之一，形态为 `{ kind: "visualize"; exitCode: 0; wikiDir: string; port: number; open: boolean; exportDir: string | null }`（`src/cli/commands.ts:123-130`）。解析发生在 `parseCommand` 的 `argv[0] === "visualize"` 分支（`src/cli/commands.ts:305-401`），整个分支是一个手写循环：逐个扫描选项、填默认值、收集位置参数，最后做两组校验。
+`visualize` 是 `CliCommand` 联合类型的 9 个 variant 之一，形态为 `{ kind: "visualize"; exitCode: 0; wikiDir: string; port: number; open: boolean; exportDir: string | null }`（`src/cli/commands.ts:187-194`）。解析发生在 `parseCommand` 的 `argv[0] === "visualize"` 分支（`src/cli/commands.ts:400-496`），整个分支是一个手写循环：逐个扫描选项、填默认值、收集位置参数，最后做两组校验。
 
 | 项 | 默认值 | 解析位置 |
 |----|--------|---------|
-| wiki 目录（位置参数） | `"openwiki"` | `src/cli/commands.ts:306`、`372-376` |
-| `--port <n>` / `--port=<n>` | `4321` | `src/cli/commands.ts:307`、`324-337`、`339-343` |
-| `--no-open`（取反 `open`） | `true`（自动开浏览器） | `src/cli/commands.ts:308`、`318-322` |
-| `--export <dir>` / `--export=<dir>` | `null`（不导出，起服务） | `src/cli/commands.ts:309`、`345-357`、`359-370` |
+| wiki 目录（位置参数） | `"openwiki"` | `src/cli/commands.ts:401`、`372-376` |
+| `--port <n>` / `--port=<n>` | `4321` | `src/cli/commands.ts:402`、`324-337`、`339-343` |
+| `--no-open`（取反 `open`） | `true`（自动开浏览器） | `src/cli/commands.ts:403`、`318-322` |
+| `--export <dir>` / `--export=<dir>` | `null`（不导出，起服务） | `src/cli/commands.ts:404`、`345-357`、`359-370` |
 
 解析规则的四条细节：
 
-1. **两种选项拼写等价**：`--port 4400` 与 `--port=4400`、`--export dir` 与 `--export=dir` 走同一组字段，空格形式在消费值后 `index += 1` 跳过下一个参数（`src/cli/commands.ts:335`、`355`）。
-2. **带值选项必须有值**：`--port`/`--export` 的空格形式若缺失下一个参数、或下一个参数以 `-` 开头，立即返回 `kind: "error"`（`src/cli/commands.ts:326-332`、`346-353`）；等号形式只要求等号后非空（`src/cli/commands.ts:361-367`）。
-3. **位置参数只取第一个**：第一个不以 `-` 开头的参数成为 wikiDir（`src/cli/commands.ts:372-376`）；再多出来的任何参数（包括第二个位置参数）都会落进「未知选项」错误 `Unknown option for visualize: <arg>`（`src/cli/commands.ts:378-382`）。
-4. **不加载模型凭据**：`commandLoadsEnvironment` 的白名单只含 run/auth/cron/ingest/ngrok，**不含 visualize**（`src/cli/commands.ts:1078-1087`），因此 `cli.tsx` 的启动序不会为它调 `loadOpenWikiEnv`（`src/cli/cli.tsx:63-65`）——可视化器是纯只读消费方，不需要 OpenWiki 私有环境。
+1. **两种选项拼写等价**：`--port 4400` 与 `--port=4400`、`--export dir` 与 `--export=dir` 走同一组字段，空格形式在消费值后 `index += 1` 跳过下一个参数（`src/cli/commands.ts:430`、`355`）。
+2. **带值选项必须有值**：`--port`/`--export` 的空格形式若缺失下一个参数、或下一个参数以 `-` 开头，立即返回 `kind: "error"`（`src/cli/commands.ts:421-427`、`346-353`）；等号形式只要求等号后非空（`src/cli/commands.ts:456-462`）。
+3. **位置参数只取第一个**：第一个不以 `-` 开头的参数成为 wikiDir（`src/cli/commands.ts:467-471`）；再多出来的任何参数（包括第二个位置参数）都会落进「未知选项」错误 `Unknown option for visualize: <arg>`（`src/cli/commands.ts:473-477`）。
+4. **不加载模型凭据**：`commandLoadsEnvironment` 的白名单只含 run/auth/cron/ingest/ngrok，**不含 visualize**（`src/cli/commands.ts:1173-1182`），因此 `cli.tsx` 的启动序不会为它调 `loadOpenWikiEnv`（`src/cli/cli.tsx:64-66`）——可视化器是纯只读消费方，不需要 OpenWiki 私有环境。
 
 ### 1.2 两组校验：互斥与端口范围
 
 校验按固定顺序执行，任何一条失败都返回 `kind: "error"`、`exitCode: 1`：
 
-- **`--export` 与 `--port`/`--no-open` 互斥**（`src/cli/commands.ts:385-391`）：静态导出是一次性命令，起服务才有端口和开浏览器的概念，混用直接报 `--export cannot be combined with --port or --no-open.`。注意解析器**先收集后校验**——`--export x --port 4400` 在循环中不会被拒绝，要等循环走完才在互斥检查处报错。
-- **端口范围 1024–65535**（`src/cli/commands.ts:393-399`）：`--port must be between 1024 and 65535.`。`Number()` 产生 `NaN` 时同样被 `Number.isInteger` 拦下，所以 `--port=abc` 也会走到这条错误。
+- **`--export` 与 `--port`/`--no-open` 互斥**（`src/cli/commands.ts:480-486`）：静态导出是一次性命令，起服务才有端口和开浏览器的概念，混用直接报 `--export cannot be combined with --port or --no-open.`。注意解析器**先收集后校验**——`--export x --port 4400` 在循环中不会被拒绝，要等循环走完才在互斥检查处报错。
+- **端口范围 1024–65535**（`src/cli/commands.ts:488-494`）：`--port must be between 1024 and 65535.`。`Number()` 产生 `NaN` 时同样被 `Number.isInteger` 拦下，所以 `--port=abc` 也会走到这条错误。
 
 解析分支一共可能产生六条触发路径、五种错误消息文本，全部以 `kind: "error"`、`exitCode: 1` 返回：
 
 | 触发 | 消息 | 位置 |
 |------|------|------|
-| `--port` 缺值或值以 `-` 开头 | `--port requires a value.` | `src/cli/commands.ts:327-332` |
-| `--export` 缺值或值以 `-` 开头（空格形式） | `--export requires a directory.` | `src/cli/commands.ts:348-353` |
-| `--export=` 等号后为空 | `--export requires a directory.` | `src/cli/commands.ts:362-367` |
-| 无法识别的参数（含第二个位置参数） | `Unknown option for visualize: <arg>` | `src/cli/commands.ts:378-382` |
-| `--export` 与 `--port`/`--no-open` 同用 | `--export cannot be combined with --port or --no-open.` | `src/cli/commands.ts:385-391` |
-| 端口越界 / 非整数 | `--port must be between 1024 and 65535.` | `src/cli/commands.ts:393-399` |
+| `--port` 缺值或值以 `-` 开头 | `--port requires a value.` | `src/cli/commands.ts:422-427` |
+| `--export` 缺值或值以 `-` 开头（空格形式） | `--export requires a directory.` | `src/cli/commands.ts:443-448` |
+| `--export=` 等号后为空 | `--export requires a directory.` | `src/cli/commands.ts:457-462` |
+| 无法识别的参数（含第二个位置参数） | `Unknown option for visualize: <arg>` | `src/cli/commands.ts:473-477` |
+| `--export` 与 `--port`/`--no-open` 同用 | `--export cannot be combined with --port or --no-open.` | `src/cli/commands.ts:480-486` |
+| 端口越界 / 非整数 | `--port must be between 1024 and 65535.` | `src/cli/commands.ts:488-494` |
 
 两条 `--export` 路径共用同一文案，所以是「六条路径、五种文本」。
 
-全部通过后返回 `{ kind: "visualize", exitCode: 0, wikiDir, port, open, exportDir }`（`src/cli/commands.ts:401`）。help 文案与三处示例同步声明了这套面：usage 行 `openwiki visualize [path] [--port <port>] [--no-open] [--export <dir>]`（`src/cli/commands.ts:1110`）、选项说明（`:1241-1251`）与示例 `openwiki visualize openwiki --port 4400 --no-open`、`openwiki visualize openwiki --export docs/openwiki-visualizer`（`:1285-1287`）。
+全部通过后返回 `{ kind: "visualize", exitCode: 0, wikiDir, port, open, exportDir }`（`src/cli/commands.ts:496`）。help 文案与三处示例同步声明了这套面：usage 行 `openwiki visualize [path] [--port <port>] [--no-open] [--export <dir>]`（`src/cli/commands.ts:1208`）、选项说明（`:1241-1251`）与示例 `openwiki visualize openwiki --port 4400 --no-open`、`openwiki visualize openwiki --export docs/openwiki-visualizer`（`:1285-1287`）。
 
 ### 1.3 分发与执行
 
-`cli.tsx` 的 `runStandardCommand` 在标准命令分发链上把 `kind === "visualize"` 交给 `runVisualizeCommand`（`src/cli/cli.tsx:88-89`），两条 runner 从 `src/cli/runners.ts:33-34` 导入：`exportStaticVisualizer`（静态导出）与 `runVisualizeServer`（本地服务）。
+`cli.tsx` 的 `runStandardCommand` 在标准命令分发链上把 `kind === "visualize"` 交给 `runVisualizeCommand`（`src/cli/cli.tsx:93-94`），两条 runner 从 `src/cli/runners.ts:33-34` 导入：`exportStaticVisualizer`（静态导出）与 `runVisualizeServer`（本地服务）。
 
 `runVisualizeCommand`（`src/cli/runners.ts:66-91`）第一步就把 wikiDir 解析成绝对路径 `path.resolve(process.cwd(), command.wikiDir)`（`:69`），随后按 `exportDir` 分流：
 
@@ -86,8 +86,8 @@ out_of_scope:
 
 把 §1-§2 串起来，`openwiki visualize openwiki --port 4400 --no-open` 从敲下到可浏览的完整时序：
 
-1. `parseCommand` 解析出 `{ kind: "visualize", wikiDir: "openwiki", port: 4400, open: false, exportDir: null }`（`src/cli/commands.ts:305-401`）；
-2. `cli.tsx` 分发（`src/cli/cli.tsx:88-89`），`runVisualizeCommand` 把 wikiDir 解析为 `<cwd>/openwiki`（`src/cli/runners.ts:69`）；
+1. `parseCommand` 解析出 `{ kind: "visualize", wikiDir: "openwiki", port: 4400, open: false, exportDir: null }`（`src/cli/commands.ts:400-496`）；
+2. `cli.tsx` 分发（`src/cli/cli.tsx:93-94`），`runVisualizeCommand` 把 wikiDir 解析为 `<cwd>/openwiki`（`src/cli/runners.ts:69`）；
 3. `assertWikiDir` 预检目录存在且是目录（`src/visualize/server.ts:220-231`）；
 4. `loadVisualizerAssets` 一次性读入 dist 编译产物（`src/visualize/server.ts:75`）；
 5. `listen` 绑定 `127.0.0.1:4400`；被占用则逐端口 +1 重试（`src/visualize/server.ts:236-255`）；
@@ -168,39 +168,39 @@ out_of_scope:
 
 ### 3.2 node id：相对路径去 `.md`
 
-id 规则由 `toId` 统一实现（`src/visualize/graph.ts:222-227`）：`path.relative(wikiRoot, fullPath)` → 反斜杠归一为 `/` → 去掉结尾 `.md`。例如 `<root>/_digested/12-visualizer/README.md` 的 id 是 `_digested/12-visualizer/README`。id 同时是侧栏索引、边端点和浏览器内应用内导航的稳定键（`src/visualize/graph.ts:42-44`）。
+id 规则由 `toId` 统一实现（`src/visualize/graph.ts:101-106`）：`path.relative(wikiRoot, fullPath)` → 反斜杠归一为 `/` → 去掉结尾 `.md`。例如 `<root>/_digested/12-visualizer/README.md` 的 id 是 `_digested/12-visualizer/README`。id 同时是侧栏索引、边端点和浏览器内应用内导航的稳定键（`src/visualize/graph.ts:42-44`）。
 
 ### 3.3 标题与类型的缺省链
 
-每页的 `title` 与 `type` 都有确定性缺省链，在 `readNode`（`src/visualize/graph.ts:275-295`）中落定：
+每页的 `title` 与 `type` 都有确定性缺省链，在 `readNode`（`src/visualize/graph.ts:154-174`）中落定：
 
-- **title 四级优先**（`src/visualize/graph.ts:280-283`）：frontmatter `title` → index 页用**所在目录名**（`sectionTitle`，`src/visualize/graph.ts:232-236`：根目录的 index 叫 `Home`，其余取目录 basename 并首字母大写）→ 正文第一个 H1（`firstHeading`，匹配 `^#\s+(.+)$` 多行模式，`src/visualize/graph.ts:215-217`）→ 文件名去 `.md`。index 页跳过 H1 是有意为之——OpenWiki 自产的 index 页标题是泛化的 `# Files`，不如目录名有信息量（`src/visualize/graph.ts:279`）。
-- **type 两级缺省**（`src/visualize/graph.ts:287`）：frontmatter `type` → index 页 `"Section"`，其余 `"Reference"`。
+- **title 四级优先**（`src/visualize/graph.ts:159-162`）：frontmatter `title` → index 页用**所在目录名**（`sectionTitle`，`src/visualize/graph.ts:111-115`：根目录的 index 叫 `Home`，其余取目录 basename 并首字母大写）→ 正文第一个 H1（`firstHeading`，匹配 `^#\s+(.+)$` 多行模式，`src/visualize/graph.ts:94-96`）→ 文件名去 `.md`。index 页跳过 H1 是有意为之——OpenWiki 自产的 index 页标题是泛化的 `# Files`，不如目录名有信息量（`src/visualize/graph.ts:158`）。
+- **type 两级缺省**（`src/visualize/graph.ts:166`）：frontmatter `type` → index 页 `"Section"`，其余 `"Reference"`。
 
-`isIndex` 的判定就是 `path.basename(file) === "index.md"`（`src/visualize/graph.ts:278`）。
+`isIndex` 的判定就是 `path.basename(file) === "index.md"`（`src/visualize/graph.ts:157`）。
 
 ### 3.4 frontmatter：只解析 OpenWiki 自产子集
 
-`splitFrontmatter`（`src/visualize/graph.ts:158-196`）是一个刻意极简的 YAML 子集解析器：只认 `---` 开头/结尾块内的三类值——标量（剥一层单/双引号，`stripQuotes` `:150-152`）、内联 `[a, b]` 数组、`key:` 空值后跟 `- item` 虚线列表。嵌套结构、多行字符串、锚点等一概不解析。`readMeta`（`src/visualize/graph.ts:201-210`）再从中只取四个字段：`type`/`title`/`description`（要求标量，数组一律视为未声明）与 `tags`（要求数组）。这与 OpenWiki 生成页自产 front matter 的形态一一对应，其他工具写的复杂 front matter 不会让构建崩溃，只是字段取不到、走缺省链。
+`splitFrontmatter`（`src/visualize/graph.ts:34-75`）是一个刻意极简的 YAML 子集解析器：只认 `---` 开头/结尾块内的三类值——标量（剥一层单/双引号，`stripQuotes` `:150-152`）、内联 `[a, b]` 数组、`key:` 空值后跟 `- item` 虚线列表。嵌套结构、多行字符串、锚点等一概不解析。`readMeta`（`src/visualize/graph.ts:80-89`）再从中只取四个字段：`type`/`title`/`description`（要求标量，数组一律视为未声明）与 `tags`（要求数组）。这与 OpenWiki 生成页自产 front matter 的形态一一对应，其他工具写的复杂 front matter 不会让构建崩溃，只是字段取不到、走缺省链。
 
 ### 3.5 边抽取：`](xxx.md)` 正则 + 三重过滤
 
-链接抽取用一条正则完成（`src/visualize/graph.ts:145`）：`/\]\(([^)\s]+\.md)(?:#[^)]*)?\)/g`——匹配 `](相对路径.md)` 与 `](相对路径.md#anchor)` 两种形式，锚点部分直接丢弃。`linkNodes`（`src/visualize/graph.ts:302-320`）随后把每条原始链接解析成边，带三重过滤：
+链接抽取用一条正则完成（`src/visualize/graph.ts:21`）：`/\]\(([^)\s]+\.md)(?:#[^)]*)?\)/g`——匹配 `](相对路径.md)` 与 `](相对路径.md#anchor)` 两种形式，锚点部分直接丢弃。`linkNodes`（`src/visualize/graph.ts:181-206`）随后把每条原始链接解析成边，带三重过滤：
 
 1. **按链接所在文件解析相对路径**：`path.resolve(fileDir, link)`——`./x.md`、`../y/z.md` 都以源文件目录为基准，再经 `toId` 归一成目标 id（`src/visualize/graph.ts:307-309`）；
-2. **去未知与自环**：目标 id 不在节点表（链接指向不存在的页面）或目标等于自身时丢弃（`src/visualize/graph.ts:312`）;
-3. **去重复**：`source\ntarget` 组成的 `seen` 集合保证同一对页面只产生一条边，即使正文里链接了多次（`src/visualize/graph.ts:305`、`311-314`）。
+2. **去未知与自环**：目标 id 不在节点表（链接指向不存在的页面）或目标等于自身时丢弃（`src/visualize/graph.ts:198`）;
+3. **去重复**：`source\ntarget` 组成的 `seen` 集合保证同一对页面只产生一条边，即使正文里链接了多次（`src/visualize/graph.ts:184`、`311-314`）。
 
-幸存的边同时回写两端：源节点 `links.push(target)`、目标节点 `backlinks.push(source)`（`src/visualize/graph.ts:315-316`），所以浏览器拿到的邻接信息是冗余双向的，无需自己再算反向链接。
+幸存的边同时回写两端：源节点 `links.push(target)`、目标节点 `backlinks.push(source)`（`src/visualize/graph.ts:201-202`），所以浏览器拿到的邻接信息是冗余双向的，无需自己再算反向链接。
 
 ### 3.6 遍历防护：排除名单与 symlink 越界
 
-`buildGraph`（`src/visualize/graph.ts:325-338`）的收集阶段 `collectMarkdown`（`src/visualize/graph.ts:251-270`）带两道防护：
+`buildGraph`（`src/visualize/graph.ts:211-224`）的收集阶段 `collectMarkdown`（`src/visualize/graph.ts:130-149`）带两道防护：
 
-- **路径围栏**：每个条目的 `path.resolve` 结果必须等于 wikiRoot 或位于 `wikiRoot + path.sep` 之下，否则跳过（`src/visualize/graph.ts:257-258`）——`..` 或符号链接解析出的越界路径进不了候选集。
-- **symlink 不跟进**：遍历用 `readdir(dir, { withFileTypes: true })`，而 symlink 型 dirent **既不是 `isDirectory()` 也不是 `isFile()`**，所以指向 wiki 外部的符号链接既不会被递归也不会被读取（`src/visualize/graph.ts:259-267`）。
+- **路径围栏**：每个条目的 `path.resolve` 结果必须等于 wikiRoot 或位于 `wikiRoot + path.sep` 之下，否则跳过（`src/visualize/graph.ts:136-137`）——`..` 或符号链接解析出的越界路径进不了候选集。
+- **symlink 不跟进**：遍历用 `readdir(dir, { withFileTypes: true })`，而 symlink 型 dirent **既不是 `isDirectory()` 也不是 `isFile()`**，所以指向 wiki 外部的符号链接既不会被递归也不会被读取（`src/visualize/graph.ts:138-146`）。
 
-内容侧还有一道排除：`EXCLUDED_FILES = {"INSTRUCTIONS.md", "log.md"}`（`src/visualize/graph.ts:140`）——这两个是生成脚手架产物而非真实 wiki 内容，任何目录下出现都不入图；候选文件还必须以 `.md` 结尾（`src/visualize/graph.ts:261-267`）。收集到的文件先排序再 `Promise.all` 并发读入，`types` 最后去重排序（`src/visualize/graph.ts:326-334`）。
+内容侧还有一道排除：`EXCLUDED_FILES = {"INSTRUCTIONS.md", "log.md"}`（`src/visualize/graph.ts:16`）——这两个是生成脚手架产物而非真实 wiki 内容，任何目录下出现都不入图；候选文件还必须以 `.md` 结尾（`src/visualize/graph.ts:140-146`）。收集到的文件先排序再 `Promise.all` 并发读入，`types` 最后去重排序（`src/visualize/graph.ts:212-220`）。
 
 ### 3.7 一个最小示例：规则走一遍
 
@@ -257,17 +257,17 @@ SSE 通道本身（`/events` 路由，`src/visualize/server.ts:199-209`）以 `t
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/cli/commands.ts:123-130` | `CliCommand` visualize variant | `kind/exitCode/wikiDir/port/open/exportDir` 字段 |
-| `src/cli/commands.ts:305-401` | `parseCommand` visualize 分支 | 手写选项循环 + 两组校验 |
-| `src/cli/commands.ts:318-322` | `--no-open` | 置 `open = false` |
-| `src/cli/commands.ts:324-343` | `--port` / `--port=` | 两种拼写，带值校验 |
-| `src/cli/commands.ts:345-370` | `--export` / `--export=` | 两种拼写，带值校验 |
-| `src/cli/commands.ts:372-376` | 位置参数 | 仅第一个非选项参数 |
-| `src/cli/commands.ts:385-391` | 互斥校验 | `--export` vs `--port`/`--no-open` |
-| `src/cli/commands.ts:393-399` | 端口校验 | 1024–65535 + 整数 |
-| `src/cli/commands.ts:1078-1087` | `commandLoadsEnvironment` | visualize 不加载环境凭据 |
-| `src/cli/commands.ts:1110` | help usage | 命令面权威表述 |
-| `src/cli/cli.tsx:88-89` | 分发 | `kind === "visualize"` → `runVisualizeCommand` |
+| `src/cli/commands.ts:187-194` | `CliCommand` visualize variant | `kind/exitCode/wikiDir/port/open/exportDir` 字段 |
+| `src/cli/commands.ts:400-496` | `parseCommand` visualize 分支 | 手写选项循环 + 两组校验 |
+| `src/cli/commands.ts:413-417` | `--no-open` | 置 `open = false` |
+| `src/cli/commands.ts:419-438` | `--port` / `--port=` | 两种拼写，带值校验 |
+| `src/cli/commands.ts:440-465` | `--export` / `--export=` | 两种拼写，带值校验 |
+| `src/cli/commands.ts:467-471` | 位置参数 | 仅第一个非选项参数 |
+| `src/cli/commands.ts:480-486` | 互斥校验 | `--export` vs `--port`/`--no-open` |
+| `src/cli/commands.ts:488-494` | 端口校验 | 1024–65535 + 整数 |
+| `src/cli/commands.ts:1173-1182` | `commandLoadsEnvironment` | visualize 不加载环境凭据 |
+| `src/cli/commands.ts:1208` | help usage | 命令面权威表述 |
+| `src/cli/cli.tsx:93-94` | 分发 | `kind === "visualize"` → `runVisualizeCommand` |
 | `src/cli/runners.ts:66-91` | `runVisualizeCommand` | wikiRoot 解析 + exportDir 分流 |
 | `src/cli/runners.ts:33-34` | imports | `exportStaticVisualizer` / `runVisualizeServer` |
 | `src/visualize/server.ts:14-16` | `HOST`/`PORT_ATTEMPTS`/`WATCH_DEBOUNCE_MS` | 127.0.0.1 / 20 / 150ms |
@@ -282,13 +282,13 @@ SSE 通道本身（`/events` 路由，`src/visualize/server.ts:199-209`）以 `t
 | `src/visualize/server.ts:281-289` | `openBrowser` | `execFile` 无 shell 打开浏览器 |
 | `src/visualize/graph.ts:105-130` | `WikiGraph` | 顶层图结构 |
 | `src/visualize/graph.ts:40-85` | `WikiNode` | 节点字段（含 links/backlinks） |
-| `src/visualize/graph.ts:145` | `MARKDOWN_LINK` | `](xxx.md#anchor)` 抽取正则 |
-| `src/visualize/graph.ts:158-196` | `splitFrontmatter` | OpenWiki 自产 YAML 子集解析 |
-| `src/visualize/graph.ts:201-210` | `readMeta` | 只取 type/title/description/tags |
-| `src/visualize/graph.ts:222-227` | `toId` | 相对路径去 `.md` |
-| `src/visualize/graph.ts:232-236` | `sectionTitle` | index 页目录名标题（根 → Home） |
-| `src/visualize/graph.ts:251-270` | `collectMarkdown` | 路径围栏 + symlink 不跟进 |
-| `src/visualize/graph.ts:275-295` | `readNode` | title/type 缺省链落定 |
-| `src/visualize/graph.ts:302-320` | `linkNodes` | 相对解析 + 去自环/未知/重复 |
-| `src/visualize/graph.ts:325-338` | `buildGraph` | 排序收集 → 并发读 → 组装 |
+| `src/visualize/graph.ts:21` | `MARKDOWN_LINK` | `](xxx.md#anchor)` 抽取正则 |
+| `src/visualize/graph.ts:34-75` | `splitFrontmatter` | OpenWiki 自产 YAML 子集解析 |
+| `src/visualize/graph.ts:80-89` | `readMeta` | 只取 type/title/description/tags |
+| `src/visualize/graph.ts:101-106` | `toId` | 相对路径去 `.md` |
+| `src/visualize/graph.ts:111-115` | `sectionTitle` | index 页目录名标题（根 → Home） |
+| `src/visualize/graph.ts:130-149` | `collectMarkdown` | 路径围栏 + symlink 不跟进 |
+| `src/visualize/graph.ts:154-174` | `readNode` | title/type 缺省链落定 |
+| `src/visualize/graph.ts:181-206` | `linkNodes` | 相对解析 + 去自环/未知/重复 |
+| `src/visualize/graph.ts:211-224` | `buildGraph` | 排序收集 → 并发读 → 组装 |
 | `src/visualize/static-export.ts:33-40` | `loadVisualizerAssets` | 按 `import.meta.url` 读同目录编译产物 |

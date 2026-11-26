@@ -47,7 +47,7 @@ flowchart LR
 
 「装入 host」解决的问题是：host 内的 agent 天然会读 skill 目录里的说明、按 MCP config 启动本地 server。OpenWiki 顺着这个机制交付自己——**不驻留后台、不自带 agent**，只在 host 拉起 `openwiki mcp` 时作为一个无根（rootless）进程存在，把 05 区那套可恢复页任务（page job）生命周期以 6 个 MCP 工具暴露给 host（详见 02 号）。写作（调研、 prose、页面质量）由 host 侧模型承担，OpenWiki 只拥有状态、队列、校验与收尾。
 
-命令面两组（入口分发在 `src/cli/cli.tsx:47-53`，`integrations`/`mcp` 走独立分支、不加载模型环境）：
+命令面两组（入口分发在 `src/cli/cli.tsx:48-54`，`integrations`/`mcp` 走独立分支、不加载模型环境）：
 
 ```
 openwiki integrations list                                   # 列出 4 目标与各自状态
@@ -56,7 +56,7 @@ openwiki integrations uninstall <host> [--project [path]]
 openwiki mcp --host <host>                                   # 由 host 的 MCP config 拉起，人一般不手敲
 ```
 
-解析规则（`parseIntegrationsCommand`，`src/cli/commands.ts:539-650`）：
+解析规则（`parseIntegrationsCommand`，`src/cli/commands.ts:634-745`）：
 
 - 动作只认 `install`/`list`/`uninstall`，否则输出注册表动态生成的 usage（`:541-543`，usage 文案见 `:717-719`）；
 - install/uninstall 必须带认识的目标名，未知目标报「Supported targets: …」（`:547-563`）；
@@ -73,7 +73,7 @@ openwiki mcp --host <host>                                   # 由 host 的 MCP 
 
 ## 2. 目标注册表与 4 目标安装路径表
 
-全部路径集中在一个不可变注册表 `HOST_TARGETS`（`src/integrations/install/registry.ts:10-79`，`as const satisfies Record<HostTargetId, HostTarget>`）。注册表存的是 scope 相对路径；user scope 的 root 是 home 目录、project scope 的 root 是目标仓库根（`resolveInstallContext`，`src/integrations/install/install-paths.ts:75-110`：project scope 会先过 `resolveRepositoryRoot` 做 Git 根解析与安全拒绝，`:87-90`）。每个目标还带 `producerActor`——host 写出的页面会盖上这个 OKF producer 身份（`types.ts:79`；语义见 02 号 §4.3）。
+全部路径集中在一个不可变注册表 `HOST_TARGETS`（`src/integrations/install/registry.ts:10-157`，`as const satisfies Record<HostTargetId, HostTarget>`）。注册表存的是 scope 相对路径；user scope 的 root 是 home 目录、project scope 的 root 是目标仓库根（`resolveInstallContext`，`src/integrations/install/install-paths.ts:75-110`：project scope 会先过 `resolveRepositoryRoot` 做 Git 根解析与安全拒绝，`:87-90`）。每个目标还带 `producerActor`——host 写出的页面会盖上这个 OKF producer 身份（`types.ts:79`；语义见 02 号 §4.3）。
 
 | 目标 | producerActor | scope | skill 目录 | MCP config | 格式 kind |
 |------|---------------|-------|-----------|------------|-----------|
@@ -247,7 +247,7 @@ config 的期望条目以**回执里记录的命令**为准（无回执时退回
 
 ## 5. 三种 config 适配器
 
-三个适配器同构，各自暴露三件套：`install*`（幂等——已有等值条目返回 false 不重写；已有「可替换条目」才改写；其余一律 conflict）、`uninstall*`（只删与期望逐字节等价的受管条目）、`get*Status`（absent/intact/modified）。所有写盘都经 `writeTextAtomic`（`src/integrations/install/atomic-file.ts:11-34`）：先 lstat 记下原文件 mode（新建缺省 0644），写同目录隐藏临时文件，一次 `rename` 顶替——config 永远不会以半截状态被 host 读到，且权限位不漂移。
+三个适配器同构，各自暴露三件套：`install*`（幂等——已有等值条目返回 false 不重写；已有「可替换条目」才改写；其余一律 conflict）、`uninstall*`（只删与期望逐字节等价的受管条目）、`get*Status`（absent/intact/modified）。所有写盘都经 `writeTextAtomic`（`src/integrations/install/atomic-file.ts:12-38`）：先 lstat 记下原文件 mode（新建缺省 0644），写同目录隐藏临时文件，一次 `rename` 顶替——config 永远不会以半截状态被 host 读到，且权限位不漂移。
 
 ```text
               一套三件套契约（install* / uninstall* / get*Status）
@@ -302,7 +302,7 @@ host 集成的写入目标是 home 目录或用户仓库，路径即攻击面，
 2. **类型联合**：`HostTargetId` 加新 id（`types.ts:4`）——`as const satisfies` 会让漏字段或拼错 id 的注册表条目直接编译失败。
 3. **installer 三 switch**：`installManagedConfig` / `uninstallManagedConfig` / `getManagedConfigStatus` 各自按 `mcpConfigKind` 分发到适配器（`installer.ts:571-585`、`:595-608`、`:618-631`），新 kind 需要三处各加一臂（穷尽 switch 保证漏臂编译报错）。若新目标复用 `json` 格式则此步为零。
 
-CLI 侧无需改动：usage 文案由 `formatSupportedHostTargets` 从注册表动态生成（`src/cli/commands.ts:712-729`），`getHostTarget`/`listHostTargets` 自动接纳新条目。
+CLI 侧无需改动：usage 文案由 `formatSupportedHostTargets` 从注册表动态生成（`src/cli/commands.ts:807-824`），`getHostTarget`/`listHostTargets` 自动接纳新条目。
 
 ## 8. 测试佐证
 
@@ -321,36 +321,36 @@ MCP 面的 `protocol/session-manager/mcp-server/mcp-stdio` 四件见 02 号 §8�
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
 | `src/integrations/install/types.ts:4` | `HostTargetId` | 4 目标联合类型 |
-| `src/integrations/install/types.ts:9-15` | `HostIntegrationStatus` / `HostIntegrationScope` | 四态与 user/project scope |
-| `src/integrations/install/types.ts:35-60` | `HostMcpConfig` / `HostInstallationPaths` | config kind + scope 相对目的地 |
-| `src/integrations/install/types.ts:65-95` | `HostTarget` | 注册表条目形状（含 `producerActor` :79） |
-| `src/integrations/install/registry.ts:10-79` | `HOST_TARGETS` | 4 目标路径表（本文 §2 全部路径出处） |
-| `src/integrations/install/registry.ts:87-98` | `getHostTarget` / `listHostTargets` | 信任边界读取与枚举 |
-| `src/integrations/install/registry.ts:106-113` | `defaultMcpServerCommand` | `openwiki mcp --host <target>` 条目 |
-| `src/integrations/install/skill-bundle.ts:12-13` | `RECEIPT_FILE` / `ALLOWED_BUNDLE_ROOTS` | 回执文件名与 bundle 顶层白名单 |
-| `src/integrations/install/skill-bundle.ts:18-43` | `SkillReceipt` | 回执 schema（严格五键） |
+| `src/integrations/install/types.ts:18-24` | `HostIntegrationStatus` / `HostIntegrationScope` | 四态与 user/project scope |
+| `src/integrations/install/types.ts:44-69` | `HostMcpConfig` / `HostInstallationPaths` | config kind + scope 相对目的地 |
+| `src/integrations/install/types.ts:74-104` | `HostTarget` | 注册表条目形状（含 `producerActor` :79） |
+| `src/integrations/install/registry.ts:10-157` | `HOST_TARGETS` | 4 目标路径表（本文 §2 全部路径出处） |
+| `src/integrations/install/registry.ts:165-176` | `getHostTarget` / `listHostTargets` | 信任边界读取与枚举 |
+| `src/integrations/install/registry.ts:184-191` | `defaultMcpServerCommand` | `openwiki mcp --host <target>` 条目 |
+| `src/integrations/install/skill-bundle.ts:13-14` | `RECEIPT_FILE` / `ALLOWED_BUNDLE_ROOTS` | 回执文件名与 bundle 顶层白名单 |
+| `src/integrations/install/skill-bundle.ts:19-42` | `SkillReceipt` | 回执 schema（严格五键） |
 | `src/integrations/install/skill-bundle.ts:78-84` | `resolveCanonicalSkillBundle` | 规范包定位（moduleUrl 上三级） |
 | `src/integrations/install/skill-bundle.ts:93-163` | `inventorySkill` | SHA-256 清单 + 布局/symlink 校验 |
-| `src/integrations/install/skill-bundle.ts:173-191` | `writeReceipt` | 回执写入 |
-| `src/integrations/install/skill-bundle.ts:200-226` | `inspectInstallation` | installed/modified/not-installed 判定 |
-| `src/integrations/install/skill-bundle.ts:235-245` | `sameFiles` | 清单等值比较 |
+| `src/integrations/install/skill-bundle.ts:176-198` | `writeReceipt` | 回执写入 |
+| `src/integrations/install/skill-bundle.ts:210-241` | `inspectInstallation` | installed/modified/not-installed 判定 |
+| `src/integrations/install/skill-bundle.ts:250-260` | `sameFiles` | 清单等值比较 |
 | `src/integrations/install/skill-bundle.ts:254-280` | `readReceipt` | 回执严格校验（含 `:288-343` 辅助函数） |
 | `src/integrations/install/installer.ts:114` | `HostIntegrationInstaller` | 事务安装器（可注入操作 `:74-102`） |
-| `src/integrations/install/installer.ts:156-237` | `install` | 事务安装主流程 |
-| `src/integrations/install/installer.ts:246-338` | `uninstall` | 事务卸载（modified 拒删 `:259-264`/`:274-279`） |
-| `src/integrations/install/installer.ts:347-369` | `status` | 状态合并判定 |
-| `src/integrations/install/installer.ts:383-437` | `commitInstall` | 快照→config→挪旧→rename 提交 |
-| `src/integrations/install/installer.ts:446-458` | `cleanupPriorSkill` | force 备份保留 / rollback 目录清理 |
-| `src/integrations/install/installer.ts:469-503` | `rollbackInstall` | 回滚与 AggregateError |
-| `src/integrations/install/installer.ts:515-548` | `installHostIntegration` 等三封装 | CLI 使用的模块级 API |
-| `src/integrations/install/installer.ts:571-631` | `installManagedConfig` 等三 switch | config 适配器分发（扩展触点 3） |
+| `src/integrations/install/installer.ts:156-241` | `install` | 事务安装主流程 |
+| `src/integrations/install/installer.ts:250-352` | `uninstall` | 事务卸载（modified 拒删 `:259-264`/`:274-279`） |
+| `src/integrations/install/installer.ts:361-383` | `status` | 状态合并判定 |
+| `src/integrations/install/installer.ts:397-451` | `commitInstall` | 快照→config→挪旧→rename 提交 |
+| `src/integrations/install/installer.ts:460-472` | `cleanupPriorSkill` | force 备份保留 / rollback 目录清理 |
+| `src/integrations/install/installer.ts:483-517` | `rollbackInstall` | 回滚与 AggregateError |
+| `src/integrations/install/installer.ts:529-562` | `installHostIntegration` 等三封装 | CLI 使用的模块级 API |
+| `src/integrations/install/installer.ts:585-645` | `installManagedConfig` 等三 switch | config 适配器分发（扩展触点 3） |
 | `src/integrations/install/install-paths.ts:75-110` | `resolveInstallContext` | 路径解析 + project Git 根守卫 |
 | `src/integrations/install/install-paths.ts:118-145` | `assertNoSymlinkComponents` | 组件级 symlink 拒绝 |
 | `src/integrations/install/install-paths.ts:153-181` | `snapshotTextFile` / `restoreTextFile` | config 快照与还原 |
 | `src/integrations/install/install-paths.ts:210-220` | `forcedBackupPath` | `--force` 时间戳备份名 |
 | `src/integrations/install/install-paths.ts:228-244` | `removeEmptySkillParents` | 空父目录清理（不越 host 根） |
 | `src/integrations/install/install-paths.ts:304-323` | `resolveInside` | scope 包容校验 |
-| `src/integrations/install/atomic-file.ts:11-34` | `writeTextAtomic` | tmp+rename 原子写、保留 mode |
+| `src/integrations/install/atomic-file.ts:12-38` | `writeTextAtomic` | tmp+rename 原子写、保留 mode |
 | `src/integrations/install/config-json.ts:14-92` | `installJsonMcpEntry` 三件套 | JSON 适配器 |
 | `src/integrations/install/config-toml.ts:6-7,32-129` | `START/END` 与三件套 | TOML managed block 适配器 |
 | `src/integrations/install/config-toml.ts:157-196` | `renderBlock` / `markerRange` | 块渲染与标记校验 |
@@ -358,9 +358,9 @@ MCP 面的 `protocol/session-manager/mcp-server/mcp-stdio` 四件见 02 号 §8�
 | `src/integrations/core/repository-root.ts:20-34,122-133` | `resolveRepositoryRoot` / `assertSafeRepositoryRoot` | Git 根解析与 fs root/home 拒绝 |
 | `src/integrations/core/errors.ts:4-5` | `HostIntegrationErrorCode` | conflict/invalid_input/invalid_state |
 | `src/cli/integrations.ts:20-81` | `runIntegrationsCommand` | list/install/uninstall 执行面 |
-| `src/cli/commands.ts:539-650` | `parseIntegrationsCommand` | `--force`/`--project` 解析 |
-| `src/cli/commands.ts:712-729` | usage / `formatSupportedHostTargets` | 注册表驱动的 usage 文案 |
-| `src/cli/cli.tsx:47-53` | 分发分支 | integrations/mcp 不走标准命令路径 |
+| `src/cli/commands.ts:634-745` | `parseIntegrationsCommand` | `--force`/`--project` 解析 |
+| `src/cli/commands.ts:807-824` | usage / `formatSupportedHostTargets` | 注册表驱动的 usage 文案 |
+| `src/cli/cli.tsx:48-54` | 分发分支 | integrations/mcp 不走标准命令路径 |
 | `test/integrations/installer.test.ts` | — | 事务安装/回滚/registry 测试 |
 | `test/integrations/config-adapters.test.ts` | — | 三适配器所有权矩阵测试 |
 | `test/integrations/package-contents.test.ts` | — | 发布 bundle 布局守卫 |

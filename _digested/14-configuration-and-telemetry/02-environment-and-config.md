@@ -130,7 +130,7 @@ OpenWiki 的全部持久状态都以「家目录」为根，默认 `~/.openwiki`
 
 ### 5.1 路径与管理 key 清单
 
-`openWikiEnvDir = openWikiHomeDir`（`src/config/env.ts:81`）——**不再自行拼接家目录**（旧基线 `src/env.ts:56` 是 `path.join(os.homedir(), ".openwiki")`，会无视 `OPENWIKI_CONFIG_DIR`），`openWikiEnvPath = <dir>/.env`（`:82`）。
+`openWikiEnvDir = openWikiHomeDir`（`src/config/env.ts:90`）——**不再自行拼接家目录**（旧基线 `src/env.ts:56` 是 `path.join(os.homedir(), ".openwiki")`，会无视 `OPENWIKI_CONFIG_DIR`），`openWikiEnvPath = <dir>/.env`（`:82`）。
 
 `MANAGED_ENV_KEYS`（`:102-168`）列出 OpenWiki 读取或持久化的全部 65 个环境变量，是单一真相源：凭据诊断面板的 `CREDENTIAL_DIAGNOSTIC_ENV_KEYS`（`:183-189`，= provider 行 + 全部管理 key 减去两个非凭据的 LangChain 设置 `LANGCHAIN_PROJECT`/`LANGCHAIN_TRACING_V2`，`:172-175`）与 agent 调试行的 `DEBUG_ENV_KEYS`（`:196-199`，= 全部管理 key + 只读不落盘的 `LANGCHAIN_ENDPOINT`）都从它派生，注释明确「新增管理 key 时不可能漂移失步」。65 项的分组构成：
 
@@ -277,7 +277,7 @@ cli/app/app.tsx:156  needsCredentialSetup(sessionModelId, runMode)
 
 边界要点：
 
-- **加载门**：`src/cli/cli.tsx:63-64` 只在 `commandLoadsEnvironment` 为真时 `await loadOpenWikiEnv()`（判定在 `src/cli/commands.ts:1078-1088`：run（非 dry-run）/auth/cron/ingest/ngrok；host 集成与 MCP 命令刻意用宿主自己的已认证会话，绝不加载 OpenWiki 模型凭据）。
+- **加载门**：`src/cli/cli.tsx:64-65` 只在 `commandLoadsEnvironment` 为真时 `await loadOpenWikiEnv()`（判定在 `src/cli/commands.ts:1173-1183`：run（非 dry-run）/auth/cron/ingest/ngrok；host 集成与 MCP 命令刻意用宿主自己的已认证会话，绝不加载 OpenWiki 模型凭据）。
 - **家目录**：`config/openwiki-home.ts` 的目录常量在模块加载时固化——`OPENWIKI_CONFIG_DIR` 因此是**进程启动级**配置；调度场景下 LaunchAgent 经 plist `EnvironmentVariables` 注入它（见 11 区）。
 - **写路径**：凭据向导（01 号 §5）、连接器 OAuth token 落盘、LangSmith 工作区 key 等最终都收敛到 `saveOpenWikiEnv` 单一写入口；没有第二个组件直接写 `.env`。
 - **读路径**：`resolveConfiguredProvider` 的消费方遍布 agent/CLI/诊断；诊断面板消费 `getCredentialDiagnostics`；agent 调试行消费 `DEBUG_ENV_KEYS`。
@@ -292,7 +292,7 @@ cli/app/app.tsx:156  needsCredentialSetup(sessionModelId, runMode)
 | `OPENWIKI_CONFIG_DIR` | 重定向整个家目录（含 `.env`、connectors、wiki、skills） | `config/openwiki-home.ts:6` |
 | `OPENWIKI_PROVIDER` / `OPENWIKI_MODEL_ID` | 覆盖 provider 推断与默认模型 | `config/constants.ts:65-66` |
 | `OPENWIKI_REASONING_EFFORT` | 推理强度（能力表之外的组合直接 throw） | `config/constants.ts:73` |
-| `OPENWIKI_DEBUG` | 设为 `1` 开启详细诊断（provider 元数据、crash 栈输出；非管理 key，不落 `.env`） | `src/cli/debug.ts:7`（`--debug` 在解析期置位，`src/cli/commands.ts:777-779`） |
+| `OPENWIKI_DEBUG` | 设为 `1` 开启详细诊断（provider 元数据、crash 栈输出；非管理 key，不落 `.env`） | `src/cli/debug.ts:7`（`--debug` 在解析期置位，`src/cli/commands.ts:872-874`） |
 
 ## 9. 旧篇失效论断（2026-07-17 版，勿再引用）
 
@@ -309,16 +309,16 @@ cli/app/app.tsx:156  needsCredentialSetup(sessionModelId, runMode)
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/config/constants.ts:1-104` | `*_ENV_KEY` 字典 | 约 70 个环境变量名常量与仓库内路径常量 |
-| `src/config/constants.ts:108-121` | `OpenWikiProvider` | 13 个 provider 联合类型 |
-| `src/config/constants.ts:129-130` | `ProviderAuthMethod` | api-key/aws-sdk/external-cli/oauth |
-| `src/config/constants.ts:239-253` | `SELECTABLE_OPENWIKI_PROVIDERS` | 向导可选列表 |
-| `src/config/constants.ts:255-412` | `PROVIDER_CONFIGS` | 声明式 provider 注册表 |
-| `src/config/constants.ts:603-631` | `getProviderCredentialHint` | 非粘贴 key 类 provider 的外部认证指引 |
-| `src/config/constants.ts:821` | `normalizeProvider` | provider 名归一化 |
-| `src/config/constants.ts:837-869` | `resolveConfiguredProvider` | env → provider 推断链 |
-| `src/config/constants.ts:1217` | `isValidModelId` | 模型 ID 校验 |
-| `src/config/constants.ts:1233` | `OPENWIKI_VERSION` re-export | 指向 `src/version.js` |
+| `src/config/constants.ts:1-135` | `*_ENV_KEY` 字典 | 约 70 个环境变量名常量与仓库内路径常量 |
+| `src/config/constants.ts:139-154` | `OpenWikiProvider` | 13 个 provider 联合类型 |
+| `src/config/constants.ts:162-163` | `ProviderAuthMethod` | api-key/aws-sdk/external-cli/oauth |
+| `src/config/constants.ts:278-294` | `SELECTABLE_OPENWIKI_PROVIDERS` | 向导可选列表 |
+| `src/config/constants.ts:296-479` | `PROVIDER_CONFIGS` | 声明式 provider 注册表 |
+| `src/config/constants.ts:740-777` | `getProviderCredentialHint` | 非粘贴 key 类 provider 的外部认证指引 |
+| `src/config/constants.ts:977` | `normalizeProvider` | provider 名归一化 |
+| `src/config/constants.ts:993-1027` | `resolveConfiguredProvider` | env → provider 推断链 |
+| `src/config/constants.ts:1441` | `isValidModelId` | 模型 ID 校验 |
+| `src/config/constants.ts:1457` | `OPENWIKI_VERSION` re-export | 指向 `src/version.js` |
 | `src/version.ts:45-67` | `readOwnVersion` | 向上搜索 name==="openwiki" 的 package.json |
 | `src/version.ts:73` | `OPENWIKI_VERSION` | 运行时版本（回退 `0.0.0-unknown`，`:34`） |
 | `src/version.ts:81` | `OPENWIKI_PRODUCER_ACTOR` | OKF 制品署名 actor |
@@ -326,29 +326,29 @@ cli/app/app.tsx:156  needsCredentialSetup(sessionModelId, runMode)
 | `src/config/openwiki-home.ts:8-29` | `resolveOpenWikiHomeDir` | 覆盖 + `~` 展开 + 绝对化 |
 | `src/config/openwiki-home.ts:73-81` | `ensureOpenWikiHome` | 目录创建 + 0o700 + ACL 收紧 |
 | `src/config/openwiki-home.ts:103-118` | `resolveConnectorRawPath` | raw 目录防穿越 |
-| `src/config/env.ts:81-82` | `openWikiEnvDir`/`openWikiEnvPath` | env 路径 = 家目录派生（不自行拼接） |
-| `src/config/env.ts:102-168` | `MANAGED_ENV_KEYS` | 65 个管理 key，单一真相源 |
-| `src/config/env.ts:183-189` | `CREDENTIAL_DIAGNOSTIC_ENV_KEYS` | 诊断清单（派生） |
-| `src/config/env.ts:196-199` | `DEBUG_ENV_KEYS` | 调试行清单（派生，+`LANGCHAIN_ENDPOINT`） |
-| `src/config/env.ts:222-238` | `captureShellEnv` | shell 凭据快照（首调获胜） |
-| `src/config/env.ts:246-248` | `getShellEnvValue` | shell 快照读取 |
-| `src/config/env.ts:263-265` | `getSavedEnvValue` | 首次加载的已存值快照 |
-| `src/config/env.ts:267-287` | `loadOpenWikiEnv` | 文件→process.env 回填（shell 未设才注入） |
-| `src/config/env.ts:303-316` | `saveOpenWikiEnv` | 串行队列入口（失败不堵后续） |
-| `src/config/env.ts:318-375` | `saveOpenWikiEnvLocked` | 合并→删空值→权限→临时文件+rename→镜像 |
-| `src/config/env.ts:289-301` | `getCredentialDiagnostics` | 凭据诊断面板数据源 |
-| `src/config/env.ts:638-671` | `parseEnv` | `.env` 解析（export 前缀/key 白名单） |
-| `src/config/env.ts:701-718` | `formatEnv`/`formatEnvValue` | 确定性序列化与转义 |
+| `src/config/env.ts:90-91` | `openWikiEnvDir`/`openWikiEnvPath` | env 路径 = 家目录派生（不自行拼接） |
+| `src/config/env.ts:111-185` | `MANAGED_ENV_KEYS` | 65 个管理 key，单一真相源 |
+| `src/config/env.ts:200-206` | `CREDENTIAL_DIAGNOSTIC_ENV_KEYS` | 诊断清单（派生） |
+| `src/config/env.ts:213-216` | `DEBUG_ENV_KEYS` | 调试行清单（派生，+`LANGCHAIN_ENDPOINT`） |
+| `src/config/env.ts:239-255` | `captureShellEnv` | shell 凭据快照（首调获胜） |
+| `src/config/env.ts:263-265` | `getShellEnvValue` | shell 快照读取 |
+| `src/config/env.ts:280-282` | `getSavedEnvValue` | 首次加载的已存值快照 |
+| `src/config/env.ts:284-304` | `loadOpenWikiEnv` | 文件→process.env 回填（shell 未设才注入） |
+| `src/config/env.ts:320-333` | `saveOpenWikiEnv` | 串行队列入口（失败不堵后续） |
+| `src/config/env.ts:335-392` | `saveOpenWikiEnvLocked` | 合并→删空值→权限→临时文件+rename→镜像 |
+| `src/config/env.ts:306-318` | `getCredentialDiagnostics` | 凭据诊断面板数据源 |
+| `src/config/env.ts:684-717` | `parseEnv` | `.env` 解析（export 前缀/key 白名单） |
+| `src/config/env.ts:747-764` | `formatEnv`/`formatEnvValue` | 确定性序列化与转义 |
 | `src/config/reasoning.ts:8-15` | `REASONING_EFFORT_VALUES` | 六档推理强度 |
 | `src/config/reasoning.ts:88-130` | `resolveReasoningConfig` | effort 解析（不合法即 throw） |
 | `src/platform/fs-errors.ts:12,26` | ENOENT/快照竞态判定 | 文件系统错误分类 |
 | `src/platform/utils.ts:8` | `stripHtmlTags` | HTML 剥离至不动点 |
 | `src/platform/utils.ts:25` | `stripTerminalControlSequences` | 终端控制序列清洗 |
-| `src/platform/diagnostics.ts:31-70` | `sanitizeDiagnosticText` | 脱敏安全边界（env 值 + 形态替换） |
-| `src/platform/diagnostics.ts:87-92` | `SECRET_KEY_PATTERN_SOURCE`/`isSecretLikeKey` | 共享 key 名词表 |
-| `src/platform/diagnostics.ts:140-167` | `isAuthError` | 凭据拒绝判定（驱动 auth 修复面板） |
+| `src/platform/diagnostics.ts:32-74` | `sanitizeDiagnosticText` | 脱敏安全边界（env 值 + 形态替换） |
+| `src/platform/diagnostics.ts:91-96` | `SECRET_KEY_PATTERN_SOURCE`/`isSecretLikeKey` | 共享 key 名词表 |
+| `src/platform/diagnostics.ts:144-171` | `isAuthError` | 凭据拒绝判定（驱动 auth 修复面板） |
 | `src/platform/language.ts:25-53` | `resolveLanguage` | BCP-47 三态分类（absent/resolved/unrecognized） |
 | `src/platform/windows-acl.ts:20-41` | `restrictDirToCurrentUser` | icacls 收紧（best-effort，非 Windows no-op） |
-| `src/cli/cli.tsx:63-64` | `loadOpenWikiEnv` 门 | `commandLoadsEnvironment`（`src/cli/commands.ts:1078`） |
+| `src/cli/cli.tsx:64-65` | `loadOpenWikiEnv` 门 | `commandLoadsEnvironment`（`src/cli/commands.ts:1173`） |
 | `src/cli/debug.ts:7` | `isDebugMode` | `OPENWIKI_DEBUG=1` 诊断门（`--debug` 解析期置位） |
 | `src/setup/onboarding.ts:11-14` | `openWikiOnboardingPath` | onboarding 配置独立于 `.env` 队列 |

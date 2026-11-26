@@ -32,7 +32,7 @@ out_of_scope:
 | prepare | `prepareWikiForAuthoring`（`src/agent/wiki-finalizer.ts:226`） | agent 开始写页**之前** | ① `migrate`：把存量页面归一化为 OKF front matter（:232-234）；② `provenance_snapshot`：对每个概念页的 Markdown body 取 SHA-256 指纹，并记录页面上已有的 `generated` 事件（:236-238，实现在 `src/okf/generated-provenance.ts:136-149`） |
 | finalize | `finalizeWikiArtifacts`（`src/agent/wiki-finalizer.ts:248`） | agent 写完所有页**之后** | 按固定顺序执行 5 个操作（见 §2） |
 
-prepare 产出的 `PreparedWikiState`（:125-130）里只保留 body hash 和旧 `generated` 事件——够小，可以序列化进检查点。repository 路径下，`beginRepositoryRun` 调 prepare（`src/generation/repository-run.ts:464-468`），并通过 `serializePreparedWikiState` 存进 `.run.json`（:494）；`finishRepositoryRun` 再用 `deserializePreparedWikiState` 还原（:1540）。进程崩溃重启后，指纹基线不丢，收尾仍然成立——这是 page-job 生命周期「任何失败皆可恢复」的前提之一。
+prepare 产出的 `PreparedWikiState`（:125-130）里只保留 body hash 和旧 `generated` 事件——够小，可以序列化进检查点。repository 路径下，`beginRepositoryRun` 调 prepare（`src/generation/repository-run.ts:546-550`），并通过 `serializePreparedWikiState` 存进 `.run.json`（:494）；`finishRepositoryRun` 再用 `deserializePreparedWikiState` 还原（:1540）。进程崩溃重启后，指纹基线不丢，收尾仍然成立——这是 page-job 生命周期「任何失败皆可恢复」的前提之一。
 
 ### 1.1 操作执行器：遥测边界与延迟任务
 
@@ -50,7 +50,7 @@ prepare 产出的 `PreparedWikiState`（:125-130）里只保留 body hash 和旧
 
 | 维度 | repository（page-job） | local-wiki（agent） |
 |------|----------------------|--------------------|
-| 调用方 | `finishRepositoryRun`（`src/generation/repository-run.ts:1535`） | `createOpenWikiIndexMiddleware` 的 `afterAgent`（`src/agent/okf-middleware.ts:106`） |
+| 调用方 | `finishRepositoryRun`（`src/generation/repository-run.ts:1712`） | `createOpenWikiIndexMiddleware` 的 `afterAgent`（`src/agent/okf-middleware.ts:106`） |
 | prepare 时机 | `beginRepositoryRun`（:464），状态进 `.run.json` | `beforeAgent`（okf-middleware :67），状态在内存 |
 | 虚拟 FS 根 | `/openwiki` | `/` |
 | `claims_sources` | 总执行（claims runtime 提供 `claimSources`） | 不执行（无 claims runtime） |
@@ -64,7 +64,7 @@ prepare 产出的 `PreparedWikiState`（:125-130）里只保留 body hash 和旧
 |---|--------|------|--------|-------------|
 | 1 | `mermaid` | :263 | 全 wiki 校验 mermaid 围栏（fence），不可解析的降级为 ```` ```text ````（详见 §4） | 含坏图的页面 |
 | 2 | `index_sync` | :264-266 | 重建每个目录的确定性 `index.md`，顺手归一化概念页 front matter（详见 §5） | 各级 `index.md`、front matter 漂移的概念页 |
-| 3 | `link_validation` | :267-269 | 校验 wiki 内部链接，给断链打标记（`src/agent/wiki-link-validator.ts:87` `validateWikiInternalLinks`，`stampBrokenLinks` :171） | 含断链的页面 |
+| 3 | `link_validation` | :267-269 | 校验 wiki 内部链接，给断链打标记（`src/agent/wiki-link-validator.ts:105` `validateWikiInternalLinks`，`stampBrokenLinks` :171） | 含断链的页面 |
 | 4 | `claims_sources` | :270-274 | 仅当传入 `claimSources` 时执行：把页级 claims 证据投影成 OKF `sources` 列表（`src/okf/claim-sources.ts:38` `synchronizeClaimSources`；投影语义**详见 07 区**） | 有 claims 证据的页面 front matter |
 | 5 | `generated_provenance` | :275-284 | 对比 prepare 时的 body hash，给本次真正变更/新增的页面盖 `generated` 章（`src/okf/generated-provenance.ts:164-217`） | 变更/新增页面的 front matter |
 
@@ -73,7 +73,7 @@ prepare 产出的 `PreparedWikiState`（:125-130）里只保留 body hash 和旧
 两个顺序细节：
 
 - `claims_sources` 是条件步骤：`claimSources` 参数缺省时跳过（:270）。repository 路径总有 claims runtime 所以总是执行；local-wiki/agent 路径没有 claims runtime，因此不传。
-- repository 路径下 `finishRepositoryRun` 在调用 finalize **之前**已删完废弃页与计划删除页（`src/generation/repository-run.ts:1531-1533`：`applyAbandonedGeneratedPageDeletions`、`applyPlannedDeletions`、`reconcileDeletedClaimPages`），finalize **之后**才恢复 skipped 页快照（:1547-1549）、执行 claims runtime 终局（:1551 `claimsRuntime.finalize`）、断言 claims 落盘（:1552）、整表替换 `.page-manifest.json`（:1554-1559）、写元数据 complete|interrupted、最后删 `.run.json`（:1585）。整个 finish 的事务序属本区 01 号文档，这里只强调：finalize 处在「页面内容已定、运行元数据未定」的位置——它失败时 `.run.json` 还在，run 可恢复。
+- repository 路径下 `finishRepositoryRun` 在调用 finalize **之前**已删完废弃页与计划删除页（`src/generation/repository-run.ts:1690-1692`：`applyAbandonedGeneratedPageDeletions`、`applyPlannedDeletions`、`reconcileDeletedClaimPages`），finalize **之后**才恢复 skipped 页快照（:1547-1549）、执行 claims runtime 终局（:1551 `claimsRuntime.finalize`）、断言 claims 落盘（:1552）、整表替换 `.page-manifest.json`（:1554-1559）、写元数据 complete|interrupted、最后删 `.run.json`（:1585）。整个 finish 的事务序属本区 01 号文档，这里只强调：finalize 处在「页面内容已定、运行元数据未定」的位置——它失败时 `.run.json` 还在，run 可恢复。
 
 ### 2.1 失败语义：谁会中断 run
 
@@ -106,8 +106,8 @@ prepare 产出的 `PreparedWikiState`（:125-130）里只保留 body hash 和旧
 
 盖章的归属信息来自两个参数：
 
-- `producerActor`（默认 `OPENWIKI_PRODUCER_ACTOR`，:255）：本 run 的默认生产者；repository 路径传 `run.state.actor.producerActor`（`src/generation/repository-run.ts:1542`）；
-- `producerActorsByPage`（:202）：页级覆盖。repository 路径从 `.page-manifest.json` 收集——凡是 `completedRunId` 等于本 run 的页，用该页 `completedBy` 覆盖默认值（`src/generation/repository-run.ts:1522-1529`），跨 session 协作的页各归其主。
+- `producerActor`（默认 `OPENWIKI_PRODUCER_ACTOR`，:255）：本 run 的默认生产者；repository 路径传 `run.state.actor.producerActor`（`src/generation/repository-run.ts:1719`）；
+- `producerActorsByPage`（:202）：页级覆盖。repository 路径从 `.page-manifest.json` 收集——凡是 `completedRunId` 等于本 run 的页，用该页 `completedBy` 覆盖默认值（`src/generation/repository-run.ts:1681-1688`），跨 session 协作的页各归其主。
 
 时间戳也只有一个：`at` 是整 run 共享的 ISO 时间。repository 路径传 `run.state.startedAt`（:1541）；agent 路径由 `createOpenWikiIndexMiddleware` 的 `now` 参数统一计算一次并穿线（`src/agent/okf-middleware.ts:33-37` 注释、:55 默认参数）——同一 run 写出的每一页共享同一个 `generated.at`，测试下可复现。
 
@@ -115,7 +115,7 @@ prepare 产出的 `PreparedWikiState`（:125-130）里只保留 body hash 和旧
 
 ## 4. mermaid 校验与降级管线
 
-`src/mermaid/` 共 4 个文件。先明确定位：**OpenWiki 不生成图**——图由模型按提示词写入 ```` ```mermaid ```` 围栏（`src/agent/prompt.ts:144-148`，`src/agent/prompts/personal.ts:338-342`）。mermaid/ 子系统只在 finalize 阶段做两件事：**校验**（validate）和**降级**（downgrade）。四个文件各司一职：
+`src/mermaid/` 共 4 个文件。先明确定位：**OpenWiki 不生成图**——图由模型按提示词写入 ```` ```mermaid ```` 围栏（`src/agent/prompt.ts:142-146`，`src/agent/prompts/personal.ts:338-342`）。mermaid/ 子系统只在 finalize 阶段做两件事：**校验**（validate）和**降级**（downgrade）。四个文件各司一职：
 
 | 文件 | 职责 |
 |------|------|
@@ -172,7 +172,7 @@ mermaid 的 flowchart/state 解析器内部调 DOMPurify，裸 Node 下会报 `D
 
 错误文本在进注释前经 `sanitizeMermaidError`（:215-226）三道处理：
 
-1. **秘密脱敏**（redact）：先过 `sanitizeDiagnosticText`（`src/platform/diagnostics.ts:31`；`.js` 只是 ESM import 后缀，`src/mermaid/validate.ts:1`）——错误可能内嵌路径、凭据等敏感串；
+1. **秘密脱敏**（redact）：先过 `sanitizeDiagnosticText`（`src/platform/diagnostics.ts:32`；`.js` 只是 ESM import 后缀，`src/mermaid/validate.ts:1`）——错误可能内嵌路径、凭据等敏感串；
 2. **拍平成单行**：保留定位行与 `Expecting ... got ...` 诊断（后续 run 修复真正需要的信息），丢弃空行与 caret 下划线噪声行（:218-224）；
 3. **HTML 注释安全**：`--` 会被当成注释终止符，全部折叠为 `-`；限长 400 字符；空结果兜底 `"unknown error"`（:225）。
 
@@ -214,11 +214,11 @@ finalize 后变为：
 
 ### 4.6 可选对等依赖（optional peer dependencies）
 
-`mermaid`（^11.16.0）与 `jsdom`（^29.1.1）都是**可选对等依赖**（optional peer dependencies，`package.json:89-100`，`peerDependenciesMeta` 两者均 `optional: true`）。没装也能跑：`loadMermaid()` 解析为 `undefined`，校验自动退到启发式（§4.2），jsdom 自然也不会被 import；装了（例如 CI 环境）则获得权威校验。依赖安装提示见 `src/ingestion/code-mode.ts:374-375`；`src/agent/index.ts:1379-1393` 另有一处浏览器守卫注释，解释 jsdom 注入的 `document` 只供 AnthropicVertex 的 `dangerouslyAllowBrowser` 路径使用，二者互不干扰。
+`mermaid`（^11.16.0）与 `jsdom`（^29.1.1）都是**可选对等依赖**（optional peer dependencies，`package.json:89-100`，`peerDependenciesMeta` 两者均 `optional: true`）。没装也能跑：`loadMermaid()` 解析为 `undefined`，校验自动退到启发式（§4.2），jsdom 自然也不会被 import；装了（例如 CI 环境）则获得权威校验。依赖安装提示见 `src/ingestion/code-mode.ts:565-566`；`src/agent/index.ts:1580-1594` 另有一处浏览器守卫注释，解释 jsdom 注入的 `document` 只供 AnthropicVertex 的 `dangerouslyAllowBrowser` 路径使用，二者互不干扰。
 
 ### 4.7 修复闭环：降级不是终点
 
-降级注释是给**下一轮 run** 的修复契约：`src/agent/prompt.ts:148` 与 `src/agent/prompts/personal.ts:342` 明确指示模型——发现 `openwiki: mermaid parse failed` 前缀注释时，按注释里的解析错误修语法、恢复 ```` ```mermaid ```` 围栏、删除注释。于是坏图的处理跨 run 闭环：本轮保住「坏图永不进渲染器」（:166-168 的设计意图），下轮由模型带着诊断信息修好。配合 §4.6：装了 mermaid 的环境（CI）每轮都会重新权威校验，未装环境靠启发式兜底 + 模型自愈。
+降级注释是给**下一轮 run** 的修复契约：`src/agent/prompt.ts:146` 与 `src/agent/prompts/personal.ts:342` 明确指示模型——发现 `openwiki: mermaid parse failed` 前缀注释时，按注释里的解析错误修语法、恢复 ```` ```mermaid ```` 围栏、删除注释。于是坏图的处理跨 run 闭环：本轮保住「坏图永不进渲染器」（:166-168 的设计意图），下轮由模型带着诊断信息修好。配合 §4.6：装了 mermaid 的环境（CI）每轮都会重新权威校验，未装环境靠启发式兜底 + 模型自愈。
 
 ## 5. 索引同步：确定性的 `index.md`
 
@@ -239,7 +239,7 @@ finalize 后变为：
 - 链接按 href 排序（`renderLinks` :256）；目录条目也排序；
 - 文件条目格式 `- [label](href) - description`（:258-261），label 做 Markdown 转义（`escapeLabel` :326-331：反斜杠与方括号），description 仅文件节渲染、目录节没有；
 - 只有 wiki 根的 `index.md` 带 `okf_version: "0.2"` front matter（:243），子目录索引是纯链接文档；
-- 标题用本地化标签（`IndexLabels`，默认 `ENGLISH_INDEX_LABELS`），repository 路径按 run 语言解析（`src/generation/repository-run.ts:1538-1539` `resolveIndexLabels`/`resolveConceptTypeLabel`）；
+- 标题用本地化标签（`IndexLabels`，默认 `ENGLISH_INDEX_LABELS`），repository 路径按 run 语言解析（`src/generation/repository-run.ts:1715-1716` `resolveIndexLabels`/`resolveConceptTypeLabel`）；
 - 排除项与 mermaid 遍历一致：`index.md`/`log.md`/`INSTRUCTIONS.md` 与点文件（:16）。
 
 渲染产物示意（英文标签、根目录情形）：
@@ -269,10 +269,10 @@ okf_version: "0.2"
 
 收尾管线有两个调用方，共享 `wiki-finalizer.ts` 的同一实现：
 
-- **repository（page-job）路径**：`src/generation/repository-run.ts:1535`（begin 时 :464 配对调用 prepare）；
-- **local-wiki/agent 路径**：`src/agent/okf-middleware.ts:50` 的 `createOpenWikiIndexMiddleware`（:50-57），经 `src/agent/index.ts:519-525` 挂进 agent 中间件数组（chat 命令除外）。
+- **repository（page-job）路径**：`src/generation/repository-run.ts:1712`（begin 时 :464 配对调用 prepare）；
+- **local-wiki/agent 路径**：`src/agent/okf-middleware.ts:50` 的 `createOpenWikiIndexMiddleware`（:50-57），经 `src/agent/index.ts:559-565` 挂进 agent 中间件数组（chat 命令除外）。
 
-> **历史注记**：原 `index-middleware.ts` 文件已删除，该函数现位于 `src/agent/okf-middleware.ts:50`（报告 R4b 记录的去向；`src/agent/index.ts:38` 的导入也指向本文件）。凡旧文档引用 `index-middleware.ts` 均以本路径为准。
+> **历史注记**：原 `index-middleware.ts` 文件已删除，该函数现位于 `src/agent/okf-middleware.ts:50`（报告 R4b 记录的去向；`src/agent/index.ts:42` 的导入也指向本文件）。凡旧文档引用 `index-middleware.ts` 均以本路径为准。
 
 中间件用三个钩子把管线缝合进 agent 生命周期（`src/agent/okf-middleware.ts:60-121`）：
 
@@ -286,17 +286,17 @@ okf_version: "0.2"
 
 ### 6.2 `createWikiTranslationMiddleware`：收尾的**前置**邻居
 
-`src/agent/translation-middleware.ts:142-167` 的 `createWikiTranslationMiddleware` 只挂 `beforeAgent`（:156-165）：开跑前把整 wiki 翻译到目标语言（`translateWiki` :187 起，单页失败打 pending 标记继续跑，:210-215 的 pending 重试语义）。它与收尾的关系是**位置关系**而非包含关系：在 `src/agent/index.ts` 的中间件数组里它排在 index 中间件之前（:488-517 装配，:519 挂载），所以它的改写发生在 prepare 快照**之前**——被翻译的页面 body 变了，天然落进 `generated` 盖章的判定范围，由本 run 的 producer 署名。repository 路径不用它：语言切换走 `requiredRewritePages` 逐页重写（`src/generation/repository-run.ts:469-470`），收尾语义殊途同归。
+`src/agent/translation-middleware.ts:142-167` 的 `createWikiTranslationMiddleware` 只挂 `beforeAgent`（:156-165）：开跑前把整 wiki 翻译到目标语言（`translateWiki` :187 起，单页失败打 pending 标记继续跑，:210-215 的 pending 重试语义）。它与收尾的关系是**位置关系**而非包含关系：在 `src/agent/index.ts` 的中间件数组里它排在 index 中间件之前（:488-517 装配，:519 挂载），所以它的改写发生在 prepare 快照**之前**——被翻译的页面 body 变了，天然落进 `generated` 盖章的判定范围，由本 run 的 producer 署名。repository 路径不用它：语言切换走 `requiredRewritePages` 逐页重写（`src/generation/repository-run.ts:551-552`），收尾语义殊途同归。
 
 ## 7. 调用方速查
 
 | 调用方 | 位置 | 用法 |
 |--------|------|------|
-| repository run（begin） | `src/generation/repository-run.ts:464` | prepare；结果序列化进 `.run.json`（:494） |
-| repository run（finish） | `src/generation/repository-run.ts:1535` | 五步 finalize；`claimSources` 取自 claims runtime session 的 `getEvidenceResourcesByPage()`（:1544，`src/claims/brains/code/session.ts:258`） |
+| repository run（begin） | `src/generation/repository-run.ts:546` | prepare；结果序列化进 `.run.json`（:494） |
+| repository run（finish） | `src/generation/repository-run.ts:1712` | 五步 finalize；`claimSources` 取自 claims runtime session 的 `getEvidenceResourcesByPage()`（:1544，`src/claims/brains/code/session.ts:258`） |
 | agent 中间件（prepare） | `src/agent/okf-middleware.ts:67` | `beforeAgent` |
 | agent 中间件（finalize） | `src/agent/okf-middleware.ts:106` | `afterAgent` |
-| 中间件挂载 | `src/agent/index.ts:519` | `createOpenWikiAgent` 装配（translation 在前） |
+| 中间件挂载 | `src/agent/index.ts:559` | `createOpenWikiAgent` 装配（translation 在前） |
 
 同一组生命周期函数还被 `src/integrations/core/session-manager.ts` 直接调用（导入见 :10）——coding agent host 集成走的也是这条收尾管线，不另有一份实现。
 
@@ -306,7 +306,7 @@ okf_version: "0.2"
 - **浏览器端 mermaid 渲染**（visualize SPA 里的图渲染）不属于本篇——那是消费已降级/已校验产物的展示层，属 `12-visualizer/02-frontend-live-reload-and-static-export.md`。一句话划界：本篇的 mermaid 管线管「落盘的字节能不能被渲染」，12 区管「渲染出来长什么样」。
 - **page-job 生命周期**（finish 的事务序、崩溃恢复、`.run.json`）：见本区 `01-page-job-state-machine.md`；manifest 与 fast-forward：见 `02-page-manifest-and-fast-forward.md`。
 - **OKF front matter 校验/修复本体**（`validateOkfFrontmatter`/`repairPersistedFile`）：属 07 区，本文只在 `wrapToolCall` 钩子处引用其调用点。
-- mermaid 不做生成（generate），只做校验+降级；图的产生者在提示词层（`src/agent/prompt.ts:144-148`）与 mermaid-diagrams skill；标签安全规则由 skill 承担，管线只做最后防线。
+- mermaid 不做生成（generate），只做校验+降级；图的产生者在提示词层（`src/agent/prompt.ts:142-146`）与 mermaid-diagrams skill；标签安全规则由 skill 承担，管线只做最后防线。
 
 ## Source Anchor
 
@@ -326,20 +326,20 @@ okf_version: "0.2"
 | `src/mermaid/validate.ts:215` | `sanitizeMermaidError` | 脱敏/拍平/`--` 折叠/限长 |
 | `src/mermaid/dom-shim.ts:22` | `ensureDomGlobals` | jsdom window/document 前置，幂等 |
 | `src/mermaid/wiki.ts:46` | `validateWikiMermaid` | backend 虚拟 FS 遍历；根 `/` vs `/openwiki`（:50） |
-| `src/okf/index-sync.ts:56` | `synchronizeWikiIndexes` | 全目录确定性索引同步 |
-| `src/okf/index-sync.ts:77` | `migrateWikiToOkf` | prepare 侧 OKF 迁移 |
-| `src/okf/index-sync.ts:231` | `renderIndex` | 排序/转义；根 `okf_version: "0.2"`（:243） |
+| `src/okf/index-sync.ts:80` | `synchronizeWikiIndexes` | 全目录确定性索引同步 |
+| `src/okf/index-sync.ts:113` | `migrateWikiToOkf` | prepare 侧 OKF 迁移 |
+| `src/okf/index-sync.ts:276` | `renderIndex` | 排序/转义；根 `okf_version: "0.2"`（:243） |
 | `src/okf/generated-provenance.ts:136` | `snapshotGeneratedProvenance` | body SHA-256 + 旧 generated 事件 |
 | `src/okf/generated-provenance.ts:164` | `finalizeGeneratedProvenance` | hash 对比盖章/还原；best-effort 写（:209-215） |
 | `src/okf/claim-sources.ts:38` | `synchronizeClaimSources` | claims → OKF sources 投影（详见 07 区） |
 | `src/agent/okf-middleware.ts:50` | `createOpenWikiIndexMiddleware` | agent 路径收尾宿主（原 index-middleware.ts） |
 | `src/agent/okf-middleware.ts:128` | `addFrontmatterWarning` | 写后即时修复 + ToolMessage 警告 |
 | `src/agent/translation-middleware.ts:142` | `createWikiTranslationMiddleware` | beforeAgent 翻译前置 |
-| `src/agent/wiki-link-validator.ts:87` | `validateWikiInternalLinks` | link_validation 操作实现（`stampBrokenLinks` :171） |
-| `src/generation/repository-run.ts:464` | `prepareWikiForAuthoring` 调用 | begin 阶段 prepare |
-| `src/generation/repository-run.ts:1535` | `finalizeWikiArtifacts` 调用 | finish 阶段收尾（:1551 claims 终局、:1585 删 `.run.json`） |
-| `src/agent/index.ts:519` | 中间件挂载 | translation → index 中间件顺序 |
-| `src/agent/index.ts:1379` | 浏览器守卫注释 | jsdom document 与 AnthropicVertex 边界 |
-| `src/agent/prompt.ts:148` | mermaid 修复指令 | 降级注释的跨 run 修复契约 |
+| `src/agent/wiki-link-validator.ts:105` | `validateWikiInternalLinks` | link_validation 操作实现（`stampBrokenLinks` :171） |
+| `src/generation/repository-run.ts:546` | `prepareWikiForAuthoring` 调用 | begin 阶段 prepare |
+| `src/generation/repository-run.ts:1712` | `finalizeWikiArtifacts` 调用 | finish 阶段收尾（:1551 claims 终局、:1585 删 `.run.json`） |
+| `src/agent/index.ts:559` | 中间件挂载 | translation → index 中间件顺序 |
+| `src/agent/index.ts:1580` | 浏览器守卫注释 | jsdom document 与 AnthropicVertex 边界 |
+| `src/agent/prompt.ts:146` | mermaid 修复指令 | 降级注释的跨 run 修复契约 |
 | `src/telemetry/taxonomy.ts:43` | `okf_error` | detail 闭集含 `mermaid`/`migrate`/`index_sync` |
 | `package.json:89-100` | `peerDependencies` | mermaid + jsdom 可选 |

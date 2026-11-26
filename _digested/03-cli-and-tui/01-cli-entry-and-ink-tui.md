@@ -59,7 +59,7 @@ src/cli/
 ```
 installCrashGuard()                        // cli.tsx:42，最后手段的崩溃记录器
     ↓
-parseCommand(argv)                         // cli.tsx:44-45 → src/cli/commands.ts:168
+parseCommand(argv)                         // cli.tsx:44-45 → src/cli/commands.ts:232
     ↓
 kind === "integrations" | "mcp"？          // cli.tsx:47-53，短路分发
     ↓ 否（runStandardCommand，cli.tsx:60）
@@ -77,7 +77,7 @@ commandEmitsTelemetry(command)？           // cli.tsx:76-78，决定是否展�
 
 1. **崩溃守卫（crash guard）先于一切**（`cli.tsx:39-42`）：`installCrashGuard()`（来自 `src/agent/crash-guard.ts`）在模块加载期就注册，保证任何逃逸到顶层的 Promise 拒绝（例如子代理在微任务队列上报错）会被记录并打标，而不是无声杀掉进程。
 2. **host 集成命令短路**（`cli.tsx:47-53`）：`integrations` 与 `mcp` 两个命令在进入标准管线**之前**就被分给 `runIntegrationsCommand` / `runMcpCommand`（`src/cli/integrations.ts:20`、`:88`）。类型层面用 `StandardCliCommand = Exclude<CliCommand, {kind:"integrations"} | {kind:"mcp"}>`（`cli.tsx:34-37`）收窄后续管线。这两类命令刻意**不加载 OpenWiki 私有环境**——它们复用宿主（如 Codex CLI）自己的认证会话。
-3. **条件环境加载**（`cli.tsx:63-65`）：只有 `commandLoadsEnvironment`（`src/cli/commands.ts:1078-1086`）为真的命令才调用 `loadOpenWikiEnv()`（来自 `src/config/env.ts`）：run（非 `--dry-run`）、auth、cron、ingest、ngrok。help/error/visualize/dry-run 不碰私有凭据。
+3. **条件环境加载**（`cli.tsx:63-65`）：只有 `commandLoadsEnvironment`（`src/cli/commands.ts:1173-1181`）为真的命令才调用 `loadOpenWikiEnv()`（来自 `src/config/env.ts`）：run（非 `--dry-run`）、auth、cron、ingest、ngrok。help/error/visualize/dry-run 不碰私有凭据。
 4. **启动路由（startup routing）**（`cli.tsx:67-70`）：`resolveStartupCommand`（`src/cli/startup.ts:24-93`）做三项检查——交互 chat 无 TTY 直接报错（`:30-42`）、非交互运行缺凭据时给出带提示的错误（`:44-77`）、空用户消息拒绝（`:79-90`）；通过则原样返回命令。凭据四元组等细节见 03 号。
 5. **首跑遥测声明**（`cli.tsx:72-78`）：`commandEmitsTelemetry`（`commands.ts:1062-1068`，仅 init/update 且非 dry-run）为真时查询 `firstRunNoticePending()`（来自 `src/telemetry/`），决定本次会话是否渲染首次运行声明（first-run notice）。
 6. **五路命令分发**（`cli.tsx:80-89`）：auth、ngrok、cron、ingest、visualize 依次交给 `src/cli/runners.ts` 的执行函数（`runAuthCommand:186`、`runNgrokCommand:48`、`runCronCommand:93`、`runIngestCommand:151`、`runVisualizeCommand:66`），全部是纯文本输出、不经 Ink。
@@ -281,9 +281,9 @@ app.tsx:574  withRunTelemetry → ensureCodeModeRepoSetup → runOpenWikiAgent
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/cli/cli.tsx:42` | `installCrashGuard()` 调用 | 崩溃守卫先于一切注册 |
-| `src/cli/cli.tsx:44-53` | `parseCommand`、integrations/mcp 短路 | 解析与 host 集成命令分流 |
-| `src/cli/cli.tsx:60-110` | `runStandardCommand` | 环境加载 → 启动路由 → 五路分发 → TUI 兜底 |
+| `src/cli/cli.tsx:43` | `installCrashGuard()` 调用 | 崩溃守卫先于一切注册 |
+| `src/cli/cli.tsx:45-54` | `parseCommand`、integrations/mcp 短路 | 解析与 host 集成命令分流 |
+| `src/cli/cli.tsx:61-115` | `runStandardCommand` | 环境加载 → 启动路由 → 五路分发 → TUI 兜底 |
 | `src/cli/app/app.tsx:86` | `RUN_LOG_RENDER_DELAY_MS` | 运行日志 250ms 渲染节流 |
 | `src/cli/app/app.tsx:110-177` | `App` 状态铺开 | 会话偏好、运行标识、日志缓冲 |
 | `src/cli/app/app.tsx:188-197` | Ctrl+C `useInput` | 中断转交 `requestProcessInterrupt` |
@@ -306,11 +306,11 @@ app.tsx:574  withRunTelemetry → ensureCodeModeRepoSetup → runOpenWikiAgent
 | `src/cli/input/types.ts:9-122` | `ChatInputState`/`SecretInputMode`/`ChatInputMenuState` 等 | 输入状态类型族 |
 | `src/cli/input/cursor.ts:7-156` | 光标编辑函数集 | 纯函数光标/删除/原始输入 |
 | `src/cli/input/secret.ts:5` | `formatSecretInputSummary` | 密钥掩码摘要 |
-| `src/cli/run-log/types.ts:225-230` | `RunLogItem` | 五变体有界日志元素 |
-| `src/cli/run-log/reducer.ts:16-70` | `appendRunLogEvent` | 事件分派入口 |
-| `src/cli/run-log/reducer.ts:95-155` | `appendToolStartLogItem` | 叙述丢弃 + 计数累加 + 路径激活 |
-| `src/cli/run-log/reducer.ts:162-238` | `completeToolLogItem` | 完成传播与 written/explored 收集 |
-| `src/cli/run-log/reducer.ts:343-355` | `boundActivityLog` | 活动条目有界化（最近 8 条） |
+| `src/cli/run-log/types.ts:239-244` | `RunLogItem` | 五变体有界日志元素 |
+| `src/cli/run-log/reducer.ts:16-76` | `appendRunLogEvent` | 事件分派入口 |
+| `src/cli/run-log/reducer.ts:101-161` | `appendToolStartLogItem` | 叙述丢弃 + 计数累加 + 路径激活 |
+| `src/cli/run-log/reducer.ts:168-244` | `completeToolLogItem` | 完成传播与 written/explored 收集 |
+| `src/cli/run-log/reducer.ts:349-361` | `boundActivityLog` | 活动条目有界化（最近 8 条） |
 | `src/cli/run-log/activity.ts:111-152` | `getToolPathActivities` | 工具名 → read/search/write 路径提取 |
 | `src/cli/run-log/summary.ts:45-126` | `findRunSummary`/`formatRunCounts` 等 | 摘要查找与格式化 |
 | `src/cli/run-log/tool-input.ts:6,21` | `parseToolInput`/`countToolTargets` | 输入守卫解析与任务计数 |

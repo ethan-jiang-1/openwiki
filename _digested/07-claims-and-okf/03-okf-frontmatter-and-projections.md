@@ -35,7 +35,7 @@ src/claims/（事实状态所有者）            src/okf/（投影目标 + fron
 ```
 
 - claims 侧的 Claim/Evidence/操作集与对账协议见 01/02 号文档；本文只讲投影端点。
-- OKF 对通用 agent 工具隐藏 `.claims`（`src/agent/docs-only-backend.ts:637` 的 `isClaimsStatePath`，判定在 `src/agent/docs-only-backend.ts:643-645`），模型只能通过 `inspect_claims`/`submit_page` 间接参与。
+- OKF 对通用 agent 工具隐藏 `.claims`（`src/agent/docs-only-backend.ts:704` 的 `isClaimsStatePath`，判定在 `src/agent/docs-only-backend.ts:710-712`），模型只能通过 `inspect_claims`/`submit_page` 间接参与。
 - 消费方向上 `okf/` 只依赖 `claims/evidence/repository/resource.ts` 的纯解析函数（`src/okf/claim-sources.ts:5-8`）和 claims brain 的一个类型（`src/okf/claims-verification.ts:2`），不依赖生成生命周期；生命周期拥有方是 `src/generation/repository-run.ts`（收尾管线全貌详见 05-generation-lifecycle/03）。
 
 ## 2. OKF v0.2 front matter 规范
@@ -45,13 +45,13 @@ src/claims/（事实状态所有者）            src/okf/（投影目标 + fron
 | 字段 | 必填 | 校验规则 | 源码 |
 |------|------|---------|------|
 | `type` | 是（唯一必填） | 存在且为非空字符串；缺失即 `missing_type` | `src/okf/frontmatter.ts:152-154` |
-| `title` | 否 | 存在则须非空字符串；可由首个 H1 或文件名派生 | `src/okf/frontmatter.ts:698-707` |
+| `title` | 否 | 存在则须非空字符串；可由首个 H1 或文件名派生 | `src/okf/frontmatter.ts:712-721` |
 | `description` | 否 | 存在则须非空字符串；代码从不代笔派生 | `src/okf/frontmatter.ts:9-21` |
 | `tags` | 否 | YAML 列表，每项为非空字符串 | `src/okf/frontmatter.ts:168-179` |
 
 字段常量在 `OKF_STRING_FIELDS`（`src/okf/frontmatter.ts:9-15`）与 `OKF_OPTIONAL_STRING_FIELDS`（`src/okf/frontmatter.ts:17-21`）。校验只检查"存在则合法"的形状，**容忍生产者扩展字段**：未知键原样保留，使上下游自定义元数据能往返存活。
 
-`title` 的派生规则（`deriveMinimalFrontmatter`，`src/okf/frontmatter.ts:698-707`）：优先取正文首个 ATX H1，否则从文件名构造（`-`/`_` 转空格、首字母大写）。`description` 例外地**不**代码派生——注释原话是"code-guessed one is usually poor"（`src/okf/frontmatter.ts:54-58`），留给 agent 补。
+`title` 的派生规则（`deriveMinimalFrontmatter`，`src/okf/frontmatter.ts:712-721`）：优先取正文首个 ATX H1，否则从文件名构造（`-`/`_` 转空格、首字母大写）。`description` 例外地**不**代码派生——注释原话是"code-guessed one is usually poor"（`src/okf/frontmatter.ts:54-58`），留给 agent 补。
 
 ### 2.2 信任族（trust family）
 
@@ -127,8 +127,8 @@ issue 是结构化的 `{code, line?, message}`（`src/okf/frontmatter.ts:74-89`�
 
 | API | 层次 | 行为 |
 |-----|------|------|
-| `normalizeConceptContent`（`src/okf/frontmatter.ts:736-742`） | 纯内存 | 直接委托 `repairOkfFrontmatter`，供索引迁移等批量调用 |
-| `repairOkfFrontmatter`（`src/okf/frontmatter.ts:759-844`） | 纯内存，核心 | 逐族确定性修复，保证输出通过校验，永不抛异常 |
+| `normalizeConceptContent`（`src/okf/frontmatter.ts:750-756`） | 纯内存 | 直接委托 `repairOkfFrontmatter`，供索引迁移等批量调用 |
+| `repairOkfFrontmatter`（`src/okf/frontmatter.ts:773-858`） | 纯内存，核心 | 逐族确定性修复，保证输出通过校验，永不抛异常 |
 | `repairPersistedFile`（`src/okf/frontmatter.ts:354`） | 含持久化 | 修复 + 写回 + 复验，供写后中间件使用 |
 
 ### 4.2 修复策略（逐族）
@@ -140,7 +140,7 @@ issue 是结构化的 `{code, line?, message}`（`src/okf/frontmatter.ts:74-89`�
 - 可选标量（`description`/`resource`/`timestamp`）无效：直接删除（:788-792）。
 - `tags`：只保留合规项，全不合规则删字段（:794-802）。
 - 信任族是**断言**：`generated`/`verified`/`sources`/`status`/`stale_after` 无法证明合规时删除而非改写成假断言（:803-838）。`verified` 与 `sources` 逐条过滤，保合规条目（:806-824）。
-- 字段级修复后仍不通过，或 YAML 块整体不可解析：兜底 `rebuildMinimalConcept`（`src/okf/frontmatter.ts:847-854`）——换成最小真实块（`type`+派生 `title`+`openwiki_generated: true`，`renderFrontmatter`，`src/okf/frontmatter.ts:712-722`）+ 原正文。
+- 字段级修复后仍不通过，或 YAML 块整体不可解析：兜底 `rebuildMinimalConcept`（`src/okf/frontmatter.ts:861-868`）——换成最小真实块（`type`+派生 `title`+`openwiki_generated: true`，`renderFrontmatter`，`src/okf/frontmatter.ts:726-736`）+ 原正文。
 
 一个修复示意（YAML 可解析、部分字段非法的页）：
 
@@ -188,7 +188,7 @@ snapshotGeneratedProvenance   →   页面字节被改写（或没改）  →   
 2. **正文未变**：回填 run 前的旧章（`restoreGeneratedEvent`，:297-307）——agent 重写页面却误删/改动了 `generated` 时恢复原值且**不前推时间戳**；此前无章的页保持无章（删除 `generated` 字段）。
 3. 整体再过一次 `repairOkfFrontmatter`（:207），有差异才写回。
 
-**生产者归属**：默认全 wiki 用 `producerActor`；finish 阶段可按页覆盖——`producerActorsByPage` 来自 page manifest 的 `completedBy`/`completedRunId`（`src/generation/repository-run.ts:1521-1527`），用于 fast-forward 或中断恢复后"这一页实际是另一个 session 完成"的场景（参数定义 `src/agent/wiki-finalizer.ts:197-202`）。
+**生产者归属**：默认全 wiki 用 `producerActor`；finish 阶段可按页覆盖——`producerActorsByPage` 来自 page manifest 的 `completedBy`/`completedRunId`（`src/generation/repository-run.ts:1680-1686`），用于 fast-forward 或中断恢复后"这一页实际是另一个 session 完成"的场景（参数定义 `src/agent/wiki-finalizer.ts:197-202`）。
 
 **失败语义刻意宽松**：单页读失败跳过（:186-194）、写失败继续（:209-215）——溯源是"有益但非必需"的信任元数据，不能因它失败整轮 run；落盘字节保持未盖章/旧章状态，后续 finalizer 仍能对它们做 claims 同步。反之 `producerActor` 为空是致命错误（:172-183）。
 
@@ -208,10 +208,10 @@ snapshotGeneratedProvenance   →   页面字节被改写（或没改）  →   
 
 ### 6.2 durable 验证事件 → `verified`（claims-verification.ts）
 
-`synchronizeClaimsVerification`（`src/okf/claims-verification.ts:35-59`）把 claims 的 durable 验证资格事件投影为 `verified`：
+`synchronizeClaimsVerification`（`src/okf/claims-verification.ts:35-61`）把 claims 的 durable 验证资格事件投影为 `verified`：
 
 - 输入 `verificationByPage`：页 → `ClaimsVerificationEvent | null`（`{by, at}`，`src/claims/brains/code/types.ts:11-21`）。事件 actor 是版本化生产者 `openwiki/<version>`（`src/version.ts:81` 的 `OPENWIKI_PRODUCER_ACTOR`）。
-- **actor 家族所有权**：现有 `verified` 事件里，`by` 匹配 `/^openwiki\//` 的属于本系统（`isOpenWikiActor`，`src/okf/claims-verification.ts:110-112`），按当前 durable 状态整族替换；人类、其他进程、其他生产者的事件无条件保留。无活跃事件的页只失去 `openwiki/` 家族的事件。
+- **actor 家族所有权**：现有 `verified` 事件里，`by` 匹配 `/^openwiki\//` 的属于本系统（`isOpenWikiActor`，`src/okf/claims-verification.ts:112-114`），按当前 durable 状态整族替换；人类、其他进程、其他生产者的事件无条件保留。无活跃事件的页只失去 `openwiki/` 家族的事件。
 - 裸映射验证者在此归一为规范列表形态（`isCanonicalList`，:102-105——已合规且无需变更时避免无谓重写）。
 - **带回滚**：函数返回 `ClaimsVerificationChanges`——每个被改页面的**修改前 Markdown 原文**（:53-55）；`rollbackClaimsVerification`（:64-75）可用它把指定页面恢复原字节。这是"先盖章、后验证 sidecar、验证失败即回滚"事务的一半。
 
@@ -220,7 +220,7 @@ snapshotGeneratedProvenance   →   页面字节被改写（或没改）  →   
 `src/claims/brains/code/runtime.ts`（185 行）是 claims 会话与投影的粘合层。`ClaimsRuntime.finalize`（接口 `src/claims/brains/code/runtime.ts:40`；实现闭包 :123-149）做两步：
 
 1. `session.finalize(store, {by: OPENWIKI_PRODUCER_ACTOR, at}, excludedPages)`（:127-134）：把脏页 claims 对账落盘为 durable sidecar，并产出每页验证资格 `verificationByPage`（`ClaimSession.finalize` 在 `src/claims/brains/code/session.ts:301`）。资格判定（`src/claims/brains/code/session.ts:407-412`）= 已持久化 && 非脏 && ≥1 claim && 无 issue && 有 verification 事件；合格页映射到事件、否则映射 `null`（:413-415）。
-2. `finalizeVerificationProjection`（`src/claims/brains/code/runtime.ts:161-185`）：先 `synchronizeClaimsVerification` 盖章，然后**刷新每个代表页的 sidecar pageVersion**（`session.refreshPageVersions`，`src/claims/brains/code/session.ts:432`；调用 :173-175）——因为确定性 finalizer 可能改了代码持有的 front matter 而没改验证事件本身，必须让 sidecar 始终描述最终 Markdown 字节。任何刷新失败的页若本该有活跃事件，即视为"不安全盖章"，用 6.2 的原文回滚（:176-183）。所有 warning 汇入调用方后以 `ClaimsPersistenceError` 使 run 失败（:144-148）。
+2. `finalizeVerificationProjection`（`src/claims/brains/code/runtime.ts:162-188`）：先 `synchronizeClaimsVerification` 盖章，然后**刷新每个代表页的 sidecar pageVersion**（`session.refreshPageVersions`，`src/claims/brains/code/session.ts:432`；调用 :173-175）——因为确定性 finalizer 可能改了代码持有的 front matter 而没改验证事件本身，必须让 sidecar 始终描述最终 Markdown 字节。任何刷新失败的页若本该有活跃事件，即视为"不安全盖章"，用 6.2 的原文回滚（:176-183）。所有 warning 汇入调用方后以 `ClaimsPersistenceError` 使 run 失败（:144-148）。
 
 即：**verified 章永远不先于 sidecar 证明存在**——盖章、验证哈希、失败回滚构成一个小事务，保证"页面上的 verified 断言"与"`.claims` sidecar 记录"不出现单向漂移。
 
@@ -228,17 +228,17 @@ snapshotGeneratedProvenance   →   页面字节被改写（或没改）  →   
 
 ### 7.1 前置迁移（pre-migration）：migrateWikiToOkf
 
-`migrateWikiToOkf`（`src/okf/index-sync.ts:77-85`）在 agent 开写**之前**跑：对 `listWikiConceptPaths`（:94-114）逐页调 `normalizeConceptFile`（:123-137，`normalizeConceptContent` + 有变化才 `backend.edit`）。概念页清单的口径（排除表 :14-16）：排除 `index.md`/`log.md`/`INSTRUCTIONS.md` 与点开头的隐藏文件、只收 `.md`（扩展名小写比较）、路径按 `localeCompare` 排序保证稳定顺序。
+`migrateWikiToOkf`（`src/okf/index-sync.ts:113-121`）在 agent 开写**之前**跑：对 `listWikiConceptPaths`（:94-114）逐页调 `normalizeConceptFile`（:123-137，`normalizeConceptContent` + 有变化才 `backend.edit`）。概念页清单的口径（排除表 :14-16）：排除 `index.md`/`log.md`/`INSTRUCTIONS.md` 与点开头的隐藏文件、只收 `.md`（扩展名小写比较）、路径按 `localeCompare` 排序保证稳定顺序。
 
 效果：上一轮遗留页或外部手编页在 run 开始时已被迁成最小 OKF 块（带 `openwiki_generated` 标记），agent 读到干净元数据，并在同一 run 里充实被标记的页——这是"前置迁移"而非"事后修补"的设计意图（:69-76 注释）。
 
 ### 7.2 确定性 index.md 渲染
 
-`synchronizeWikiIndexes`（`src/okf/index-sync.ts:56-66`）对 wiki 每个可见目录（根：local-wiki 为 `/`，repository 为 `/openwiki`，:62；递归收集 `collectDirectories`，:142-166）重渲染 `index.md`：
+`synchronizeWikiIndexes`（`src/okf/index-sync.ts:80-102`）对 wiki 每个可见目录（根：local-wiki 为 `/`，repository 为 `/openwiki`，:62；递归收集 `collectDirectories`，:142-166）重渲染 `index.md`：
 
 - 目录内每个 `.md` 先就地 normalize（:197），再读 `title`/`description` 做链接标签（`readIndexMetadata`，:269-281；不可用即回退文件名去扩展名）。
 - 渲染完全确定性（`renderIndex`/`renderLinks`，:231-264）：两节（文件/子目录）按 href 排序，文件条目附 description，子目录条目只给链接；同一目录树输入永远得到同一字节，变更检测退化为字符串比较，无 diff 则不写（:218-225），已存在走 `edit`、不存在走 `write`（:220-222）。
-- **根部版本戳**：仅根目录的 index 头部注入 `okf_version: "0.2"` front matter（`src/okf/index-sync.ts:243`）——wiki 级版本声明只出现一次。
+- **根部版本戳**：仅根目录的 index 头部注入 `okf_version: "0.2"` front matter（`src/okf/index-sync.ts:288`）——wiki 级版本声明只出现一次。
 - 空目录渲染 `# <files 标题>` 单行占位（:244）。
 
 根 index 渲染结果示意（语言为英文时）：
@@ -265,7 +265,7 @@ okf_version: "0.2"
 - `CONCEPT_TYPE_LABELS`：修复页的派生 `type` 单词（:114-146，`zh: 参考` :144、`zh-TW: 參考` :145）；`ENGLISH_CONCEPT_TYPE` 常量为 `"Reference"`（:100）。
 - 解析规则两者一致（`resolveIndexLabels` :87-94、`resolveConceptTypeLabel` :155-162）：完整标签 → 主子标签（`Intl.Locale`，:168-174）→ 英文兜底。`pt-BR` 落到 `pt` 默认，`pt-PT` 用自己的条目；未列或畸形语言不报错，退化英文。
 
-调用侧：native repository 收尾把 `run.state.language` 解析成 labels/conceptType 传入（`src/generation/repository-run.ts:1538-1539`）；DeepAgents 路径由 agent 工厂挂中间件时同样传入（`src/agent/index.ts:519-525`）。
+调用侧：native repository 收尾把 `run.state.language` 解析成 labels/conceptType 传入（`src/generation/repository-run.ts:1715-1716`）；DeepAgents 路径由 agent 工厂挂中间件时同样传入（`src/agent/index.ts:559-565`）。
 
 ## 8. 收尾顺序约束
 
@@ -306,7 +306,7 @@ finish:   finishRepositoryRun(:1485)
 
 ①里的 `finalizeWikiArtifacts` 携带来自 manifest `completedBy` 的页级生产者 `producerActorsByPage`（:1522-1527）与 `claimSources: session.getEvidenceResourcesByPage()`（:1544）。注意 ③ 在 ① 之后：OKF 静态收尾（含 sources 投影）先落定，verified 章作为最后写入的信任断言，紧接 durable 证明。
 
-**DeepAgents 中间件路径**（`src/agent/okf-middleware.ts`）：`createOpenWikiIndexMiddleware`（:50-122）的 `beforeAgent` 跑准备（:62-77）、`afterAgent` 跑收尾（:102-120），两段都以 `inStage("build"/"finalize", {errorClass: "okf_error", errorDetail: operation})` 包装（:71-76, :114-118），OKF 自身的缺陷归类为 `okf_error` 而非落到 run 阶段的原始分类器。挂载点在 `src/agent/index.ts:519-525`（导入 :38）；此路径不传 `claimSources`（claims 投影仅 native 路径承担），收尾即 §8.1 的 mermaid→index_sync→link_validation→generated_provenance 四步。
+**DeepAgents 中间件路径**（`src/agent/okf-middleware.ts`）：`createOpenWikiIndexMiddleware`（:50-122）的 `beforeAgent` 跑准备（:62-77）、`afterAgent` 跑收尾（:102-120），两段都以 `inStage("build"/"finalize", {errorClass: "okf_error", errorDetail: operation})` 包装（:71-76, :114-118），OKF 自身的缺陷归类为 `okf_error` 而非落到 run 阶段的原始分类器。挂载点在 `src/agent/index.ts:559-565`（导入 :38）；此路径不传 `claimSources`（claims 投影仅 native 路径承担），收尾即 §8.1 的 mermaid→index_sync→link_validation→generated_provenance 四步。
 
 ### 8.3 写后即时修复与告警
 
@@ -319,17 +319,17 @@ finish:   finishRepositoryRun(:1485)
 - `src/agent/okf-middleware.ts:6-9`：写后修复用 `repairPersistedFile` + `FrontmatterIssue`；
 - `src/agent/translation-middleware.ts:10-14`：翻译标记读写用 `OPENWIKI_TRANSLATION_PENDING_FIELD`/`readFrontmatterField`。
 
-同期的 `index-middleware.ts` 也已删除、并入 `okf-middleware.ts`（`createOpenWikiIndexMiddleware` 这个名字即由此而来，功能早已超出"索引"）。归档报告 R4a 中"repository-runner.ts:340/476 挂载中间件"与"index.ts:486 挂载"对应的是更早形态；当前源码是 `src/agent/index.ts:519` 单点挂载，native 路径的 OKF 生命周期由 `repository-run.ts:464/:1535` 直接调用，不经中间件。
+同期的 `index-middleware.ts` 也已删除、并入 `okf-middleware.ts`（`createOpenWikiIndexMiddleware` 这个名字即由此而来，功能早已超出"索引"）。归档报告 R4a 中"repository-runner.ts:340/476 挂载中间件"与"index.ts:486 挂载"对应的是更早形态；当前源码是 `src/agent/index.ts:559` 单点挂载，native 路径的 OKF 生命周期由 `repository-run.ts:464/:1535` 直接调用，不经中间件。
 
 ## 10. 排错抓手
 
 | 现象 | 机制解释 | 锚点 |
 |------|---------|------|
-| 页面被盖上 `type: "参考"`（或 `Reference`）+ `openwiki_generated: true` | 前置迁移修复了缺失/非法 front matter，标记待 agent 充实 | `src/okf/index-sync.ts:77`、`src/okf/frontmatter.ts:777-781` |
-| `index.md` 与页面内容不同步 | index 只在渲染结果有差异时写入；先查页面 `title`/`description` 是否可解析 | `src/okf/index-sync.ts:218-225,269-281` |
-| 页面 `verified` 事件消失 | 无活跃 durable 事件或页不在 `verificationByPage`；只有 `openwiki/` actor 家族会被替换，人类事件保留 | `src/okf/claims-verification.ts:45-47,110-112` |
+| 页面被盖上 `type: "参考"`（或 `Reference`）+ `openwiki_generated: true` | 前置迁移修复了缺失/非法 front matter，标记待 agent 充实 | `src/okf/index-sync.ts:113`、`src/okf/frontmatter.ts:791-795` |
+| `index.md` 与页面内容不同步 | index 只在渲染结果有差异时写入；先查页面 `title`/`description` 是否可解析 | `src/okf/index-sync.ts:263-270,269-281` |
+| 页面 `verified` 事件消失 | 无活跃 durable 事件或页不在 `verificationByPage`；只有 `openwiki/` actor 家族会被替换，人类事件保留 | `src/okf/claims-verification.ts:47-49,110-112` |
 | `generated.at` 没有前推到本轮 | 正文哈希未变，回填 run 前旧章（不前推时间戳） | `src/okf/generated-provenance.ts:206,297-307` |
-| run 失败："Claims finalization was not fully durable" | verified 投影或 sidecar pageVersion 刷新产生 warning，按设计整 run 拒绝 | `src/claims/brains/code/runtime.ts:144-148` |
+| run 失败："Claims finalization was not fully durable" | verified 投影或 sidecar pageVersion 刷新产生 warning，按设计整 run 拒绝 | `src/claims/brains/code/runtime.ts:145-149` |
 | ToolMessage 出现 "could not persist deterministic YAML front matter repair" | 写后修复仍不合法，按 issue code 修页；修复成功则无告警 | `src/agent/okf-middleware.ts:150-157,195-203` |
 | 遥测出现 `okf_error`，detail 是操作名 | 具名操作（mermaid/index_sync/link_validation/claims_sources/generated_provenance）在遥测边界失败 | `src/agent/wiki-finalizer.ts:33-38`、`src/agent/okf-middleware.ts:71-76` |
 
@@ -355,9 +355,9 @@ finish:   finishRepositoryRun(:1485)
 | `src/okf/frontmatter.ts:506` | `setFrontmatterField` | 标量字段字节级写入原语 |
 | `src/okf/frontmatter.ts:554` | `setOkfSources` | `sources` 列表写入原语 |
 | `src/okf/frontmatter.ts:580` | `setOkfVerified` | `verified` 列表写入原语 |
-| `src/okf/frontmatter.ts:698` | `deriveMinimalFrontmatter` | title/type 派生 |
-| `src/okf/frontmatter.ts:759` | `repairOkfFrontmatter` | 逐族确定性修复核心 |
-| `src/okf/frontmatter.ts:847` | `rebuildMinimalConcept` | 最小合法块兜底 |
+| `src/okf/frontmatter.ts:712` | `deriveMinimalFrontmatter` | title/type 派生 |
+| `src/okf/frontmatter.ts:773` | `repairOkfFrontmatter` | 逐族确定性修复核心 |
+| `src/okf/frontmatter.ts:861` | `rebuildMinimalConcept` | 最小合法块兜底 |
 | `src/okf/generated-provenance.ts:91` | `serializeGeneratedProvenance` | 快照持久化（进 `.run.json`） |
 | `src/okf/generated-provenance.ts:136` | `snapshotGeneratedProvenance` | run 前 body hash 快照 |
 | `src/okf/generated-provenance.ts:164` | `finalizeGeneratedProvenance` | 变更盖章/未变更回填 |
@@ -365,15 +365,15 @@ finish:   finishRepositoryRun(:1485)
 | `src/okf/claim-sources.ts:38` | `synchronizeClaimSources` | claims 证据 → `sources` 投影 |
 | `src/okf/claim-sources.ts:135` | `openWikiSourceId` | `openwiki-source-<sha24>` 稳定 id |
 | `src/okf/claims-verification.ts:35` | `synchronizeClaimsVerification` | durable 验证事件 → `verified` 投影 |
-| `src/okf/claims-verification.ts:64` | `rollbackClaimsVerification` | 投影回滚 |
-| `src/okf/index-sync.ts:56` | `synchronizeWikiIndexes` | 逐目录确定性 index 渲染 |
-| `src/okf/index-sync.ts:77` | `migrateWikiToOkf` | agent 前置迁移 |
-| `src/okf/index-sync.ts:94` | `listWikiConceptPaths` | 概念页清单口径 |
-| `src/okf/index-sync.ts:243` | `renderIndex` | 根部 `okf_version: "0.2"` 戳 |
+| `src/okf/claims-verification.ts:66` | `rollbackClaimsVerification` | 投影回滚 |
+| `src/okf/index-sync.ts:80` | `synchronizeWikiIndexes` | 逐目录确定性 index 渲染 |
+| `src/okf/index-sync.ts:113` | `migrateWikiToOkf` | agent 前置迁移 |
+| `src/okf/index-sync.ts:130` | `listWikiConceptPaths` | 概念页清单口径 |
+| `src/okf/index-sync.ts:288` | `renderIndex` | 根部 `okf_version: "0.2"` 戳 |
 | `src/okf/index-labels.ts:87` | `resolveIndexLabels` | 多语言 index 标签解析 |
 | `src/okf/index-labels.ts:155` | `resolveConceptTypeLabel` | 多语言派生 type 解析 |
 | `src/claims/brains/code/runtime.ts:64` | `prepareClaimsRuntime` | repository-only claims 运行时 |
-| `src/claims/brains/code/runtime.ts:161` | `finalizeVerificationProjection` | verified 投影+pageVersion 刷新+回滚 |
+| `src/claims/brains/code/runtime.ts:162` | `finalizeVerificationProjection` | verified 投影+pageVersion 刷新+回滚 |
 | `src/claims/brains/code/session.ts:301` | `ClaimSession.finalize` | 脏页落盘与验证资格产出 |
 | `src/claims/brains/code/session.ts:432` | `refreshPageVersions` | 投影后 sidecar 哈希刷新 |
 | `src/claims/brains/code/types.ts:11` | `ClaimsVerificationEvent` | `{by, at}` durable 验证事件 |
@@ -382,12 +382,12 @@ finish:   finishRepositoryRun(:1485)
 | `src/agent/wiki-finalizer.ts:248` | `finalizeWikiArtifacts` | 固定顺序收尾编排 |
 | `src/agent/okf-middleware.ts:50` | `createOpenWikiIndexMiddleware` | beforeAgent/afterAgent 生命周期 |
 | `src/agent/okf-middleware.ts:128` | `addFrontmatterWarning` | 写后即时修复与告警 |
-| `src/generation/repository-run.ts:364` | `prepareClaimsRuntime` 调用 | begin 装配 claims 运行时 |
-| `src/generation/repository-run.ts:464` | `prepareWikiForAuthoring` 调用 | native 路径准备 |
+| `src/generation/repository-run.ts:446` | `prepareClaimsRuntime` 调用 | begin 装配 claims 运行时 |
+| `src/generation/repository-run.ts:546` | `prepareWikiForAuthoring` 调用 | native 路径准备 |
 | `src/generation/repository-run.ts:1251-1256` | 页事务 | 对账→finalize→页级证明 |
-| `src/generation/repository-run.ts:1485` | `finishRepositoryRun` | finish 全序起点 |
-| `src/generation/repository-run.ts:1535` | `finalizeWikiArtifacts` 调用 | finish 静态收尾 |
-| `src/generation/repository-run.ts:1551` | `claimsRuntime.finalize` 调用 | finish 的 claims durable 证明 |
-| `src/agent/index.ts:519` | 中间件挂载 | DeepAgents 路径唯一挂载点 |
+| `src/generation/repository-run.ts:1640` | `finishRepositoryRun` | finish 全序起点 |
+| `src/generation/repository-run.ts:1712` | `finalizeWikiArtifacts` 调用 | finish 静态收尾 |
+| `src/generation/repository-run.ts:1733` | `claimsRuntime.finalize` 调用 | finish 的 claims durable 证明 |
+| `src/agent/index.ts:559` | 中间件挂载 | DeepAgents 路径唯一挂载点 |
 | `src/version.ts:81` | `OPENWIKI_PRODUCER_ACTOR` | `openwiki/<version>` actor |
-| `src/agent/docs-only-backend.ts:637` | `isClaimsStatePath` | `.claims` 对模型隐藏 |
+| `src/agent/docs-only-backend.ts:704` | `isClaimsStatePath` | `.claims` 对模型隐藏 |

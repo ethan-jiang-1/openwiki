@@ -147,16 +147,16 @@ provider 原生错误码 → 类别的内部映射，仅用于消歧「长得一
 
 | 打点 | 位置 | 标签 |
 |------|------|------|
-| 配置解析失败 | `src/agent/index.ts:369` | `tagErrorStage(error, "config")` |
-| run context 构建 | `src/agent/index.ts:555` | `build_error/run_context` |
-| snapshot 生成 | `src/agent/index.ts:564` | `build_error/snapshot` |
-| 模型创建（createModel） | `src/agent/index.ts:567,577`（runners 内 :197 同形） | `build_error/model` |
-| checkpointer 创建 | `src/agent/index.ts:584,587` | `checkpointer_error/create` |
-| agent 组装（createDeepAgent） | `src/agent/index.ts:595` | 纯 build 阶段括号 |
-| 首次流打开（agent.stream） | `src/agent/index.ts:638,648` | `build_error/stream_open`（见 §5 例外） |
-| 流失败后 | `src/agent/index.ts:685` | `tagErrorStage(error, "run")` |
-| checkpoint chmod（流失败路径） | `src/agent/index.ts:725,728` | `checkpointer_error/chmod` |
-| 元数据收尾 | `src/agent/index.ts:738` | `inStage("finalize", …)` 纯阶段括号 |
+| 配置解析失败 | `src/agent/index.ts:391` | `tagErrorStage(error, "config")` |
+| run context 构建 | `src/agent/index.ts:596` | `build_error/run_context` |
+| snapshot 生成 | `src/agent/index.ts:605` | `build_error/snapshot` |
+| 模型创建（createModel） | `src/agent/index.ts:608,577`（runners 内 :197 同形） | `build_error/model` |
+| checkpointer 创建 | `src/agent/index.ts:625,587` | `checkpointer_error/create` |
+| agent 组装（createDeepAgent） | `src/agent/index.ts:636` | 纯 build 阶段括号 |
+| 首次流打开（agent.stream） | `src/agent/index.ts:679,648` | `build_error/stream_open`（见 §5 例外） |
+| 流失败后 | `src/agent/index.ts:726` | `tagErrorStage(error, "run")` |
+| checkpoint chmod（流失败路径） | `src/agent/index.ts:766,728` | `checkpointer_error/chmod` |
+| 元数据收尾 | `src/agent/index.ts:779` | `inStage("finalize", …)` 纯阶段括号 |
 | OKF 准备（beforeAgent） | `src/agent/okf-middleware.ts:72-75` | `okf_error/<operation>`（build 阶段） |
 | OKF 收尾（afterAgent） | `src/agent/okf-middleware.ts:115-118` | `okf_error/<operation>`（finalize 阶段） |
 
@@ -224,8 +224,8 @@ owner 在记录时刻就推导并显式随事件发出（而非留给 PostHog �
 
 - 包住调用方执行的 **setup → connectors → agent** 全序列，序列中任何一处抛错（repo setup、connector 拉取、agent 序曲、agent 本体）都被恰好记录一次——补上了此前 pre-agent 抛错够不着遥测的空洞（:40-47）。
 - 干净返回：记录 agent 发布在 `ctx` 上的 outcome（默认 `"success"`）；抛错：以 `describeErrorForTelemetry` 的匿名诊断记录 `"failure"`，**然后原样重抛**（:83）——CLI 仍然拥有失败的 UX；遥测自身永不抛（`recordRunSafe` 吞自己的错，:50）。
-- `RunTelemetryContext`（:17-37）：调用方创建一个可变上下文同时交给包裹器和 agent；provider 在解析成功的瞬间发布（`src/agent/index.ts:185,249`），失败时仍归因到正确 provider（从没解析到就是 `"unknown"`）；agent 用它发布 `noop` 短路（`src/agent/index.ts:216`），成功/失败由包裹器兜底。
-- 接入点：CLI `src/cli/runners.ts:289-298`；摄取 `src/ingestion/ingestion.ts:190-198`（每源更新 `withRunTelemetry("update",…)`，单源失败 catch 后标 `status: "error"` :209-218）。
+- `RunTelemetryContext`（:17-37）：调用方创建一个可变上下文同时交给包裹器和 agent；provider 在解析成功的瞬间发布（`src/agent/index.ts:198,249`），失败时仍归因到正确 provider（从没解析到就是 `"unknown"`）；agent 用它发布 `noop` 短路（`src/agent/index.ts:231`），成功/失败由包裹器兜底。
+- 接入点：CLI `src/cli/runners.ts:289-298`；摄取 `src/ingestion/ingestion.ts:192-200`（每源更新 `withRunTelemetry("update",…)`，单源失败 catch 后标 `status: "error"` :209-218）。
 
 ### 6.1 可达性注记（okf-middleware.ts:78-91 的守护注释）
 
@@ -241,7 +241,7 @@ owner 在记录时刻就推导并显式随事件发出（而非留给 PostHog �
 
 **例 A：被包裹的 provider 429**（agent 流中途，LangChain `MiddlewareError` 包着 SDK 错误）
 
-1. 流抛错 → `src/agent/index.ts:685` 打 `run` 阶段标签（first tag wins，仅 stage）。
+1. 流抛错 → `src/agent/index.ts:726` 打 `run` 阶段标签（first tag wins，仅 stage）。
 2. `withRunTelemetry` catch → `describeErrorForTelemetry`（errors.ts:641）。
 3. `readErrorOrigin`：链上只有 stage-only 标签 → 返回它（:443），无 `errorClass`。
 4. `classifyError`：链展开发现内层 SDK 错误；`extractProviderErrorCode` 未命中 → `extractStatus` 读出 429 → `provider_error/rate_limit`（:174-176）。
@@ -313,15 +313,15 @@ owner 在记录时刻就推导并显式随事件发出（而非留给 PostHog �
 | `src/telemetry/errors.ts:612-623` | `innermostErrorName` | 残差桶的唯一信号 |
 | `src/telemetry/errors.ts:641-680` | `describeErrorForTelemetry` | 五字段总装 |
 | `src/telemetry/errors.ts:698-714` | `streamOpenDisguisesProvider` | stream_open 伪装 provider 错的改判例外 |
-| `src/telemetry/taxonomy.ts:18-52` | `FIXED_ERROR_DETAILS` | 逐族明细白名单 |
-| `src/telemetry/taxonomy.ts:60-63,:126-147` | `OPEN_DETAIL_CLASSES` / `normalizeErrorDetail` | 开放族 + 越界丢弃 |
-| `src/telemetry/taxonomy.ts:73-91` | `SAFE_ERROR_IDENTIFIER` / `isSafeErrorIdentifier` | 裸标识符白名单（≤64 字符） |
-| `src/telemetry/taxonomy.ts:167-198` | `deriveOwner` | owner 唯一事实源 + 三条跨属例外 |
+| `src/telemetry/taxonomy.ts:18-60` | `FIXED_ERROR_DETAILS` | 逐族明细白名单 |
+| `src/telemetry/taxonomy.ts:68-71,:126-147` | `OPEN_DETAIL_CLASSES` / `normalizeErrorDetail` | 开放族 + 越界丢弃 |
+| `src/telemetry/taxonomy.ts:81-99` | `SAFE_ERROR_IDENTIFIER` / `isSafeErrorIdentifier` | 裸标识符白名单（≤64 字符） |
+| `src/telemetry/taxonomy.ts:175-206` | `deriveOwner` | owner 唯一事实源 + 三条跨属例外 |
 | `src/telemetry/with-run-telemetry.ts:17-37` | `RunTelemetryContext` | provider/outcome 的可变发布通道 |
 | `src/telemetry/with-run-telemetry.ts:59-85` | `withRunTelemetry` | 单一遥测边界（失败记录后重抛） |
 | `src/telemetry/types.ts:12-25,:40-49` | 类目/owner/stage 闭集 | 13 族 + 5 owner + 4 stage |
-| `src/agent/index.ts:369,:555-648,:685,:725-738` | stage 打点群 | config/build/run/finalize 全部 inStage/tagErrorStage 调用 |
+| `src/agent/index.ts:391,:555-648,:685,:725-738` | stage 打点群 | config/build/run/finalize 全部 inStage/tagErrorStage 调用 |
 | `src/agent/okf-middleware.ts:72-75,:78-91,:115-118` | okf_error 打点 + 可达性注记 | OKF 自有族标签与三类盲区 |
 | `src/agent/wiki-finalizer.ts:28-38` | `WikiPreparationOperation` 等 | okf_error 明细的步骤名来源 |
 | `src/cli/runners.ts:289-298` | `withRunTelemetry` 调用 | CLI 边界 |
-| `src/ingestion/ingestion.ts:190-218` | `withRunTelemetry("update",…)` | 摄取边界 + 单源失败 status:"error" |
+| `src/ingestion/ingestion.ts:192-220` | `withRunTelemetry("update",…)` | 摄取边界 + 单源失败 status:"error" |

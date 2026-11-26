@@ -56,7 +56,7 @@ MCP 连接器的使用方式有两条，殊途同归地落进 `~/.openwiki/conne
   readOnlyOperations 非空 → executeMcpReadOnlyOperations 批量执行 → mcp-results.json
 ```
 
-两条路径的每次运行都会写 raw JSON 证据并追加 `state.json` 的 `runs` 记录（§9）。agent 在 personal 运行里主要走路径 A：MCP 连接器声明了 `supportsAgenticDiscovery: true`，onboarding 的确定性拉取分支不会替它调 `ingest`（`isDeterministicConnector = !supportsAgenticDiscovery`，`src/ingestion/ingestion.ts:266-268`，分流 `:145-151`）。
+两条路径的每次运行都会写 raw JSON 证据并追加 `state.json` 的 `runs` 记录（§9）。agent 在 personal 运行里主要走路径 A：MCP 连接器声明了 `supportsAgenticDiscovery: true`，onboarding 的确定性拉取分支不会替它调 `ingest`（`isDeterministicConnector = !supportsAgenticDiscovery`，`src/ingestion/ingestion.ts:268-270`，分流 `:145-151`）。
 
 ## 3. 工厂参数化：一份 sources/mcp.ts，两个注册表实例
 
@@ -251,7 +251,7 @@ discovery 分支调 `listMcpTools` 把工具清单连同脱敏 transport 写进 
 
 此外 `custom-mcp` 出现在三个通用连接器工具的 id 枚举里：`openwiki_ingest_connector`（`:112`）、`openwiki_list_raw_items`（`:160`）、`openwiki_read_raw_item`（`:189`）——即 custom-mcp 也能走通用 ingest/raw 读取路径，与路径 B（§2）对应。
 
-**custom-mcp（`250296c`）**：定位是「内置的通用 MCP 源，不是插件加载器」（注册表描述自述，`registry.ts:30`）。使用完全走文件配置：`~/.openwiki/connectors/custom-mcp/config.json`，`"enabled": true` 加 http 或 stdio `transport`，即可接任意 MCP server——Linear、Jira、内部知识库均可（onboarding 引导文案，`src/setup/credentials/constants.ts:143-158`）。凭证约定：secret 只放 `~/.openwiki/.env`，配置文件里以 env 名写入 `transport.headers` / `transport.env`（`${ENV_NAME}` 引用，§7）；`requiredEnv` 保持空数组（`registry.ts:35`），因为不同 server 需要不同凭证。安全姿态同样写进引导文案（`constants.ts:154-155`）：优先 `allowedTools` 与 MCP `readOnlyHint`；不要把 mutating 工具加进白名单。custom-mcp 也是 onboarding personal 模式的默认候选源之一（`constants.ts:36` 的 `sourceIds`）。
+**custom-mcp（`250296c`）**：定位是「内置的通用 MCP 源，不是插件加载器」（注册表描述自述，`registry.ts:30`）。使用完全走文件配置：`~/.openwiki/connectors/custom-mcp/config.json`，`"enabled": true` 加 http 或 stdio `transport`，即可接任意 MCP server——Linear、Jira、内部知识库均可（onboarding 引导文案，`src/setup/credentials/constants.ts:152-167`）。凭证约定：secret 只放 `~/.openwiki/.env`，配置文件里以 env 名写入 `transport.headers` / `transport.env`（`${ENV_NAME}` 引用，§7）；`requiredEnv` 保持空数组（`registry.ts:35`），因为不同 server 需要不同凭证。安全姿态同样写进引导文案（`constants.ts:154-155`）：优先 `allowedTools` 与 MCP `readOnlyHint`；不要把 mutating 工具加进白名单。custom-mcp 也是 onboarding personal 模式的默认候选源之一（`constants.ts:36` 的 `sourceIds`）。
 
 **notion 实例**则走托管 OAuth（`authProvider: "notion"`，`constants.ts:128-142`）：浏览器授权后凭证自动进 env，运行时经 §7 的 OAuth 解析动态换取 access token，配置文件里无需任何 token 字面量。
 
@@ -269,7 +269,7 @@ discovery 分支调 `listMcpTools` 把工具清单连同脱敏 transport 写进 
 
 - **本篇 = OpenWiki 作为 MCP 客户端**：消费外部 MCP server 的工具与资源，代码全部在 `src/connectors/`。
 - **OpenWiki 作为 MCP server**（coding-agent 宿主集成：`src/integrations/mcp/server.ts` + `stdio.ts`，begin/submit_plan/next_page/inspect_page_claims/submit_page/finish 六工具生命周期协议，装入 codex/claude/opencode/cursor 四宿主）方向相反，归 **13-integrations**（`02-mcp-lifecycle-protocol-and-skills.md`）。
-- **fetchWithResilience 通用层**（30s/尝试超时、仅 429/5xx 重试、Retry-After 上限 20s，`src/connectors/http.ts:95-145`）是全体 HTTP 型连接器的横切设施，细节归 **02-connector-config-paths-and-security.md**；本文只覆盖它在 MCP http transport 的接入点（§5.2）。
+- **fetchWithResilience 通用层**（30s/尝试超时、仅 429/5xx 重试、Retry-After 上限 20s，`src/connectors/http.ts:144-200`）是全体 HTTP 型连接器的横切设施，细节归 **02-connector-config-paths-and-security.md**；本文只覆盖它在 MCP http transport 的接入点（§5.2）。
 - 注册表全景、`ConnectorDefinition` 字段表与工具暴露全貌归 **01-connector-registry.md / 03-connector-tools.md**。
 
 ## Source Anchor
@@ -302,9 +302,9 @@ discovery 分支调 `listMcpTools` 把工具清单连同脱敏 transport 写进 
 | `src/connectors/tools.ts:38-40,54-102` | repository 门控 + 两个 MCP 工具 | MCP 枚举 `:62,85`；通用枚举 `:112,160,189` 含 custom-mcp |
 | `src/connectors/io.ts:11-31,59-86` | `readConnectorConfig` / `writeRawJson` / `updateStateWithRun` | 配置浅合并读取；raw 0600 落盘；state 留 20 条 run |
 | `src/config/openwiki-home.ts:57-59` | `getConnectorConfigPath` | `~/.openwiki/connectors/<id>/config.json` |
-| `src/ingestion/ingestion.ts:145-151,266-268` | `isDeterministicConnector` | agentic-discovery 连接器不走确定性拉取分支 |
-| `src/setup/credentials/constants.ts:36,128-158` | personal `sourceIds` / Notion / Custom MCP 引导 | OAuth 流与 `${ENV_NAME}` 约定、不白名单 mutating 工具 |
-| `src/connectors/http.ts:95-145` | `fetchWithResilience` | MCP http transport 的底层（30s/尝试、429/5xx 退避） |
+| `src/ingestion/ingestion.ts:147-153,266-268` | `isDeterministicConnector` | agentic-discovery 连接器不走确定性拉取分支 |
+| `src/setup/credentials/constants.ts:37,128-158` | personal `sourceIds` / Notion / Custom MCP 引导 | OAuth 流与 `${ENV_NAME}` 约定、不白名单 mutating 工具 |
+| `src/connectors/http.ts:144-200` | `fetchWithResilience` | MCP http transport 的底层（30s/尝试、429/5xx 退避） |
 | `test/connectors/mcp-client.test.ts:17-118` | `buildChildEnv` 测试组 | 钉住环境隔离不变量（含空字符串 env，`:93`） |
 | `test/connectors/mcp-runtime.test.ts:74-207` | 身份/脱敏/门控测试 | 含「Notion 启发式不适用 custom-mcp」（`:164`） |
 | `test/connectors/sources/mcp.test.ts:70-208` | 门控/发现/执行/覆盖测试 | 含 `connectorConfig` 覆盖断言（`:176`） |

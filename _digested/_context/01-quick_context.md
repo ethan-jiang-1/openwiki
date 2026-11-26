@@ -111,7 +111,7 @@ LangChain AI 开发的 TypeScript CLI 工具（npm 包 `openwiki`，v0.5.x，MIT
 | 一轮生成怎么推进/恢复 | `src/generation/repository-run.ts` → `src/agent/repository-runner.ts` |
 | Agent 怎么被约束 | `src/agent/docs-only-backend.ts` → `src/agent/openwiki-ignore.ts` |
 | wiki 为什么可信 | `src/claims/brains/code/runtime.ts` → `src/okf/frontmatter.ts` |
-| 支持哪些模型、怎么加新的 | `src/config/constants.ts` → `src/agent/index.ts:1077-1264` |
+| 支持哪些模型、怎么加新的 | `src/config/constants.ts` → `src/agent/index.ts:1123-1465` |
 | 连接器怎么工作 | `src/connectors/registry.ts` → `src/connectors/sources/` |
 | OAuth 怎么认证 | `src/auth/oauth.ts` → `src/auth/oauth-discovery.ts` |
 | 怎么定时运行 | `src/scheduling/schedules.ts` |

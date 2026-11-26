@@ -24,7 +24,7 @@ out_of_scope:
 |------|------|------|
 | `openwiki`（默认 = **code** 模式） | `src/cli/cli.tsx` → `src/cli/app/app.tsx` | Code mode run（chat/init/update）；personal 需显式 `openwiki personal` 或 `--mode personal` |
 | `openwiki code` | `src/ingestion/code-mode.ts` → run 流程 | Code mode，为当前仓库初始化文档 wiki 工作流 |
-| `openwiki --init` | `src/cli/cli.tsx` → `src/agent/index.ts:178-230` → `src/generation/` | 从零生成 wiki（page-job 生命周期） |
+| `openwiki --init` | `src/cli/cli.tsx` → `src/agent/index.ts:191-245` → `src/generation/` | 从零生成 wiki（page-job 生命周期） |
 | `openwiki --update` | 同上 | 基于源指纹与 manifest 增量更新/快速推进 |
 | `openwiki --print` | `src/cli/run-mode.ts` | 非交互式输出（CI/脚本） |
 | `openwiki auth configure` | `src/cli/runners.ts` → `src/auth/configure.ts` | 交互式凭据配置 |
@@ -61,7 +61,7 @@ out_of_scope:
 | claims 运行时 | `src/claims/brains/code/runtime.ts`（185） | `prepareClaimsRuntime:64`、finalize 投影 |
 | OKF 校验 | `src/okf/frontmatter.ts`（854） | `validateOkfFrontmatter:118`、`repairPersistedFile:354` |
 | 提供商配置 | `src/config/constants.ts`（1233） | `PROVIDER_CONFIGS:255`、`resolveConfiguredProvider:837` |
-| 模型工厂 | `src/agent/index.ts:1077-1264` | 7 分支（gemini/gemini-enterprise/anthropic/openai-chatgpt/openrouter/bedrock/兜底） |
+| 模型工厂 | `src/agent/index.ts:1123-1465` | 7 分支（gemini/gemini-enterprise/anthropic/openai-chatgpt/openrouter/bedrock/兜底） |
 | reasoning | `src/config/reasoning.ts`（147） | 三 transport、能力表 |
 | 连接器注册 | `src/connectors/registry.ts`（72） | 9 连接器（含 langsmith、custom-mcp） |
 | 连接器工具 | `src/connectors/tools.ts`（575） | 工具暴露 + repository 门控（:30-40） |
@@ -94,7 +94,7 @@ out_of_scope:
 | `<repo>/openwiki/.claims/**/*.json` | claims sidecar |
 | `<repo>/openwiki/.langsmith.json` | LangSmith 连接器提交配置 |
 | `<repo>/.openwikiignore` | 路径排除规则 |
-| `.github/workflows/openwiki-update.yml` | 定时更新（模板只在文件缺失时创建：`src/ingestion/code-mode.ts:82-89` 存在即 early-return，手工补丁不会被再生成冲掉；模板自带 fork guard 恢复步骤，运维沿革见 `11-scheduling-and-ci/02-ci-workflow-generation.md`） |
+| `.github/workflows/openwiki-update.yml` | 定时更新（模板只在文件缺失时创建：`src/ingestion/code-mode.ts:106-113` 存在即 early-return，手工补丁不会被再生成冲掉；模板自带 fork guard 恢复步骤，运维沿革见 `11-scheduling-and-ci/02-ci-workflow-generation.md`） |
 
 ## 待填充
 

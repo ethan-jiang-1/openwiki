@@ -135,7 +135,7 @@ src/cli/commands.ts
 ### 5.1 `integrations`（parseIntegrationsCommand，:539-650）
 
 - **action 必须是** `install | list | uninstall`，否则返回注册表派生的用法错误（`integrationUsageError:712-721`，host 清单由 `formatSupportedHostTargets:729-733` 实时从安装注册表拼出，不硬编码）。
-- **install/uninstall 要求目标**（`:547-566`）：第二个位置参数必须命中注册表（`getHostTarget`，`src/integrations/install/registry.ts:87`）；`list` 不带目标（`target: null`）。
+- **install/uninstall 要求目标**（`:547-566`）：第二个位置参数必须命中注册表（`getHostTarget`，`src/integrations/install/registry.ts:165`）；`list` 不带目标（`target: null`）。
 - **`--force` 仅 install 有效**（`:575-592`）：其他 action 下出现即报错，且只能出现一次——install 可用它替换非 OpenWiki 托管的技能内容。
 - **`--project [path]`**（`:594-625`）：出现即置 `scope: "project"`；`--project=` 形式路径不能为空（`:604-615`），分离形式取下一个非 `-` 参数，**没有值时默认当前目录 `"."`**（`:617-623`）；只能出现一次（`:595-600`）。
 - **位置参数顺序**：`--project` 之后的裸 token 报错「Project paths must follow --project.」（`:634-638`）——目标必须在 `--project` 之前。
@@ -143,7 +143,7 @@ src/cli/commands.ts
 
 ### 5.2 `mcp`（parseMcpCommand，:658-705）
 
-- **`--host <id>`**（`:664-693`）：`--host` 与 `--host=` 两种形式；只能指定一次（`:665-671`）；值不能为空或以 `-` 开头（`:674-680`），且必须通过 `isValidHostId`（1-64 个小写字母/数字/连字符，`src/integrations/core/protocol.ts:174`，`:681-688`）。
+- **`--host <id>`**（`:664-693`）：`--host` 与 `--host=` 两种形式；只能指定一次（`:665-671`）；值不能为空或以 `-` 开头（`:674-680`），且必须通过 `isValidHostId`（1-64 个小写字母/数字/连字符，`src/integrations/core/protocol.ts:179`，`:681-688`）。
 - **默认值是 `"unknown"`**（`:659`）：不带 `--host` 也能解析成功——host 只是被写进运行元数据的记录字段，不是路由必需品。
 - 任何其他参数（无论是否以 `-` 开头）都报错（`:695-701`）。
 
@@ -178,7 +178,7 @@ src/cli/commands.ts
 
 ### 7.2 `ingest`（:404-486）
 
-- **目标**（`:405-413`）：`parseIngestionTarget(argv[1] ?? "all")`——位置参数缺失默认 `"all"`；解析失败（未知连接器/非法 source-instance）返回用法错误。目标语法本身委派给 `src/ingestion/ingestion.ts:107-122`（§9）。
+- **目标**（`:405-413`）：`parseIngestionTarget(argv[1] ?? "all")`——位置参数缺失默认 `"all"`；解析失败（未知连接器/非法 source-instance）返回用法错误。目标语法本身委派给 `src/ingestion/ingestion.ts:109-124`（§9）。
 - **`--print` / `-p`**（`:422-425`）：跑完打印而非写 wiki。
 - **`--scheduled`**（`:427-430`）：只跑调度器管理的实例（scheduler-managed runs 用）。
 - **`--modelId <id>`**（`:432-469`）：`--modelId`/`--model-id` 的分离与 `=` 形式；值经 `normalizeModelId` + `isValidModelId` 校验，非法即报错（§9）。
@@ -223,13 +223,13 @@ src/cli/commands.ts
 
 | 符号 | 权威位置 | 规则 |
 |------|---------|------|
-| `normalizeModelId` | `src/config/constants.ts:1213-1215` | trim |
-| `isValidModelId` | `src/config/constants.ts:1217-1228` | 非空、≤120 字符、白名单字符集（首字符可为 `@`，如 Workers AI `@cf/…`；内部 `@` 供 Vertex 版本号）、禁 `://` |
-| `parseIngestionTarget` | `src/ingestion/ingestion.ts:107-122` | `"all"` → `"all"`；连接器 ID 原样；否则安全 source-instance ID → `{ kind: "source-instance", id }`；都不匹配返回 `null`（`IngestionTarget` 类型定义在 `:36`） |
+| `normalizeModelId` | `src/config/constants.ts:1437-1439` | trim |
+| `isValidModelId` | `src/config/constants.ts:1441-1452` | 非空、≤120 字符、白名单字符集（首字符可为 `@`，如 Workers AI `@cf/…`；内部 `@` 供 Vertex 版本号）、禁 `://` |
+| `parseIngestionTarget` | `src/ingestion/ingestion.ts:109-124` | `"all"` → `"all"`；连接器 ID 原样；否则安全 source-instance ID → `{ kind: "source-instance", id }`；都不匹配返回 `null`（`IngestionTarget` 类型定义在 `:36`） |
 | `resolveLanguage` | `src/platform/language.ts:25` | locale 规范化与识别，返回 `resolved`/`unrecognized` 判别结果 |
 | `isAuthProviderId` | `src/auth/providers.ts:106` | 认证 provider ID 封闭集合 |
-| `getHostTarget` / `listHostTargets` | `src/integrations/install/registry.ts:87` / `:96` | host 集成注册表查询（目标校验与用法文案都源自这里） |
-| `isValidHostId` | `src/integrations/core/protocol.ts:174` | MCP host ID 语法：1-64 位小写字母/数字/连字符 |
+| `getHostTarget` / `listHostTargets` | `src/integrations/install/registry.ts:165` / `:96` | host 集成注册表查询（目标校验与用法文案都源自这里） |
+| `isValidHostId` | `src/integrations/core/protocol.ts:179` | MCP host ID 语法：1-64 位小写字母/数字/连字符 |
 
 ## 10. 判定函数 (Predicate Functions)
 
@@ -267,34 +267,34 @@ src/cli/commands.ts
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/cli/commands.ts:107-164` | `CliCommand` | 9 变体辨别联合 |
-| `src/cli/commands.ts:43-105` | `IntegrationsCliCommand`/`McpCliCommand`/`HostIntegrationCliCommand` | host 集成两个变体的独立接口 |
-| `src/cli/commands.ts:151,166` | `run.language`、`OpenWikiRunModeSource` | 语言字段与 mode 来源档位 |
-| `src/cli/commands.ts:168-531` | `parseCommand` | 主分发器（顺序即优先级） |
-| `src/cli/commands.ts:181-240` | auth 解析 | action 映射、provider 位置、`--force` |
-| `src/cli/commands.ts:242-303` | ngrok 解析 | `start` 子命令、默认端口 53682、范围检查 |
-| `src/cli/commands.ts:305-402` | visualize 解析 | 默认 `openwiki`/4321、`--export` 与 `--port`/`--no-open` 互斥 `:385-391` |
-| `src/cli/commands.ts:404-486` | ingest 解析 | 目标委派 `parseIngestionTarget`、`--scheduled`/`--print`/`--modelId` |
-| `src/cli/commands.ts:488-524` | cron 解析 | pause/resume/delete 只接受 `all` |
-| `src/cli/commands.ts:539-650` | `parseIntegrationsCommand` | 目标必填、`--force` 仅 install、`--project` 默认 `"."` |
-| `src/cli/commands.ts:658-705` | `parseMcpCommand` | `--host` 校验、默认 `"unknown"` |
-| `src/cli/commands.ts:712-733` | `integrationUsageError`/`formatSupportedHostTargets` | 注册表派生的用法文案 |
-| `src/cli/commands.ts:735-1007` | `parseRunCommand` | run 全选项解析与收尾校验 |
-| `src/cli/commands.ts:776-781` | `--debug` 处理 | 解析期设置 `OPENWIKI_DEBUG=1` |
-| `src/cli/commands.ts:946-958` | 位置 mode 词仲裁 | 旗标后的 mode 词仍可提升 mode |
-| `src/cli/commands.ts:965-990` | `shouldStart`/语言校验/默认 mode | run 收尾规则 |
-| `src/cli/commands.ts:1009-1031` | `resolveExplicitMode`/`isOpenWikiRunMode` | mode 冲突仲裁 |
-| `src/cli/commands.ts:1040-1049` | `shouldRunNonInteractively` | print / 非 TTY 分流判定 |
-| `src/cli/commands.ts:1051-1055` | `isDevelopmentMode` | `--dry-run` 与帮助开发段的门控 |
-| `src/cli/commands.ts:1062-1068` | `commandEmitsTelemetry` | 仅 init/update 需要首跑披露 |
-| `src/cli/commands.ts:1078-1086` | `commandLoadsEnvironment` | 环境加载判定（integrations/mcp 刻意除外） |
-| `src/cli/commands.ts:1088-1293` | `helpContent` | usage/commands/options/examples 常量 |
-| `src/cli/commands.ts:1295-1339` | `getHelpText`/`formatRows` | 文本拼装与对齐 |
-| `src/config/constants.ts:1213-1228` | `normalizeModelId`/`isValidModelId` | 模型 ID 规范化与校验 |
-| `src/ingestion/ingestion.ts:36,107-122` | `IngestionTarget`/`parseIngestionTarget` | 摄取目标类型与解析 |
+| `src/cli/commands.ts:169-228` | `CliCommand` | 9 变体辨别联合 |
+| `src/cli/commands.ts:43-167` | `IntegrationsCliCommand`/`McpCliCommand`/`HostIntegrationCliCommand` | host 集成两个变体的独立接口 |
+| `src/cli/commands.ts:215,166` | `run.language`、`OpenWikiRunModeSource` | 语言字段与 mode 来源档位 |
+| `src/cli/commands.ts:232-626` | `parseCommand` | 主分发器（顺序即优先级） |
+| `src/cli/commands.ts:276-335` | auth 解析 | action 映射、provider 位置、`--force` |
+| `src/cli/commands.ts:337-398` | ngrok 解析 | `start` 子命令、默认端口 53682、范围检查 |
+| `src/cli/commands.ts:400-497` | visualize 解析 | 默认 `openwiki`/4321、`--export` 与 `--port`/`--no-open` 互斥 `:385-391` |
+| `src/cli/commands.ts:499-581` | ingest 解析 | 目标委派 `parseIngestionTarget`、`--scheduled`/`--print`/`--modelId` |
+| `src/cli/commands.ts:583-619` | cron 解析 | pause/resume/delete 只接受 `all` |
+| `src/cli/commands.ts:634-745` | `parseIntegrationsCommand` | 目标必填、`--force` 仅 install、`--project` 默认 `"."` |
+| `src/cli/commands.ts:753-800` | `parseMcpCommand` | `--host` 校验、默认 `"unknown"` |
+| `src/cli/commands.ts:807-828` | `integrationUsageError`/`formatSupportedHostTargets` | 注册表派生的用法文案 |
+| `src/cli/commands.ts:830-1102` | `parseRunCommand` | run 全选项解析与收尾校验 |
+| `src/cli/commands.ts:871-876` | `--debug` 处理 | 解析期设置 `OPENWIKI_DEBUG=1` |
+| `src/cli/commands.ts:1041-1053` | 位置 mode 词仲裁 | 旗标后的 mode 词仍可提升 mode |
+| `src/cli/commands.ts:1060-1085` | `shouldStart`/语言校验/默认 mode | run 收尾规则 |
+| `src/cli/commands.ts:1104-1126` | `resolveExplicitMode`/`isOpenWikiRunMode` | mode 冲突仲裁 |
+| `src/cli/commands.ts:1135-1144` | `shouldRunNonInteractively` | print / 非 TTY 分流判定 |
+| `src/cli/commands.ts:1146-1150` | `isDevelopmentMode` | `--dry-run` 与帮助开发段的门控 |
+| `src/cli/commands.ts:1157-1163` | `commandEmitsTelemetry` | 仅 init/update 需要首跑披露 |
+| `src/cli/commands.ts:1173-1181` | `commandLoadsEnvironment` | 环境加载判定（integrations/mcp 刻意除外） |
+| `src/cli/commands.ts:1183-1401` | `helpContent` | usage/commands/options/examples 常量 |
+| `src/cli/commands.ts:1403-1447` | `getHelpText`/`formatRows` | 文本拼装与对齐 |
+| `src/config/constants.ts:1437-1452` | `normalizeModelId`/`isValidModelId` | 模型 ID 规范化与校验 |
+| `src/ingestion/ingestion.ts:38,107-122` | `IngestionTarget`/`parseIngestionTarget` | 摄取目标类型与解析 |
 | `src/platform/language.ts:25` | `resolveLanguage` | locale 识别与规范化 |
 | `src/auth/providers.ts:106` | `isAuthProviderId` | 认证 provider 封闭集合 |
-| `src/integrations/install/registry.ts:87,96` | `getHostTarget`/`listHostTargets` | host 集成注册表查询 |
-| `src/integrations/core/protocol.ts:174` | `isValidHostId` | MCP host ID 语法 |
-| `src/cli/cli.tsx:45,63,76,93` | 入口消费点 | 解析结果的四个判定消费 |
+| `src/integrations/install/registry.ts:165,96` | `getHostTarget`/`listHostTargets` | host 集成注册表查询 |
+| `src/integrations/core/protocol.ts:179` | `isValidHostId` | MCP host ID 语法 |
+| `src/cli/cli.tsx:46,63,76,93` | 入口消费点 | 解析结果的四个判定消费 |
 | `src/cli/run-mode.ts:61-69` | `shouldAutoExitStartupRun` | auto-exit 判定消费 run 字段 |

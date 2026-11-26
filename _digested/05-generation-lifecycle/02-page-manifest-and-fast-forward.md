@@ -27,7 +27,7 @@ out_of_scope:
 
 | 文件 | 粒度 | 回答的问题 | 损坏时的策略 |
 |------|------|-----------|-------------|
-| `openwiki/.run.json` | 单轮 run | 这轮进行到哪里了？ | `invalid_state`，拒绝丢弃可恢复工作（`src/generation/run-state.ts:323-328`） |
+| `openwiki/.run.json` | 单轮 run | 这轮进行到哪里了？ | `invalid_state`，拒绝丢弃可恢复工作（`src/generation/run-state.ts:327-332`） |
 | `openwiki/.page-manifest.json` | 单页 × 源检查点 | 这页的这些字节在哪个源下被验证过？ | `invalid_state`，拒绝丢弃已提交覆盖（`src/generation/page-manifest.ts:129-134`） |
 | `openwiki/.claims/**` | 单页 claim 集 | 这页断言了什么、证据是什么？ | 由 claims 预检转成 issue 进入下一轮规划（详见 07 区） |
 
@@ -110,7 +110,7 @@ zod schema（`page-manifest.ts:71-87`）为 strict：`sourceFingerprint` 与 `pa
 | 3 | gitHead 匹配 | `317-319` | 请求带 gitHead 且 entry 缺失或不等 → `null` |
 | 4 | sidecar 复核 | `320-330` | sidecar 缺失、无 verification、`sidecar.pageVersion ≠ entry.pageVersion`、或当前页哈希 ≠ `entry.pageVersion` → `null` |
 
-为什么指纹和 gitHead **都要**比：源指纹覆盖的是「模型可见的源输入」，且**生成物 `openwiki/` 与忽略路径被显式排除**（实现注释 `src/agent/utils.ts:324-326`）。于是存在两类合法的「不同步」：
+为什么指纹和 gitHead **都要**比：源指纹覆盖的是「模型可见的源输入」，且**生成物 `openwiki/` 与忽略路径被显式排除**（实现注释 `src/agent/utils.ts:312-314`）。于是存在两类合法的「不同步」：
 
 - 只提交 `openwiki/` 变更 → gitHead 前进、指纹不变（§5 fast-forward 正是为此）；
 - 工作区改了源文件但未提交 → 指纹变、gitHead 不变（此时任何条目都不该被放行，第 2 级检查兜住）。
@@ -164,11 +164,11 @@ HEAD 前进了，但新提交只动了 `openwiki/` 下的生成物（典型：�
 
 1. 当前源快照带 `gitHead`——无头仓库直接放弃（`852`）；
 2. entry 有 `gitHead` 且 ≠ 当前 gitHead——相等的无需推进（`856-857`）;
-3. 以 entry.`gitHead` 为基线计算仓库变更路径，**变更集为空**（`859-864`；`getRepositoryChangedPaths` 在 `src/agent/utils.ts:909`，与指纹同用 ignore 边界，实现详见 04 区 03 号）。
+3. 以 entry.`gitHead` 为基线计算仓库变更路径，**变更集为空**（`859-864`；`getRepositoryChangedPaths` 在 `src/agent/utils.ts:946`，与指纹同用 ignore 边界，实现详见 04 区 03 号）。
 
 满足后 `recordRepositoryPageCompletion` 重写条目（`866-872`）：§3.1 一致性门自动重证页体与 sidecar；`completedBy`/`completedRunId` 原样透传（`869-871`）——页没有变，作者归属也不该变。任一条件不满足的页保持旧覆盖，进入本轮正常规划。
 
-注意条件 3 的措辞：判定的是「entry 基线之后**零变更路径**」，而不是「git 状态干净」——但两者差距比字面小：`getRepositoryChangedPaths`（`src/agent/utils.ts:909`）除提交区间（`baseGitHead..HEAD`，`:916-924`）外，还计入工作区 staged+unstaged 改动（`diff --name-only HEAD`，`:926-933`）与未跟踪文件（`ls-files --others`，`:935-941`）。因此触及指纹可见源文件的**未提交改动会直接让条件 3 失败**（`repository-run.ts:859-864`），条目不推进——并不依赖后续 `getCurrentRepositoryPageCompletion` 的指纹复核（§3.2 第 2 级）兜底；「有未提交改动仍能 fast-forward」只在改动落在 ignore/指纹边界之外时成立。无论走哪条路径，都不会产生错误放行。
+注意条件 3 的措辞：判定的是「entry 基线之后**零变更路径**」，而不是「git 状态干净」——但两者差距比字面小：`getRepositoryChangedPaths`（`src/agent/utils.ts:946`）除提交区间（`baseGitHead..HEAD`，`:916-924`）外，还计入工作区 staged+unstaged 改动（`diff --name-only HEAD`，`:926-933`）与未跟踪文件（`ls-files --others`，`:935-941`）。因此触及指纹可见源文件的**未提交改动会直接让条件 3 失败**（`repository-run.ts:859-864`），条目不推进——并不依赖后续 `getCurrentRepositoryPageCompletion` 的指纹复核（§3.2 第 2 级）兜底；「有未提交改动仍能 fast-forward」只在改动落在 ignore/指纹边界之外时成立。无论走哪条路径，都不会产生错误放行。
 
 一个具体走查：设某页 entry 基线为 commit B，当前 HEAD 为 D，历史为 B→C→D。
 
@@ -177,7 +177,7 @@ HEAD 前进了，但新提交只动了 `openwiki/` 下的生成物（典型：�
 
 ### 5.3 规划视图：页更新窗口
 
-与 fast-forward 同源的 `getRepositoryPageUpdateWindows`（`repository-run.ts:807-836`）把现有页按 manifest `gitHead` 基线分组（`815`，无条目的页基线为空串），每组附「基线以来变更路径」，通过 begin 响应的 `pageUpdateWindows`/`changedPaths` 暴露给 planner（`764-797`）。无基线的组标记 `fullReview: true`（`832`）——包括 legacy 页与**从未有过覆盖**的页；曾被覆盖后标 skipped 的页在 finish 时保留 manifest 条目（`preservePages`，`src/generation/page-manifest.ts:260-264`，经 `repository-run.ts:1553-1559` 回填 skipped 页），下次 update 基线非空 → `fullReview: false`，按常规窗口处理。
+与 fast-forward 同源的 `getRepositoryPageUpdateWindows`（`repository-run.ts:807-836`）把现有页按 manifest `gitHead` 基线分组（`815`，无条目的页基线为空串），每组附「基线以来变更路径」，通过 begin 响应的 `pageUpdateWindows`/`changedPaths` 暴露给 planner（`764-797`）。无基线的组标记 `fullReview: true`（`832`）——包括 legacy 页与**从未有过覆盖**的页；曾被覆盖后标 skipped 的页在 finish 时保留 manifest 条目（`preservePages`，`src/generation/page-manifest.ts:262-309`，经 `repository-run.ts:1553-1559` 回填 skipped 页），下次 update 基线非空 → `fullReview: false`，按常规窗口处理。
 
 ## 6. no-op 严格前置门
 
@@ -185,14 +185,14 @@ update 可能什么都不用做——但「什么都不做」的判定本身必�
 
 ### 6.1 门内条件
 
-门只在 `mode === "update"` 且 `force !== true` 时启用（`411`；驱动方把「用户带了 planning 上下文消息」编码为 force——`force: Boolean(options.userMessage?.trim())`，`src/agent/index.ts:206`）。通过需**同时**满足四重条件：
+门只在 `mode === "update"` 且 `force !== true` 时启用（`411`；驱动方把「用户带了 planning 上下文消息」编码为 force——`force: Boolean(options.userMessage?.trim())`，`src/agent/index.ts:220`）。通过需**同时**满足四重条件：
 
 1. **常规预检通过**：`getUpdateNoopStatus`（`412-416`）返回 `shouldSkip: true`（内部条件见 §6.2）；
 2. **claims 无 issue**：`claimsRuntime.issueCount === 0`（`419`）。注释（`409-410`）言明动机：**claims 校验先于 no-op 判定，干净的 git 状态不能掩盖 stale/unresolved 的 grounding 状态**；
 3. **基线全覆盖**：`hasCompleteBaselineCoverage`——每个 initialPages 在播种后的 manifest 中都有条目（`401-407`）。有页从未建立覆盖（上轮 skip、legacy 无法播种）就不能空转；
 4. **指纹稳定双检**：preflight 前后两次源快照指纹一致（`422-428`），manifest 替换发布后再检一次（`433-437`）——检查期间仓库在动就放弃空转、顺落正常 run。
 
-### 6.2 `getUpdateNoopStatus` 内部（`src/agent/utils.ts:126-195`）
+### 6.2 `getUpdateNoopStatus` 内部（`src/agent/utils.ts:119-188`）
 
 返回 `shouldSkip: true` 要求全部成立，否则带 reason 返回 `shouldSkip: false`：
 
@@ -209,7 +209,7 @@ update 可能什么都不用做——但「什么都不做」的判定本身必�
 
 ### 6.3 通过后的动作与失败顺落
 
-按序执行后返回 `NoopBeginView`（`446-454`）：`claimsRuntime.finalize` 固化 claims 状态（`423`）→ `replaceRepositoryPageManifest` 把全部页覆盖推进到当前检查点（`429-432`）→ 发布期指纹复检通过（`433-437`）→ 写 `complete` 元数据（`438-445`）。驱动方收到 `skipped: true`（`src/agent/repository-runner.ts:209-212`），CLI 侧记 `noop` 结果。
+按序执行后返回 `NoopBeginView`（`446-454`）：`claimsRuntime.finalize` 固化 claims 状态（`423`）→ `replaceRepositoryPageManifest` 把全部页覆盖推进到当前检查点（`429-432`）→ 发布期指纹复检通过（`433-437`）→ 写 `complete` 元数据（`438-445`）。驱动方收到 `skipped: true`（`src/agent/repository-runner.ts:367-370`），CLI 侧记 `noop` 结果。
 
 任一条件不满足则**顺落为正常 run**——不静默跳过，继续走完整的 begin 装配 → planning → generating（`460` 起）。这保证 no-op 永远不会发生在「claims 有债」或「覆盖不全」的仓库上。
 
@@ -230,7 +230,7 @@ update begin（force=false）
 
 ## 7. interrupted/complete 元数据语义
 
-`openwiki/.last-update.json`（`src/config/constants.ts:3` `UPDATE_METADATA_PATH`）是仓库级的「上次运行状态」文件，schema 即 `UpdateMetadata`（`src/agent/types.ts:92-99`）：`updatedAt`/`command`/`gitHead?`/`model`/`status?`（`complete | interrupted`，类型 `types.ts:90`）/`language?`。`.run.json` 里的 `previousLastUpdate` 与 `baseGitHead` 就读取自它（详见 01 号 §2.1），构成「本轮基于哪个成功基线」的判断依据。
+`openwiki/.last-update.json`（`src/config/constants.ts:3` `UPDATE_METADATA_PATH`）是仓库级的「上次运行状态」文件，schema 即 `UpdateMetadata`（`src/agent/types.ts:121-128`）：`updatedAt`/`command`/`gitHead?`/`model`/`status?`（`complete | interrupted`，类型 `types.ts:90`）/`language?`。`.run.json` 里的 `previousLastUpdate` 与 `baseGitHead` 就读取自它（详见 01 号 §2.1），构成「本轮基于哪个成功基线」的判断依据。
 
 **关键语义：元数据不是页级事实来源，页级事实在 manifest；元数据只承诺「上次成功基线」**。全部写入点：
 
@@ -244,8 +244,8 @@ update begin（force=false）
 
 三处容易误读的设计：
 
-- **begin 即 interrupted**：run 一旦落盘检查点，上次成功的 `complete` 就被降级为 `interrupted`（`501-509`）。中断后仓库的「上次成功基线」由 run state 内部的 `previousLastUpdate`/`baseGitHead` 记住，不依赖被覆盖的元数据；写函数 `writeLastUpdateMetadata`（`src/agent/utils.ts:208-239`）以 `gitHeadOverride` 参数控制 gitHead 保留还是重取。
-- **finish 的 complete 总是刷新文件**：正常路径调用 `persistRunMetadataIfChanged`（实现 `src/agent/utils.ts:249-272`），对 repository run 它总会写入并刷新时间戳——即使内容未变，「OpenWiki 真实跑过一次」也要反映到新鲜度检查；完成的 run 同时清除上一轮 interrupted 状态，让下一轮 update 有资格空转（`utils.ts:241-247` 注释）。`beforeContentSnapshot` 在此处仅作 null 守卫参数。
+- **begin 即 interrupted**：run 一旦落盘检查点，上次成功的 `complete` 就被降级为 `interrupted`（`501-509`）。中断后仓库的「上次成功基线」由 run state 内部的 `previousLastUpdate`/`baseGitHead` 记住，不依赖被覆盖的元数据；写函数 `writeLastUpdateMetadata`（`src/agent/utils.ts:201-227`）以 `gitHeadOverride` 参数控制 gitHead 保留还是重取。
+- **finish 的 complete 总是刷新文件**：正常路径调用 `persistRunMetadataIfChanged`（实现 `src/agent/utils.ts:237-260`），对 repository run 它总会写入并刷新时间戳——即使内容未变，「OpenWiki 真实跑过一次」也要反映到新鲜度检查；完成的 run 同时清除上一轮 interrupted 状态，让下一轮 update 有资格空转（`utils.ts:241-247` 注释）。`beforeContentSnapshot` 在此处仅作 null 守卫参数。
 - **interrupted 直接封死空转**：`getUpdateNoopStatus` 见到 `status === "interrupted"` 立即返回不跳过（`utils.ts:137-139`）——这正是 §6 门需要 `complete` 前置的原因：skipped 页、源漂移留下的 `interrupted` 会强制下一次 update 真正跑起来。
 
 一轮 update 生命周期内元数据的时间线：
@@ -281,28 +281,28 @@ update begin（force=false）
 | `src/generation/page-manifest.ts:146-173` | `writeRepositoryPageManifest` | 键排序 + 原子写 |
 | `src/generation/page-manifest.ts:186-205` | `recordRepositoryPageCompletion` | 单页完成记录（读—改—写） |
 | `src/generation/page-manifest.ts:217-240` | `seedRepositoryPageManifest` | legacy 播种、existing wins、留空路由 |
-| `src/generation/page-manifest.ts:250-274` | `replaceRepositoryPageManifest` | 整表替换、preservePages |
-| `src/generation/page-manifest.ts:287-295` | `isRepositoryPageCompletionCurrent` | 布尔封装 |
-| `src/generation/page-manifest.ts:305-331` | `getCurrentRepositoryPageCompletion` | 完成证明四级复核 |
-| `src/generation/page-manifest.ts:344-377` | `buildManifestEntry` | 页体与 sidecar 一致性门 |
-| `src/generation/page-manifest.ts:385-390` | `throwPageCoverageError` | 一致性失败错误 |
-| `src/generation/page-manifest.ts:398-416` | `assertCanonicalManifestPages` | 规范路径断言 |
-| `src/generation/repository-run.ts:384-400` | seed + fast-forward 调用点 | update begin 的两个推进步骤 |
-| `src/generation/repository-run.ts:401-458` | no-op 严格前置门 | 迁入 begin 的四重条件与发布动作 |
-| `src/generation/repository-run.ts:673-733` | `reconcileManifestPageJobs` | 恢复期 manifest 复核 |
-| `src/generation/repository-run.ts:764-836` | `toActiveBeginView` / `getRepositoryPageUpdateWindows` | 规划视图与基线分组 |
-| `src/generation/repository-run.ts:846-874` | `fastForwardUnchangedRepositoryPageCoverage` | fast-forward 三条件 |
+| `src/generation/page-manifest.ts:251-319` | `replaceRepositoryPageManifest` | 整表替换、preservePages |
+| `src/generation/page-manifest.ts:332-340` | `isRepositoryPageCompletionCurrent` | 布尔封装 |
+| `src/generation/page-manifest.ts:350-376` | `getCurrentRepositoryPageCompletion` | 完成证明四级复核 |
+| `src/generation/page-manifest.ts:389-422` | `buildManifestEntry` | 页体与 sidecar 一致性门 |
+| `src/generation/page-manifest.ts:430-435` | `throwPageCoverageError` | 一致性失败错误 |
+| `src/generation/page-manifest.ts:443-461` | `assertCanonicalManifestPages` | 规范路径断言 |
+| `src/generation/repository-run.ts:466-482` | seed + fast-forward 调用点 | update begin 的两个推进步骤 |
+| `src/generation/repository-run.ts:483-540` | no-op 严格前置门 | 迁入 begin 的四重条件与发布动作 |
+| `src/generation/repository-run.ts:755-815` | `reconcileManifestPageJobs` | 恢复期 manifest 复核 |
+| `src/generation/repository-run.ts:846-923` | `toActiveBeginView` / `getRepositoryPageUpdateWindows` | 规划视图与基线分组 |
+| `src/generation/repository-run.ts:933-968` | `fastForwardUnchangedRepositoryPageCoverage` | fast-forward 三条件 |
 | `src/generation/repository-run.ts:1090-1153` | `skipRepositoryPage` | skip 对元数据/manifest 的影响 |
 | `src/generation/repository-run.ts:1265-1271` | 页事务中的 recordCompletion | 详见 01 号 §6 |
-| `src/generation/repository-run.ts:1553-1559` | finish 整表替换 | skipped 页保留旧条目 |
-| `src/generation/repository-run.ts:501-509,1130-1138,438-445,1562-1581` | 元数据写入点 | interrupted/complete 全部时机 |
-| `src/generation/run-state.ts:121-218` | `RepositoryRunState` | `previousLastUpdate`/`baseGitHead`/`beforeContentSnapshot` |
-| `src/agent/utils.ts:126-195` | `getUpdateNoopStatus` | no-op 预检六条件与 reason |
-| `src/agent/utils.ts:208-272` | `writeLastUpdateMetadata` / `persistRunMetadataIfChanged` | 元数据写入与时间戳刷新 |
-| `src/agent/utils.ts:307-331` | `createRepositorySourceSnapshot` | 源快照（指纹排除 `openwiki/`） |
-| `src/agent/utils.ts:909` | `getRepositoryChangedPaths` | 基线以来变更路径 |
-| `src/agent/types.ts:90-99` | `UpdateRunStatus` / `UpdateMetadata` | `.last-update.json` schema |
+| `src/generation/repository-run.ts:1735-1756` | finish 整表替换 | skipped 页保留旧条目 |
+| `src/generation/repository-run.ts:583-591,1130-1138,438-445,1562-1581` | 元数据写入点 | interrupted/complete 全部时机 |
+| `src/generation/run-state.ts:124-221` | `RepositoryRunState` | `previousLastUpdate`/`baseGitHead`/`beforeContentSnapshot` |
+| `src/agent/utils.ts:119-188` | `getUpdateNoopStatus` | no-op 预检六条件与 reason |
+| `src/agent/utils.ts:201-260` | `writeLastUpdateMetadata` / `persistRunMetadataIfChanged` | 元数据写入与时间戳刷新 |
+| `src/agent/utils.ts:295-319` | `createRepositorySourceSnapshot` | 源快照（指纹排除 `openwiki/`） |
+| `src/agent/utils.ts:946` | `getRepositoryChangedPaths` | 基线以来变更路径 |
+| `src/agent/types.ts:119-128` | `UpdateRunStatus` / `UpdateMetadata` | `.last-update.json` schema |
 | `src/config/constants.ts:1-3` | `OPEN_WIKI_DIR` / `PAGE_MANIFEST_PATH` / `UPDATE_METADATA_PATH` | 持久化路径 |
-| `src/agent/repository-runner.ts:205-254` | `runNativeRepositoryGeneration` | noop/skipped 与 sourceChanged 的驱动方视图 |
-| `src/agent/index.ts:206` | force 装配 | planning 上下文消息 → force |
+| `src/agent/repository-runner.ts:363-417` | `runNativeRepositoryGeneration` | noop/skipped 与 sourceChanged 的驱动方视图 |
+| `src/agent/index.ts:220` | force 装配 | planning 上下文消息 → force |
 | `src/claims/brains/code/runtime.ts:21-41` | `ClaimsRuntime.finalize` | 一致性门所依赖的 sidecar 固化（详见 07 区） |

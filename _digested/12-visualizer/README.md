@@ -37,7 +37,7 @@ out_of_scope:
 | `src/visualize/page.ts` | — | SPA 模板、严格 CSP、CDN 库 SRI 固定版本 |
 | `src/visualize/client.ts` | — | force-graph 渲染、阅读器、SSE 客户端 |
 | `src/visualize/static-export.ts` | — | 静态导出器（index.html/client.js/client-lib.js/styles.css/graph.json） |
-| `src/cli/commands.ts:305-401` | — | visualize 命令解析 |
+| `src/cli/commands.ts:400-496` | — | visualize 命令解析 |
 
 ## 边界
 

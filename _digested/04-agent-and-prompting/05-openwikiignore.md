@@ -30,7 +30,7 @@ out_of_scope:
 三条边界认知：
 
 - 它是**访问门**，不是 git 机制：不参与 git 本身的忽略行为，`git status` 照常列出被排除文件，但 OpenWiki 在消费 git 输出前会按规则过滤。
-- 只在 repository 输出模式有意义：两个加载点都以 `outputMode === "repository"` 为前提（`src/agent/index.ts:232-235`、`:407-410`）；personal/local-wiki 模式装配的是空规则集。
+- 只在 repository 输出模式有意义：两个加载点都以 `outputMode === "repository"` 为前提（`src/agent/index.ts:247-250`、`:407-410`）；personal/local-wiki 模式装配的是空规则集。
 - 被排除的是**源码侧路径**；`openwiki/` 生成树内部的排除需求与此机制无关（该树另有 docs-only 写边界，见 04-deepagents-backend.md）。
 
 ## 2. 数据模型
@@ -187,7 +187,7 @@ OpenWikiIgnore.load(root)
 
 即：**只剩被排除文件与 openwiki/ 内部变更时，这次 update 视为干净**。
 
-调用点两处：`src/cli/startup.ts:135-141`（凭证预检前 `canSkipCleanUpdateBeforeCredentials`，skip 则连环境都不加载）与 `src/generation/repository-run.ts:412`（begin 门）。begin 门更严格：skip 还需 claims issueCount=0 且基线全覆盖，并且跳过前会以两次源快照复核指纹稳定（:422 起：finalize 前后各取一次快照，指纹一致才落 manifest、写 complete 元数据并返回 `noop` 视图）——防止「正在发生的排除路径变更」被竞态吞掉。
+调用点两处：`src/cli/startup.ts:135-141`（凭证预检前 `canSkipCleanUpdateBeforeCredentials`，skip 则连环境都不加载）与 `src/generation/repository-run.ts:494`（begin 门）。begin 门更严格：skip 还需 claims issueCount=0 且基线全覆盖，并且跳过前会以两次源快照复核指纹稳定（:422 起：finalize 前后各取一次快照，指纹一致才落 manifest、写 complete 元数据并返回 `noop` 视图）——防止「正在发生的排除路径变更」被竞态吞掉。
 
 ### 5.5 claims 侧
 
@@ -278,23 +278,23 @@ build/
 | `src/agent/openwiki-ignore.ts:271-287` | `ignores` | 规范化入口 + last-match-wins |
 | `src/agent/openwiki-ignore.ts:306-311` | `normalizeIgnorePath` | 防 `./x`、`a/../x` 绕过的安全边界 |
 | `src/agent/docs-only-backend.ts:74-77` | `allowedIgnoredShellCommands` | ignore 激活期 shell 白名单 |
-| `src/agent/docs-only-backend.ts:200-298` | read/readRaw/write/edit/delete | 读写硬拒绝 |
-| `src/agent/docs-only-backend.ts:304-406` | ls/grep/glob | 发现静默过滤（+无界 glob 拒绝 :361-366） |
-| `src/agent/docs-only-backend.ts:415-479` | uploadFiles/downloadFiles | 逐文件 permission_denied |
-| `src/agent/docs-only-backend.ts:487-509` | `execute` | 激活期白名单收口 |
-| `src/agent/docs-only-backend.ts:539-548` | `getIgnoredPathError` | 拒绝文案 |
-| `src/agent/prompt.ts:152-185` | 三个 ignore formatter | `{GIT_HISTORY_HINT}`/`{DISCOVERY_INSTRUCTION}`/`{OPENWIKIIGNORE_INSTRUCTIONS}` |
-| `src/agent/index.ts:232-238` | ignore 加载（run 入口） | repository 才加载 |
-| `src/agent/index.ts:454-456` | backend 注入 | 与 systemPrompt（:530-535）同一对象 |
-| `src/agent/repository-runner.ts:294-298` | planner backend | 规划 worker 的 ignore |
-| `src/agent/repository-runner.ts:414-418` | page worker backend | 每页重载 |
-| `src/generation/repository-run.ts:353` | begin 加载 | 贯穿 backend/claims/指纹/fast-forward/noop |
-| `src/generation/repository-run.ts:584-589` | resume 指纹比对 | 同口径重算→漂移重规划 |
-| `src/agent/utils.ts:126-195` | `getUpdateNoopStatus` | worktree :161-170 / committed :172-187 的 ignore 过滤 |
-| `src/agent/utils.ts:996-1024` | `lineReferencesIgnoredPath`/`extractGitPaths` | git 输出行级过滤与 rename 语义 |
-| `src/agent/utils.ts:331-404` | `createRepositorySourceSnapshot` | 指纹候选含 `.openwikiignore`（:365-367） |
-| `src/agent/utils.ts:511-518` | `isFingerprintSourcePath` | 可见性过滤；`.openwikiignore` 恒保留（:515） |
-| `src/agent/utils.ts:909-969` | `getRepositoryChangedPaths` | 变更路径口径（fast-forward/更新窗口消费） |
+| `src/agent/docs-only-backend.ts:255-358` | read/readRaw/write/edit/delete | 读写硬拒绝 |
+| `src/agent/docs-only-backend.ts:364-466` | ls/grep/glob | 发现静默过滤（+无界 glob 拒绝 :361-366） |
+| `src/agent/docs-only-backend.ts:475-539` | uploadFiles/downloadFiles | 逐文件 permission_denied |
+| `src/agent/docs-only-backend.ts:545-576` | `execute` | 激活期白名单收口 |
+| `src/agent/docs-only-backend.ts:606-615` | `getIgnoredPathError` | 拒绝文案 |
+| `src/agent/prompt.ts:150-183` | 三个 ignore formatter | `{GIT_HISTORY_HINT}`/`{DISCOVERY_INSTRUCTION}`/`{OPENWIKIIGNORE_INSTRUCTIONS}` |
+| `src/agent/index.ts:247-253` | ignore 加载（run 入口） | repository 才加载 |
+| `src/agent/index.ts:476-478` | backend 注入 | 与 systemPrompt（:530-535）同一对象 |
+| `src/agent/repository-runner.ts:457-461` | planner backend | 规划 worker 的 ignore |
+| `src/agent/repository-runner.ts:941-945` | page worker backend | 每页重载 |
+| `src/generation/repository-run.ts:435` | begin 加载 | 贯穿 backend/claims/指纹/fast-forward/noop |
+| `src/generation/repository-run.ts:666-671` | resume 指纹比对 | 同口径重算→漂移重规划 |
+| `src/agent/utils.ts:119-188` | `getUpdateNoopStatus` | worktree :161-170 / committed :172-187 的 ignore 过滤 |
+| `src/agent/utils.ts:1153-1181` | `lineReferencesIgnoredPath`/`extractGitPaths` | git 输出行级过滤与 rename 语义 |
+| `src/agent/utils.ts:319-392` | `createRepositorySourceSnapshot` | 指纹候选含 `.openwikiignore`（:365-367） |
+| `src/agent/utils.ts:499-506` | `isFingerprintSourcePath` | 可见性过滤；`.openwikiignore` 恒保留（:515） |
+| `src/agent/utils.ts:946-1126` | `getRepositoryChangedPaths` | 变更路径口径（fast-forward/更新窗口消费） |
 | `src/cli/startup.ts:135-141` | 凭证预检 skip | no-op 判定的最早注入点 |
 | `src/claims/brains/code/runtime.ts:64-79` | `prepareClaimsRuntime` | claims 运行时共享同一规则 |
 | `src/claims/evidence/repository/resolver.ts:195-198` | 证据路径拒绝 | 被排除路径不可作证据 |

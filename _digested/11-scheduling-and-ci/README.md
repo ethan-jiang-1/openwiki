@@ -18,7 +18,7 @@ out_of_scope:
 
 > 原 `09-scheduling-and-ci/`，2026-09-13 re-baseline 改号。
 
-注意口径：`src/schedules.ts` 已移至 `src/scheduling/schedules.ts`（955 行）；**CI 工作流的生成实现在 `src/ingestion/code-mode.ts:341`**（按主题归本区讲述，实现文件在 ingestion/）。
+注意口径：`src/schedules.ts` 已移至 `src/scheduling/schedules.ts`（955 行）；**CI 工作流的生成实现在 `src/ingestion/code-mode.ts:532`**（按主题归本区讲述，实现文件在 ingestion/）。
 
 ## 文档
 

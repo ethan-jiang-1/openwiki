@@ -54,7 +54,7 @@ OpenWiki 选择了中间路线 —— 用 agent（DeepAgents）做生成，但�
 
 ### 决策 2：源状态判定在 host process 中完成（Source-State Judgments Stay in the Host Process）
 
-**选择了什么**：在 agent 启动之前和之外，`createRunContext()`（`src/agent/utils.ts:74`）只组装元数据与 wiki 目标；"源是否变了""哪些路径变了"这类判定由确定性代码完成——`createRepositorySourceSnapshot`（`src/agent/utils.ts:331-404`）计算模型可见源输入的 sha256 源指纹（source fingerprint），`getRepositoryChangedPaths`（`src/agent/utils.ts:909-949`）产出结构化变更清单。旧基线把 `$ git log` 文本块拼进提示词的 `createGitSummary` 已整体删除（`RunContext.gitSummary` 字段不复存在，`src/agent/types.ts:101-105`）。agent 仍只能通过 `LocalShellBackend` 的虚拟文件系统视图操作，根路径被限制在工作目录下。
+**选择了什么**：在 agent 启动之前和之外，`createRunContext()`（`src/agent/utils.ts:67`）只组装元数据与 wiki 目标；"源是否变了""哪些路径变了"这类判定由确定性代码完成——`createRepositorySourceSnapshot`（`src/agent/utils.ts:319-392`）计算模型可见源输入的 sha256 源指纹（source fingerprint），`getRepositoryChangedPaths`（`src/agent/utils.ts:946-1106`）产出结构化变更清单。旧基线把 `$ git log` 文本块拼进提示词的 `createGitSummary` 已整体删除（`RunContext.gitSummary` 字段不复存在，`src/agent/types.ts:130-134`）。agent 仍只能通过 `LocalShellBackend` 的虚拟文件系统视图操作，根路径被限制在工作目录下。
 
 **为什么这样选**：判定权在代码而不在模型。no-op 跳过、fast-forward、漂移重规划都是生命周期级的硬决策，不能依赖模型对 Git 文本的解读；指纹把"源是否变了"压缩为一次相等比较，且指纹通道失败即抛——半可靠的指纹会导致错误的跳过或漏更新。文本证据时代 agent 可能跑错命令、漏掉关键历史、或在无效的 git 探索上烧 token，这些风险一并消失。
 
@@ -62,7 +62,7 @@ OpenWiki 选择了中间路线 —— 用 agent（DeepAgents）做生成，但�
 
 ### 决策 3：提供商配置集中化（Centralized Provider Configuration）
 
-**选择了什么**：`src/config/constants.ts`（1233 行）把所有模型提供商的元数据集中在一处 —— 环境变量 key 名、默认模型、可选模型列表、base URL、region 需求、认证方式、credential gating 逻辑。添加一个新提供商的主要流程是：在 `OpenWikiProvider` 联合类型中加一个新值（`src/config/constants.ts:108`），填一行 `PROVIDER_CONFIGS`（`:255`），在 `createModel()` 中加一个分支（`src/agent/index.ts:1077-1264`，无专属分支的 provider 走 OpenAI-compatible 兜底）。
+**选择了什么**：`src/config/constants.ts`（1233 行）把所有模型提供商的元数据集中在一处 —— 环境变量 key 名、默认模型、可选模型列表、base URL、region 需求、认证方式、credential gating 逻辑。添加一个新提供商的主要流程是：在 `OpenWikiProvider` 联合类型中加一个新值（`src/config/constants.ts:139`），填一行 `PROVIDER_CONFIGS`（`:255`），在 `createModel()` 中加一个分支（`src/agent/index.ts:1123-1465`，无专属分支的 provider 走 OpenAI-compatible 兜底）。
 
 **为什么这样选**：如果不是集中化的，每个提供商的配置会散落在 cli、agent、credentials、env 四个模块中。添加一个 provider 需要在 5 个文件里改 20 处代码，而且极易遗漏。集中化让添加 provider 的单次 diff 是可控的、可 review 的。
 
@@ -70,7 +70,7 @@ OpenWiki 选择了中间路线 —— 用 agent（DeepAgents）做生成，但�
 
 ### 决策 4：模型执行是 provider-stable 的（Provider-Stable Model Execution）
 
-**选择了什么**：OpenWiki 不会在模型调用失败时切换到另一个模型。重试策略由 LangChain 客户端处理（默认 3 次，可通过 `OPENWIKI_PROVIDER_RETRY_ATTEMPTS` 环境变量配置，`src/config/constants.ts:74`），但如果所有重试都失败，OpenWiki 把错误 surface 给用户，不做 fallback。
+**选择了什么**：OpenWiki 不会在模型调用失败时切换到另一个模型。重试策略由 LangChain 客户端处理（默认 3 次，可通过 `OPENWIKI_PROVIDER_RETRY_ATTEMPTS` 环境变量配置，`src/config/constants.ts:86`），但如果所有重试都失败，OpenWiki 把错误 surface 给用户，不做 fallback。
 
 **为什么这样选**：文档质量是 OpenWiki 的核心产品目标。如果因为临时网络故障自动从 Claude Opus 切换到一个较弱模型，生成的文档质量可能大幅下降，用户不会注意到 —— 但他们下次会注意到 wiki 质量不一致。宁愿让运行失败、让用户决定换什么模型重试，也比悄悄降级好。
 
@@ -78,7 +78,7 @@ OpenWiki 选择了中间路线 —— 用 agent（DeepAgents）做生成，但�
 
 ### 决策 5：增量判定代码化——no-op 前置门 + 页台账（Code-Defined Incrementality: No-Op Gate + Page Ledger）
 
-**选择了什么**：防"元数据自搅动"的机制在 re-baseline 中换代。旧方案是"运行前后对 `openwiki/` 做 SHA-256 快照，内容没变就不写 `.last-update.json"`"；新方案把这个职责移到**生成之前**：update 运行在 `beginRepositoryRun` 内过 no-op 严格前置门（`src/generation/repository-run.ts:409-458`）——常规预检 `getUpdateNoopStatus`（`src/agent/utils.ts:126-195`）、claims 无未决 issue、页台账全覆盖、预检前后源指纹相等，四重条件同时成立才跳过；跳过时把 `.page-manifest.json` 整表推进到当前检查点并写 `complete` 元数据。而 `persistRunMetadataIfChanged`（`src/agent/utils.ts:249-272`）**不再对比快照**：生成类运行总是刷新时间戳并清除上轮 `interrupted`——"OpenWiki 跑过了"本身就是新鲜度语义。
+**选择了什么**：防"元数据自搅动"的机制在 re-baseline 中换代。旧方案是"运行前后对 `openwiki/` 做 SHA-256 快照，内容没变就不写 `.last-update.json"`"；新方案把这个职责移到**生成之前**：update 运行在 `beginRepositoryRun` 内过 no-op 严格前置门（`src/generation/repository-run.ts:491-540`）——常规预检 `getUpdateNoopStatus`（`src/agent/utils.ts:119-188`）、claims 无未决 issue、页台账全覆盖、预检前后源指纹相等，四重条件同时成立才跳过；跳过时把 `.page-manifest.json` 整表推进到当前检查点并写 `complete` 元数据。而 `persistRunMetadataIfChanged`（`src/agent/utils.ts:237-260`）**不再对比快照**：生成类运行总是刷新时间戳并清除上轮 `interrupted`——"OpenWiki 跑过了"本身就是新鲜度语义。
 
 **为什么这样选**：旧的两层防抖（运行前 gitHead 检查 + 运行后快照对比）在页任务生命周期下都会失真：快照对比挡不住"claims 有债但内容恰好没变"的假 no-op，而逐页推进的产物也无法用单次整树快照描述。把增量判定建立在源指纹（内容字节哈希、排除 stat 漂移）和页台账（每页完成时的 gitHead + pageVersion）上，"什么算没变"就成了可机械验证的命题，而不是模型或时间戳的推断。
 
@@ -94,7 +94,7 @@ OpenWiki 选择了中间路线 —— 用 agent（DeepAgents）做生成，但�
 
 ### 决策 7：Docs-only 写入守卫（Docs-Only Write Guard）
 
-**选择了什么**：`OpenWikiLocalShellBackend`（`src/agent/docs-only-backend.ts:166`，689 行）继承 DeepAgents 的 `LocalShellBackend`，re-baseline 后从 2 个覆写扩为 **11 个方法全覆写**（read/readRaw/write/edit/delete/ls/grep/glob/uploadFiles/downloadFiles/execute，`:200-509`）。写入判定 `getDocsOnlyWriteError`（`:516-533`）两段式收窄：repository 模式下只允许写 `/openwiki/`（违例返回 `OpenWiki repository init/update runs may only write under /openwiki/. Refused path: ...`），页 worker 进一步被 `writableWikiPages` 锁到单页。在 docs-only 之外另有两条独立边界：`.openwikiignore` 排除（写硬拒绝/发现静默过滤）与 claims 所有权（`openwiki/.claims/` 对通用工具与 shell 隐藏）。
+**选择了什么**：`OpenWikiLocalShellBackend`（`src/agent/docs-only-backend.ts:220`，689 行）继承 DeepAgents 的 `LocalShellBackend`，re-baseline 后从 2 个覆写扩为 **11 个方法全覆写**（read/readRaw/write/edit/delete/ls/grep/glob/uploadFiles/downloadFiles/execute，`:200-509`）。写入判定 `getDocsOnlyWriteError`（`:516-533`）两段式收窄：repository 模式下只允许写 `/openwiki/`（违例返回 `OpenWiki repository init/update runs may only write under /openwiki/. Refused path: ...`），页 worker 进一步被 `writableWikiPages` 锁到单页。在 docs-only 之外另有两条独立边界：`.openwikiignore` 排除（写硬拒绝/发现静默过滤）与 claims 所有权（`openwiki/.claims/` 对通用工具与 shell 隐藏）。
 
 **为什么这样选**：DeepAgents 的 `LocalShellBackend` 默认允许 agent 写文件系统的任意位置。这在通用 agent 场景下是合理的，但在文档产品场景下是危险的 —— 一个提示词注入或模型幻觉可能导致 agent 修改源码文件。docs-only 守卫是最小权限原则在产品层的落地；11 个入口全覆写则堵住了"绕道 ls/glob/upload 侧门"的可能。
 
@@ -102,7 +102,7 @@ OpenWiki 选择了中间路线 —— 用 agent（DeepAgents）做生成，但�
 
 ### 决策 8：Agent 被有意约束（Agent Is Deliberately Constrained）
 
-**选择了什么**：OpenWiki 的 agent 没有暴露任意外部 HTTP 调用能力、不能安装 npm 包、不能执行任意 Python 脚本、不能访问浏览器。它的工具集被限制在四个领域：文件系统发现与写入（ls、glob、grep、read_file、write_file、edit_file）、受白名单约束的 shell（ignore 激活时仅 `pwd` 与 `git rev-parse HEAD`，`src/agent/docs-only-backend.ts:74-77`）、结构化输出（markdown 文件 + claims 载荷提交）、以及连接器数据访问——而 repository 模式下连接器工具直接返回空数组（`src/connectors/tools.ts:38-40`）。页 worker 的工具清单不含 shell（`src/agent/repository-runner.ts:74-85`）。
+**选择了什么**：OpenWiki 的 agent 没有暴露任意外部 HTTP 调用能力、不能安装 npm 包、不能执行任意 Python 脚本、不能访问浏览器。它的工具集被限制在四个领域：文件系统发现与写入（ls、glob、grep、read_file、write_file、edit_file）、受白名单约束的 shell（ignore 激活时仅 `pwd` 与 `git rev-parse HEAD`，`src/agent/docs-only-backend.ts:74-77`）、结构化输出（markdown 文件 + claims 载荷提交）、以及连接器数据访问——而 repository 模式下连接器工具直接返回空数组（`src/connectors/tools.ts:38-40`）。页 worker 的工具清单不含 shell（`src/agent/repository-runner.ts:91-102`）。
 
 **为什么这样选**：OpenWiki 是一个文档产品，它的 agent 的任务是"理解已有的代码并写文档"，不是"探索世界"。每多给 agent 一个工具，就多一个输出不可预测的维度，也多一个安全攻击面。tools 越少，agent 行为越可预测，文档质量越稳定。
 
@@ -110,7 +110,7 @@ OpenWiki 选择了中间路线 —— 用 agent（DeepAgents）做生成，但�
 
 ### 决策 9（新增）：page-job 可恢复生命周期取代单次长运行（Resumable Page-Job Lifecycle over a Single Long-Run）
 
-**选择了什么**：repository init/update 的生成主循环从"一次 DeepAgents 长运行"整体替换为可恢复的页任务（page job）状态机：begin → planning（planner 提交有序 page job 队列）→ generating（每页一个受限 worker）→ finish。进度的持久化边界是**每一页**：写页 → frontmatter 校验 → claims 对账 → `claimsRuntime.finalize` → 页级证明 → `recordCompletion`（写 `.page-manifest.json`）→ 推进 `.run.json` → 最后改内存（`src/generation/repository-run.ts:1183-1298`）；运行状态在 `openwiki/.run.json`（`src/generation/run-state.ts:14`），finish 的最后一步才删除它——删除放在最后，任何一步失败都能重新 begin 恢复。
+**选择了什么**：repository init/update 的生成主循环从"一次 DeepAgents 长运行"整体替换为可恢复的页任务（page job）状态机：begin → planning（planner 提交有序 page job 队列）→ generating（每页一个受限 worker）→ finish。进度的持久化边界是**每一页**：写页 → frontmatter 校验 → claims 对账 → `claimsRuntime.finalize` → 页级证明 → `recordCompletion`（写 `.page-manifest.json`）→ 推进 `.run.json` → 最后改内存（`src/generation/repository-run.ts:1309-1453`）；运行状态在 `openwiki/.run.json`（`src/generation/run-state.ts:14`），finish 的最后一步才删除它——删除放在最后，任何一步失败都能重新 begin 恢复。
 
 **为什么这样选**：单次长运行把"几十页的产出"押在一个进程的存活上：流式中断意味着部分产物悬空、无法可信地续跑，CI 场景下一次超时就丢掉整轮工作。页级持久化让"完成"成为已证明的事实（manifest + claims sidecar 互为一致），崩溃后重新 begin 即恢复，已完成页经 fast-forward 直接推进，只有未完成部分需要重做。
 
@@ -118,7 +118,7 @@ OpenWiki 选择了中间路线 —— 用 agent（DeepAgents）做生成，但�
 
 ### 决策 10（新增）：claims 代码化（Claims as Code, Not Prompt Conventions）
 
-**选择了什么**：wiki 的可信度从提示词里的行为约定升级为确定性实现。`src/claims/`（13 文件 3694 行）定义证据命题（claim）的数据模型、`repo://` 证据解析、稀疏对账（sparse reconciliation）协议与页级互斥的 ClaimSession；`src/okf/`（6 文件）承担 OKF v0.2 front matter 的校验、修复、投影与确定性索引。每页写完后必须通过对账（未提及且无 issue 自动 confirm；stale/unresolved 必须显式处理；页须保 ≥1 claim，`src/generation/page-jobs.ts:402`），页级证明不通过则该页完成不被记录。
+**选择了什么**：wiki 的可信度从提示词里的行为约定升级为确定性实现。`src/claims/`（13 文件 3694 行）定义证据命题（claim）的数据模型、`repo://` 证据解析、稀疏对账（sparse reconciliation）协议与页级互斥的 ClaimSession；`src/okf/`（6 文件）承担 OKF v0.2 front matter 的校验、修复、投影与确定性索引。每页写完后必须通过对账（未提及且无 issue 自动 confirm；stale/unresolved 必须显式处理；页须保 ≥1 claim，`src/generation/page-jobs.ts:417`），页级证明不通过则该页完成不被记录。
 
 **为什么这样选**：旧基线的"每条论断可追溯"只存在于提示词里——模型违反约定时没有任何机制能发现。代码化之后，"这条论断有没有证据、证据还在不在"是 resolver 可以确定性回答的问题；证据版本 token 让"引用的代码被改了"自动变成 stale，而不是静默失真。
 
@@ -134,7 +134,7 @@ OpenWiki 选择了中间路线 —— 用 agent（DeepAgents）做生成，但�
 
 ### 决策 12（新增）：OKF v0.2 信任族（OKF v0.2 Trust Family）
 
-**选择了什么**：wiki 页面的 front matter 采用 OKF v0.2 规范：基础字段（type/title/description/tags）之外，引入**信任族（trust family）**字段——`generated`（谁在何时生成，由 OpenWiki 确定性盖章，模型禁写禁删）、`verified`（校验事件列表）、`sources`（证据投影）、`status`、`stale_after`。校验与修复由 `validateOkfFrontmatter`（`src/okf/frontmatter.ts:118`）确定性执行，`generated-provenance.ts` 在 run 前快照 body hash、run 后对变更页盖章，`index-sync.ts` 提供确定性 index 与 `migrateWikiToOkf`（`src/okf/index-sync.ts:77`）。
+**选择了什么**：wiki 页面的 front matter 采用 OKF v0.2 规范：基础字段（type/title/description/tags）之外，引入**信任族（trust family）**字段——`generated`（谁在何时生成，由 OpenWiki 确定性盖章，模型禁写禁删）、`verified`（校验事件列表）、`sources`（证据投影）、`status`、`stale_after`。校验与修复由 `validateOkfFrontmatter`（`src/okf/frontmatter.ts:118`）确定性执行，`generated-provenance.ts` 在 run 前快照 body hash、run 后对变更页盖章，`index-sync.ts` 提供确定性 index 与 `migrateWikiToOkf`（`src/okf/index-sync.ts:113`）。
 
 **为什么这样选**：front matter 是人、agent 和机器三方共享的元数据接口。没有统一规范，"这页是谁生成的、依据什么证据、多久会过期"就无处安放，claims 的证据链也无法投影到页面可见的位置。信任族把"可信度"变成页面自带的、可校验的字段，而不是仓库外的口头承诺。
 
@@ -142,7 +142,7 @@ OpenWiki 选择了中间路线 —— 用 agent（DeepAgents）做生成，但�
 
 ### 决策 13（新增）：provider 认证四元（Four Authentication Methods for Providers）
 
-**选择了什么**：13 个 provider 的认证方式收敛为四种，由 `ProviderAuthMethod = "api-key" | "aws-sdk" | "external-cli" | "oauth"`（`src/config/constants.ts:129-130`）声明，`getProviderAuthMethod`（`:435`）统一解析：`api-key`（绝大多数 provider，env key + 可选 secret key）、`aws-sdk`（bedrock，AWS 凭据链，配置于 `:268`）、`external-cli`（copilot：凭据由 `gh` CLI 持有，token 不落盘、拒绝 PAT，`:282`）、`oauth`（openai-chatgpt 的 ChatGPT 登录，token 短生命周期 + 自动刷新，`:354`）。
+**选择了什么**：13 个 provider 的认证方式收敛为四种，由 `ProviderAuthMethod = "api-key" | "aws-sdk" | "external-cli" | "oauth"`（`src/config/constants.ts:162-163`）声明，`getProviderAuthMethod`（`:435`）统一解析：`api-key`（绝大多数 provider，env key + 可选 secret key）、`aws-sdk`（bedrock，AWS 凭据链，配置于 `:268`）、`external-cli`（copilot：凭据由 `gh` CLI 持有，token 不落盘、拒绝 PAT，`:282`）、`oauth`（openai-chatgpt 的 ChatGPT 登录，token 短生命周期 + 自动刷新，`:354`）。
 
 **为什么这样选**：认证方式的差异是 provider 之间最本质的差异——比 base URL、模型名深刻得多。把它显式建模为四元后，凭据预检（startup 要求非交互运行具备完整 ChatGPT OAuth 四元组）、CI 工作流模板的凭据块派生（OAuth 型 provider 生成"无无人值守等价物"提示）、external-cli 的 token 解析都能按统一接口分支，而不是在每处 if 里硬编码 provider 名单。
 
@@ -181,7 +181,7 @@ OpenWiki 的架构在 5 个方向上预留了清晰的扩展点。这些方向�
 最成熟的扩展点。添加一个提供商：
 
 1.  在 `src/config/constants.ts` 的 `OpenWikiProvider` 联合类型中加一个值
-2.  在 `PROVIDER_CONFIGS`（`src/config/constants.ts:255`）中加一行配置（含 `authMethod` 声明）
+2.  在 `PROVIDER_CONFIGS`（`src/config/constants.ts:296`）中加一行配置（含 `authMethod` 声明）
 3.  在 `src/agent/index.ts` 的 `createModel()` 中加一个 `case` 分支（无特殊传输需求的 provider 可直接走兜底分支）
 4.  在 `src/config/env.ts` 的托管 env key 清单中注册新 key（让诊断和 env 格式化感知）
 5.  在 `src/setup/credentials/steps.ts` 的向导步骤表（`credentialStep`/`orderedSetupSteps`，:201-249）中加一项——`src/setup/credentials.tsx` 只是 30 行组合根，交互步骤都在 `credentials/` 子目录
@@ -198,11 +198,11 @@ OpenWiki 的架构在 5 个方向上预留了清晰的扩展点。这些方向�
 
 ### 4.4 新宿主集成（New Host Integrations）
 
-`openwiki integrations` 的宿主目标注册在 `src/integrations/install/registry.ts`（4 目标：codex/claude/opencode/cursor）。添加新 host：在 registry 加条目、扩展 `HostTargetId` 联合、在 installer 的三处 switch（配置适配器分派，`src/integrations/install/installer.ts:571` 起）各加一个适配器分支。事务安装、receipt 与回滚机制对新 host 自动生效。
+`openwiki integrations` 的宿主目标注册在 `src/integrations/install/registry.ts`（4 目标：codex/claude/opencode/cursor）。添加新 host：在 registry 加条目、扩展 `HostTargetId` 联合、在 installer 的三处 switch（配置适配器分派，`src/integrations/install/installer.ts:585` 起）各加一个适配器分支。事务安装、receipt 与回滚机制对新 host 自动生效。
 
 ### 4.5 新输出目录结构（New Output Structure）
 
-输出格式已随 OKF v0.2 成为规范产物：每个概念页携带 front matter 信任族字段（见决策 12），索引由 `src/okf/index-sync.ts` 确定性生成；旧 wiki 的迁移由 `migrateWikiToOkf`（`src/okf/index-sync.ts:77`）确定性完成，不再依赖提示词驱动的 skill。未来格式演进沿 `SOURCE_FINGERPRINT_VERSION` 同样的版本化思路——换版本号触发全量重写，而不是静默兼容。
+输出格式已随 OKF v0.2 成为规范产物：每个概念页携带 front matter 信任族字段（见决策 12），索引由 `src/okf/index-sync.ts` 确定性生成；旧 wiki 的迁移由 `migrateWikiToOkf`（`src/okf/index-sync.ts:113`）确定性完成，不再依赖提示词驱动的 skill。未来格式演进沿 `SOURCE_FINGERPRINT_VERSION` 同样的版本化思路——换版本号触发全量重写，而不是静默兼容。
 
 ---
 
@@ -213,27 +213,27 @@ OpenWiki 的架构在 5 个方向上预留了清晰的扩展点。这些方向�
 | `src/cli/cli.tsx`（111 行） | 入口序列 | 决策 1：crashGuard → parseCommand → 启动路由 |
 | `src/setup/credentials.tsx` | `InitSetup` 组合根 | 决策 1：30 行组合根 + `credentials/` 8 文件 |
 | `src/cli/run-mode.ts:61` | `shouldAutoExitStartupRun` | 决策 6：auto-exit 判断（旧 `src/cli.tsx:3951` 已拆出） |
-| `src/agent/utils.ts:74-97` | `createRunContext` | 决策 2：运行上下文组装（无 gitSummary） |
-| `src/agent/utils.ts:331-404` | `createRepositorySourceSnapshot` | 决策 2：源指纹 + gitHead |
-| `src/agent/utils.ts:909-949` | `getRepositoryChangedPaths` | 决策 2：结构化变更清单（失败降级空） |
-| `src/config/constants.ts:108` | `OpenWikiProvider` | 决策 3：提供商联合类型（13 值） |
-| `src/config/constants.ts:255` | `PROVIDER_CONFIGS` | 决策 3：集中化提供商配置表 |
-| `src/config/constants.ts:129-130` | `ProviderAuthMethod` | 决策 13：认证四元 `"api-key" \| "aws-sdk" \| "external-cli" \| "oauth"` |
-| `src/config/constants.ts:435` | `getProviderAuthMethod` | 决策 13：认证方式解析 |
-| `src/agent/index.ts:1077-1264` | `createModel` | 决策 3：按 provider 分支的模型工厂 |
-| `src/agent/utils.ts:249-272` | `persistRunMetadataIfChanged` | 决策 5：总是刷新元数据（防抖已删除） |
-| `src/agent/utils.ts:126-195` | `getUpdateNoopStatus` | 决策 5：update no-op 预检 |
-| `src/generation/repository-run.ts:409-458` | no-op 严格前置门 | 决策 5：预检 + claims + 覆盖 + 指纹稳定四重条件 |
+| `src/agent/utils.ts:67-90` | `createRunContext` | 决策 2：运行上下文组装（无 gitSummary） |
+| `src/agent/utils.ts:319-392` | `createRepositorySourceSnapshot` | 决策 2：源指纹 + gitHead |
+| `src/agent/utils.ts:946-1106` | `getRepositoryChangedPaths` | 决策 2：结构化变更清单（失败降级空） |
+| `src/config/constants.ts:139` | `OpenWikiProvider` | 决策 3：提供商联合类型（13 值） |
+| `src/config/constants.ts:296` | `PROVIDER_CONFIGS` | 决策 3：集中化提供商配置表 |
+| `src/config/constants.ts:162-163` | `ProviderAuthMethod` | 决策 13：认证四元 `"api-key" \| "aws-sdk" \| "external-cli" \| "oauth"` |
+| `src/config/constants.ts:502` | `getProviderAuthMethod` | 决策 13：认证方式解析 |
+| `src/agent/index.ts:1123-1465` | `createModel` | 决策 3：按 provider 分支的模型工厂 |
+| `src/agent/utils.ts:237-260` | `persistRunMetadataIfChanged` | 决策 5：总是刷新元数据（防抖已删除） |
+| `src/agent/utils.ts:119-188` | `getUpdateNoopStatus` | 决策 5：update no-op 预检 |
+| `src/generation/repository-run.ts:491-540` | no-op 严格前置门 | 决策 5：预检 + claims + 覆盖 + 指纹稳定四重条件 |
 | `src/generation/run-state.ts:14` | `.run.json` 基名 | 决策 9：可恢复检查点文件 |
-| `src/generation/repository-run.ts:1183-1298` | 页事务序 | 决策 9：写页 → claims → manifest → .run.json → 内存 |
-| `src/generation/page-jobs.ts:402` | `reconcilePageClaims` | 决策 10：稀疏对账（未提及即 confirm；≥1 claim） |
+| `src/generation/repository-run.ts:1309-1453` | 页事务序 | 决策 9：写页 → claims → manifest → .run.json → 内存 |
+| `src/generation/page-jobs.ts:417` | `reconcilePageClaims` | 决策 10：稀疏对账（未提及即 confirm；≥1 claim） |
 | `src/okf/frontmatter.ts:118` | `validateOkfFrontmatter` | 决策 12：OKF v0.2 校验 |
-| `src/okf/index-sync.ts:77` | `migrateWikiToOkf` | 决策 12 / 4.5：确定性 wiki 迁移 |
-| `src/agent/docs-only-backend.ts:166` | `OpenWikiLocalShellBackend` | 决策 7：后端安全边界（11 方法全覆写） |
-| `src/agent/docs-only-backend.ts:516-533` | `getDocsOnlyWriteError` | 决策 7：docs-only + 页白名单两段式判定 |
+| `src/okf/index-sync.ts:113` | `migrateWikiToOkf` | 决策 12 / 4.5：确定性 wiki 迁移 |
+| `src/agent/docs-only-backend.ts:220` | `OpenWikiLocalShellBackend` | 决策 7：后端安全边界（11 方法全覆写） |
+| `src/agent/docs-only-backend.ts:583-600` | `getDocsOnlyWriteError` | 决策 7：docs-only + 页白名单两段式判定 |
 | `src/connectors/tools.ts:38-40` | repository 工具门控 | 决策 8：repository 模式连接器工具为空数组 |
-| `src/agent/repository-runner.ts:74-85` | worker 工具清单 | 决策 8：页 worker 无 shell |
+| `src/agent/repository-runner.ts:91-102` | worker 工具清单 | 决策 8：页 worker 无 shell |
 | `src/integrations/install/installer.ts:156` | `install()` | 决策 14：事务安装主流程 |
-| `src/integrations/install/skill-bundle.ts:12` | `.openwiki-install.json` receipt | 决策 14：SHA-256 清单回执 |
-| `src/integrations/install/installer.ts:469` | `rollbackInstall` | 决策 14：失败回滚 |
-| `src/agent/types.ts:101-105` | `RunContext` | 决策 2：`lastUpdate` + `language` + `wikiGoal` |
+| `src/integrations/install/skill-bundle.ts:13` | `.openwiki-install.json` receipt | 决策 14：SHA-256 清单回执 |
+| `src/integrations/install/installer.ts:483` | `rollbackInstall` | 决策 14：失败回滚 |
+| `src/agent/types.ts:130-134` | `RunContext` | 决策 2：`lastUpdate` + `language` + `wikiGoal` |

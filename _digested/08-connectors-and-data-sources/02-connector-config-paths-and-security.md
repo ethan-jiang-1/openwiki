@@ -28,7 +28,7 @@ out_of_scope:
 连接器子系统的配置与安全可以压缩成四句话：
 
 1. **配置分两条通路**（双配置通路，dual configuration path）：personal 连接器的配置住用户主目录 `~/.openwiki/connectors/<id>/config.json`，code 连接器（当前只有 langsmith）的配置随仓库提交到 `<repoRoot>/openwiki/.langsmith.json`。
-2. **所有 HTTP 型抓取共享一层弹性重试**（resilient retry）：`fetchWithResilience`（`src/connectors/http.ts:95-145`）统一 30 秒超时、仅对 429/5xx 重试、尊重 `Retry-After`、退避上限 20 秒。
+2. **所有 HTTP 型抓取共享一层弹性重试**（resilient retry）：`fetchWithResilience`（`src/connectors/http.ts:144-200`）统一 30 秒超时、仅对 429/5xx 重试、尊重 `Retry-After`、退避上限 20 秒。
 3. **手编 JSON 一律先规整**（normalization）：数组字段逐层 `Array.isArray` + 白名单 + 默认值回落，坏配置降级而不是炸掉摄取。
 4. **安全边界显式白名单化**：MCP 子进程环境变量走 `CHILD_ENV_ALLOWLIST`；langsmith 的 API 主机与密钥环境变量名走双白名单；所有「把密钥写给第三方」的路径都要求凭证以环境变量**名**引用、按名解析。
 
@@ -72,7 +72,7 @@ langsmith 是当前唯一的 `mode: "code"` 连接器，其配置**随仓库提�
 }
 ```
 
-**通路如何接通**：code 模式管线的 `runCodeModeConnectors(repoRoot, …)`（`src/ingestion/code-mode.ts:105-148`）计算增量窗口后，对每个 `mode === "code"` 的连接器调用 `connector.ingest({ repoRoot, windowHours })`（`code-mode.ts:125`）。langsmith 的 ingest 若发现 `options.repoRoot === undefined` 就干净跳过（`langsmith/index.ts:143-145`）——这是 `ConnectorIngestOptions.repoRoot`（`src/connectors/types.ts:29`）存在的意义：仓库根路径只经这条参数流入 code 连接器，personal 连接器永远不会收到它。
+**通路如何接通**：code 模式管线的 `runCodeModeConnectors(repoRoot, …)`（`src/ingestion/code-mode.ts:129-172`）计算增量窗口后，对每个 `mode === "code"` 的连接器调用 `connector.ingest({ repoRoot, windowHours })`（`code-mode.ts:125`）。langsmith 的 ingest 若发现 `options.repoRoot === undefined` 就干净跳过（`langsmith/index.ts:143-145`）——这是 `ConnectorIngestOptions.repoRoot`（`src/connectors/types.ts:29`）存在的意义：仓库根路径只经这条参数流入 code 连接器，personal 连接器永远不会收到它。
 
 ### 2.3 两条通路对照
 
@@ -91,11 +91,11 @@ langsmith 是当前唯一的 `mode: "code"` 连接器，其配置**随仓库提�
 
 ### 3.1 为什么存在
 
-`src/connectors/http.ts:1-17` 的模块注释记录了动机：此前每个连接器（Gmail、Slack、X、Hacker News）和 HTTP MCP 客户端都裸调 `fetch`——没有超时也没有重试，任何 429 或瞬时 5xx 直接废掉整轮 run，无响应的服务器则让摄取永久挂起。
+`src/connectors/http.ts:1-22` 的模块注释记录了动机：此前每个连接器（Gmail、Slack、X、Hacker News）和 HTTP MCP 客户端都裸调 `fetch`——没有超时也没有重试，任何 429 或瞬时 5xx 直接废掉整轮 run，无响应的服务器则让摄取永久挂起。
 
 ### 3.2 `fetchWithResilience` 的行为契约
 
-`src/connectors/http.ts:95-145`，签名 `fetchWithResilience(input, init?, options?)`，逐尝试（per-attempt）语义：
+`src/connectors/http.ts:144-200`，签名 `fetchWithResilience(input, init?, options?)`，逐尝试（per-attempt）语义：
 
 - **30 秒墙钟超时**：每次尝试用 `AbortSignal.timeout(30_000)`（默认值 `DEFAULT_TIMEOUT_MS`，`http.ts:19`；信号构造在 `:111-114`）。调用方自带 `init.signal` 时用 `AbortSignal.any` 组合，谁先中止听谁的。
 - **只重试 429 与 5xx**：`isRetryableStatus`（`http.ts:50-52`）= `status === 429 || 500..599`。**401/403 与其余 4xx 原样透传**（`:14-16` 注释、`:119` 条件）——它们不是瞬时故障，且 Gmail 需要看到 401 才触发 token 刷新，重试只会浪费次数甚至锁账号。
@@ -309,7 +309,7 @@ langsmith 对故障的策略是**失效开放（fail-open）**——一切失败
 | `src/config/constants.ts:1` | `OPEN_WIKI_DIR` | 仓库内 `openwiki/` 目录名 |
 | `src/connectors/io.ts:11-31` | `readConnectorConfig` | personal 配置读取（ENOENT→默认，浅合并） |
 | `src/connectors/types.ts:29` | `ConnectorIngestOptions.repoRoot` | code 通路参数 |
-| `src/ingestion/code-mode.ts:105-148` | `runCodeModeConnectors` | mode 分流 `:115`、`ingest({repoRoot, windowHours})` `:125`、管线级 fail-open `:126-129` |
+| `src/ingestion/code-mode.ts:129-172` | `runCodeModeConnectors` | mode 分流 `:115`、`ingest({repoRoot, windowHours})` `:125`、管线级 fail-open `:126-129` |
 | `src/connectors/sources/langsmith/repo-config.ts:13-42` | `LangSmithWorkspaceConfig`、`LangSmithRepoConfig` | 提交配置 schema（密钥只存 env 名） |
 | `src/connectors/sources/langsmith/repo-config.ts:49-53` | `ALLOWED_API_HOSTS` | US/EU/APAC 三主机白名单 |
 | `src/connectors/sources/langsmith/repo-config.ts:61` | `API_KEY_ENV_PATTERN` | `^OPENWIKI_LANGSMITH_API_KEY(_[A-Z0-9]+)?$` |
@@ -328,11 +328,11 @@ langsmith 对故障的策略是**失效开放（fail-open）**——一切失败
 | `src/connectors/sources/langsmith/runs.ts:31-73` | `selectSampleBuckets` | error→outlier（≤非错误池 1/4）→baseline |
 | `src/connectors/sources/langsmith/setup.ts:11-22` | `LangSmithRegion`、EU/APAC 常量 | 区域模型（含 APAC） |
 | `src/connectors/sources/langsmith/setup.ts:55-126` | `loadLangSmithSetup`/`saveLangSmithSetup`/`nextLangSmithApiKeyEnv` | region↔apiBaseUrl 互转、key env 分配 |
-| `src/connectors/http.ts:19-22` | 超时/重试/基数/上限常量 | 30s / 3 次 / 500ms / 20s |
-| `src/connectors/http.ts:50-52` | `isRetryableStatus` | 仅 429 与 5xx |
-| `src/connectors/http.ts:59-78` | `parseRetryAfterMs` | delta-seconds / HTTP-date |
-| `src/connectors/http.ts:80-88` | `backoffDelayMs` | 指数 + full jitter，ceiling 20s |
-| `src/connectors/http.ts:95-145` | `fetchWithResilience` | 主循环：组合信号 `:111-114`、重试 `:119-131`、网络错误 `:135-141` |
+| `src/connectors/http.ts:24-27` | 超时/重试/基数/上限常量 | 30s / 3 次 / 500ms / 20s |
+| `src/connectors/http.ts:73-75` | `isRetryableStatus` | 仅 429 与 5xx |
+| `src/connectors/http.ts:82-101` | `parseRetryAfterMs` | delta-seconds / HTTP-date |
+| `src/connectors/http.ts:103-111` | `backoffDelayMs` | 指数 + full jitter，ceiling 20s |
+| `src/connectors/http.ts:144-200` | `fetchWithResilience` | 主循环：组合信号 `:111-114`、重试 `:119-131`、网络错误 `:135-141` |
 | `src/connectors/sources/gmail.ts:9,312` | `fetchWithResilience` 接入 | 401 透传供 token 刷新 |
 | `src/connectors/sources/slack.ts:13,550` | 接入 | |
 | `src/connectors/sources/x.ts:21,267` | 接入 | |

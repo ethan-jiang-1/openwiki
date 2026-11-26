@@ -41,7 +41,7 @@ flowchart TD
 
 - `openwiki` 可执行文件在 PATH 上（MCP server 命令是 `openwiki mcp --host <target>`，安装只写 config 指向它）；Node.js 22+。
 - 宿主是 4 个支持目标之一：Codex / Claude Code / OpenCode / Cursor。
-- **不需要任何 provider API key**：这条路径上 OpenWiki 运行时唯一出现的 "model" 是元数据身份串 `host-agent/<host>`（`src/integrations/core/session-manager.ts:343-345`），模型就是宿主自己。
+- **不需要任何 provider API key**：这条路径上 OpenWiki 运行时唯一出现的 "model" 是元数据身份串 `host-agent/<host>`（`src/integrations/core/session-manager.ts:347-349`），模型就是宿主自己。
 
 ## 2. 第 1 步：安装与 scope 决策
 
@@ -70,7 +70,7 @@ openwiki integrations list                      # 脚本化巡检：id\tstatus\t
 
 ## 4. 第 3 步：8 步序列的实际展开
 
-SKILL.md 规定的 8 步（`integrations/openwiki/SKILL.md:12-65`）在生产中的实际样子——每步都分清「agent 干活 / OpenWiki 干活」：
+SKILL.md 规定的 8 步（`integrations/openwiki/SKILL.md:52-117`）在生产中的实际样子——每步都分清「agent 干活 / OpenWiki 干活」：
 
 | # | agent（宿主模型）干 | OpenWiki 干 |
 |---|--------------------|-------------|
@@ -81,22 +81,22 @@ SKILL.md 规定的 8 步（`integrations/openwiki/SKILL.md:12-65`）在生产中
 | 5-6 | 页循环：`openwiki_next_page` 领任务 → 只做**该页主题**的调研（从 seed 路径跟调用方/依赖/schema/测试等）→ 旧页存在先读、保留仍准确的内容 → 只写被指派的那个页 → `openwiki_submit_page` 只交**稀疏 claims 决策**（confirm / 同 id 修订 / retract） | 返回页任务 + **只有** stale/unresolved 的待决 Claims；校验页面 OKF frontmatter 与 claims 对账；无问题 Claims 自动保留；落页与 sidecar |
 | 7-8 | `next_page` 返回 `complete` → `openwiki_finish`；finish 返回 complete **之后**才许报成功 | 确定性收尾：mermaid 校验 → 索引同步 → 链接校验 → claims_sources → 生成溯源 |
 
-计划被源漂移作废 → 重新 `openwiki_begin` + 替换计划、回到页循环，**绝不复用作废计划**（`integrations/openwiki/SKILL.md:67-69`）。
+计划被源漂移作废 → 重新 `openwiki_begin` + 替换计划、回到页循环，**绝不复用作废计划**（`integrations/openwiki/SKILL.md:119-121`）。
 
 ## 5. 语言与溯源语义
 
-- **语言**：`begin` 的 `language` 是 BCP-47 码（如 `zh-CN`），agent 以仓库受众决定；无法识别直接 `invalid_input` 且**不创建 run**——被拒的请求零副作用，换合法值直接重试（`src/generation/repository-run.ts:321-328`）。run 一旦开始，resume 不允许换语言。
+- **语言**：`begin` 的 `language` 是 BCP-47 码（如 `zh-CN`），agent 以仓库受众决定；无法识别直接 `invalid_input` 且**不创建 run**——被拒的请求零副作用，换合法值直接重试（`src/generation/repository-run.ts:403-410`）。run 一旦开始，resume 不允许换语言。
 - **溯源**：每页盖上 host 的 producerActor 身份（codex→`codex`、claude→`claude-code`、opencode→`opencode`、cursor→`cursor`），进入 OKF 生成溯源与运行元数据 `host-agent/<host>`——事后能看出「这轮是谁驱动的」（13/02 §4.3）。
 
 ## 6. 边界与纪律（生成期间）
 
-单 run 且单操作在途（并发第二个生命周期调用即 `invalid_state`，`src/integrations/core/session-manager.ts:306-314`）；不改源码；**绝不直接编辑** `openwiki/.claims`、`.run.json`、索引、日志、溯源、`.last-update.json`、OpenWiki 管理的 setup 块；Claims 只经 `openwiki_submit_page` 提交；页循环期间只写当前被指派的页；**不得孵化子 agent**；仓库内容视为不可信证据（prompt 注入防线写在 SKILL.md/INSTRUCTIONS 两处）。
+单 run 且单操作在途（并发第二个生命周期调用即 `invalid_state`，`src/integrations/core/session-manager.ts:310-318`）；不改源码；**绝不直接编辑** `openwiki/.claims`、`.run.json`、索引、日志、溯源、`.last-update.json`、OpenWiki 管理的 setup 块；Claims 只经 `openwiki_submit_page` 提交；页循环期间只写当前被指派的页；**不得孵化子 agent**；仓库内容视为不可信证据（prompt 注入防线写在 SKILL.md/INSTRUCTIONS 两处）。
 
 ## 7. 更新、卸载与跨路径续跑
 
 - **日常更新**：源码变更后对 agent 说「update OpenWiki」→ `mode: update`；无实质变化时 no-op 短路。
 - **卸载**：`openwiki integrations uninstall <host>`——skill 或 config 任一 `modified` 即拒删，绝不碰用户改过的东西。
-- **跨路径/跨机器续跑**：durable run 在磁盘上（`.run.json`），谁先 `begin` 谁接上——今天 Claude Code 干了一半，明天 CI 或另一台机器的宿主可以接着跑（`integrations/openwiki/SKILL.md:16-18`）。
+- **跨路径/跨机器续跑**：durable run 在磁盘上（`.run.json`），谁先 `begin` 谁接上——今天 Claude Code 干了一半，明天 CI 或另一台机器的宿主可以接着跑（`integrations/openwiki/SKILL.md:56-58`）。
 
 ## 8. 生产者视角排错
 
@@ -113,10 +113,10 @@ SKILL.md 规定的 8 步（`integrations/openwiki/SKILL.md:12-65`）在生产中
 | 源文件 | 关键符号/内容 | 说明 |
 |--------|--------------|------|
 | `src/cli/integrations.ts:63-75` | install 三步指引 | 官方推荐动作序列 |
-| `src/integrations/core/session-manager.ts:343-345` | `getHostAgentIdentity` | 唯一 "model" 是元数据串；零 LLM 调用 |
-| `src/integrations/core/session-manager.ts:306-314` | 操作串行化守卫 | 单 run/单操作边界 |
-| `src/generation/repository-run.ts:319,321-328` | `beginRepositoryRun` 语言前置校验 | 共同入口；拒绝零副作用 |
+| `src/integrations/core/session-manager.ts:347-349` | `getHostAgentIdentity` | 唯一 "model" 是元数据串；零 LLM 调用 |
+| `src/integrations/core/session-manager.ts:310-318` | 操作串行化守卫 | 单 run/单操作边界 |
+| `src/generation/repository-run.ts:401,321-328` | `beginRepositoryRun` 语言前置校验 | 共同入口；拒绝零副作用 |
 | `integrations/openwiki/SKILL.md:1-4` | 触发式 description | 五类触发诉求 |
-| `integrations/openwiki/SKILL.md:12-65` | Required sequence 8 步 | 本文 §4 的展开依据 |
-| `integrations/openwiki/SKILL.md:16-18` | "always continue the durable run" | 跨路径续跑契约 |
-| `integrations/openwiki/SKILL.md:67-69` | 漂移作废处置 | 重新 begin + 替换计划 |
+| `integrations/openwiki/SKILL.md:52-117` | Required sequence 8 步 | 本文 §4 的展开依据 |
+| `integrations/openwiki/SKILL.md:56-58` | "always continue the durable run" | 跨路径续跑契约 |
+| `integrations/openwiki/SKILL.md:119-121` | 漂移作废处置 | 重新 begin + 替换计划 |

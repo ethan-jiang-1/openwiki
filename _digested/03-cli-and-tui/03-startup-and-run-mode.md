@@ -123,7 +123,7 @@ out_of_scope:
 | `src/cli/diagnostics/error-diagnostics.ts:38` | `getErrorDiagnostics` | 结构化错误诊断 |
 | `src/cli/diagnostics/auth-fix.ts:43,69` | `getAuthFix`/`getAuthFixSteps` | 认证错误修复建议 |
 | `src/cli/diagnostics/sanitize.ts:12,31` | `sanitizeHeaderValue`/`stripControlCharacters` | 诊断输出脱敏 |
-| `src/platform/diagnostics.ts:31,124` | `sanitizeDiagnosticText`/`getErrorMessage` | 平台层错误字符串化 |
+| `src/platform/diagnostics.ts:32,124` | `sanitizeDiagnosticText`/`getErrorMessage` | 平台层错误字符串化 |
 | `src/cli/process-interrupt.ts:18` | `requestProcessInterrupt` | 统一进程中断 |
 | `src/cli/guards.ts:6,16` | `isRecord`/`isDiagnosticValue` | 诊断结构守卫 |
 | `src/config/openwiki-home.ts` | `openWikiLocalWikiDir` | personal 模式工作目录 |

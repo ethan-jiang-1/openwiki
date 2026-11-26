@@ -45,7 +45,7 @@ OpenWiki 的遥测是一条**每 run 恰好一个事件**的最小管线：init/
 runOpenWikiAgent (src/agent/index.ts)
         │ 填充 telemetryContext {provider, outcome}
         ▼
-withRunTelemetry (src/cli/runners.ts:294 / src/ingestion/ingestion.ts:193)
+withRunTelemetry (src/cli/runners.ts:294 / src/ingestion/ingestion.ts:195)
         │ 失败时: describeErrorForTelemetry → {errorClass,errorDetail,errorOwner,errorStage,httpStatus}
         ▼
 recordRunSafe (record-run-safe.ts:36)      ← chat 在此被丢弃
@@ -195,7 +195,7 @@ recordRun (senders.ts:135)
 3. `rename`（:282）原子替换最终目录项本身——rename 替换的是目录项而不是顺着 symlink 写穿。
 4. 失败时 best-effort 清理 scratch 并向 stderr 报一条消息（:283-290）。
 
-这样设计的动机（:261-269 注释）：`--telemetry-file` 可能指向 /tmp 之类的共享目录，直接写会踩中预埋 symlink（用我们的权限覆写任意文件）并因 umask 泄漏 run 元数据给同机其他用户。CLI 解析 `--telemetry-file` / `--telemetry-file=<path>` 在 `src/cli/commands.ts:907-935`。
+这样设计的动机（:261-269 注释）：`--telemetry-file` 可能指向 /tmp 之类的共享目录，直接写会踩中预埋 symlink（用我们的权限覆写任意文件）并因 umask 泄漏 run 元数据给同机其他用户。CLI 解析 `--telemetry-file` / `--telemetry-file=<path>` 在 `src/cli/commands.ts:1002-1030`。
 
 tee 记录的两种形状（JSON、两空格缩进、尾随换行）：
 
@@ -214,7 +214,7 @@ tee 记录的两种形状（JSON、两空格缩进、尾随换行）：
 
 **披露流程**（首跑通知是遥测的知情同意面）：
 
-1. CLI 启动最前判定：`src/cli/cli.tsx:76-78`，且仅当 `commandEmitsTelemetry(command)` 为真——只有非 dry-run 的 init/update run 命令才算（`src/cli/commands.ts:1062-1067`）。判定发生在**任何事件发送之前**，保证披露先于输出（cli.tsx:71-73 注释）。
+1. CLI 启动最前判定：`src/cli/cli.tsx:77-79`，且仅当 `commandEmitsTelemetry(command)` 为真——只有非 dry-run 的 init/update run 命令才算（`src/cli/commands.ts:1157-1162`）。判定发生在**任何事件发送之前**，保证披露先于输出（cli.tsx:71-73 注释）。
 2. 文案单源在 `config.ts:37-41` 三条常量，存裸文本；每条渲染面自己包宽度：交互 TUI 渲染成 Ink 盒子、print/非 TTY 路径在 stderr 上加框换行（`src/cli/components/first-run-notice.tsx:13,:42-52`，固定宽 64）。
 3. 通知只出现一次（install id 已存在后 `isNew: false`）；CI 与退出态既不显示也不铸 id。
 
@@ -238,12 +238,12 @@ tee 记录的两种形状（JSON、两空格缩进、尾随换行）：
 | 调用点 | 位置 | 说明 |
 |--------|------|------|
 | CLI init/update/chat | `src/cli/runners.ts:289-298` | `withRunTelemetry` 包住 repo setup → connector 拉取 → agent 全序列；`telemetryFile` 从 run options 透传（:285） |
-| 摄取（ingestion） | `src/ingestion/ingestion.ts:190-198` | 每源更新也走 `withRunTelemetry("update",…)`，与 CLI 路径同形 |
-| 首跑通知判定 | `src/cli/cli.tsx:76-78` | 启动最前，仅 init/update run 命令（`commands.ts:1062-1067`） |
+| 摄取（ingestion） | `src/ingestion/ingestion.ts:192-200` | 每源更新也走 `withRunTelemetry("update",…)`，与 CLI 路径同形 |
+| 首跑通知判定 | `src/cli/cli.tsx:77-79` | 启动最前，仅 init/update run 命令（`commands.ts:1062-1067`） |
 | chat（经 run 生命周期） | `record-run-safe.ts:51-53` | 直接 return，不产生事件 |
 | auth/cron/visualize 等 | 不进入 run 生命周期 | 与遥测无接触 |
 
-run 事实在 agent 侧的发布通道（`RunTelemetryContext`，详见 04 篇 §6）：provider 在解析成功的瞬间发布（`src/agent/index.ts:185` repository-native 路径、:249 通用路径），`noop` 短路在 `:216` 发布；成功/失败结果由 `withRunTelemetry` 兜底判定。这样即便失败发生在 provider 解析之后的其他环节，事件仍归因到正确 provider。
+run 事实在 agent 侧的发布通道（`RunTelemetryContext`，详见 04 篇 §6）：provider 在解析成功的瞬间发布（`src/agent/index.ts:198` repository-native 路径、:249 通用路径），`noop` 短路在 `:216` 发布；成功/失败结果由 `withRunTelemetry` 兜底判定。这样即便失败发生在 provider 解析之后的其他环节，事件仍归因到正确 provider。
 
 ## 9. 隐私边界：采什么、绝不采什么
 
@@ -297,5 +297,5 @@ run 事实在 agent 侧的发布通道（`RunTelemetryContext`，详见 04 篇 �
 | `src/telemetry/index.ts:1-32` | 桶导出 | 公共 API 面 |
 | `scripts/stamp-build-channel.cjs:18-42` | `BUILD_CHANNELS` / `resolveBuildChannel` | official 只能由发布管线显式产出 |
 | `src/cli/runners.ts:289-298` | `withRunTelemetry` 调用 | CLI 单一边界 |
-| `src/ingestion/ingestion.ts:190-198` | `withRunTelemetry` 调用 | 摄取路径接入 |
-| `src/cli/cli.tsx:76-78` | `firstRunNoticePending` 调用 | 披露先于输出（判定门 `commands.ts:1062-1067`） |
+| `src/ingestion/ingestion.ts:192-200` | `withRunTelemetry` 调用 | 摄取路径接入 |
+| `src/cli/cli.tsx:77-79` | `firstRunNoticePending` 调用 | 披露先于输出（判定门 `commands.ts:1062-1067`） |

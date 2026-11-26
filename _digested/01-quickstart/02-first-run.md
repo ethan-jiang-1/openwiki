@@ -27,7 +27,7 @@ out_of_scope:
 
 ## 1. 两条第一次运行的路径
 
-先纠正一个容易搞错的口径：**裸 `openwiki` 默认进的是代码模式（code mode），不是个人模式**。这一点以源码为准——`src/cli/commands.ts:530` 把不带模式词的调用解析为 `parseRunCommand(argv, "code", "default")`；`--init`、`--update` 等非 chat 命令缺省也是 code（`src/cli/commands.ts:980-982`）。个人模式必须显式写 `personal` 位置参数（或 `--mode personal`）。
+先纠正一个容易搞错的口径：**裸 `openwiki` 默认进的是代码模式（code mode），不是个人模式**。这一点以源码为准——`src/cli/commands.ts:625` 把不带模式词的调用解析为 `parseRunCommand(argv, "code", "default")`；`--init`、`--update` 等非 chat 命令缺省也是 code（`src/cli/commands.ts:1075-1077`）。个人模式必须显式写 `personal` 位置参数（或 `--mode personal`）。
 
 | 你想要 | 命令 | wiki 写到哪 | 首跑触发 |
 |--------|------|-------------|---------|
@@ -36,12 +36,12 @@ out_of_scope:
 
 两个补充事实：
 
-- 向导内部**没有**「选模式」这一屏：CLI 以 `allowModeSelection={false}` 挂载向导（`src/cli/app/app.tsx:743-749`），模式完全由命令行决定。向导步骤类型里保留着 `run-mode` 步骤（`src/setup/credentials/steps.ts:208-210`），但 CLI 入口未启用它。
-- `--mode <personal|code>` 与位置参数等价，用法示例见 `src/cli/commands.ts:1095-1096` 的 usage 文本。
+- 向导内部**没有**「选模式」这一屏：CLI 以 `allowModeSelection={false}` 挂载向导（`src/cli/app/app.tsx:743-749`），模式完全由命令行决定。向导步骤类型里保留着 `run-mode` 步骤（`src/setup/credentials/steps.ts:237-239`），但 CLI 入口未启用它。
+- `--mode <personal|code>` 与位置参数等价，用法示例见 `src/cli/commands.ts:1190-1191` 的 usage 文本。
 
 ## 2. 什么时候会弹出向导
 
-启动门是 `needsCredentialSetup()`（`src/setup/credentials/steps.ts:68-92`）：满足任一条件就渲染向导——
+启动门是 `needsCredentialSetup()`（`src/setup/credentials/steps.ts:74-98`）：满足任一条件就渲染向导——
 
 - 模型凭据不完整：没选过 provider、缺 API key/token、没设过模型 ID；
 - 当前模式的引导（onboarding）未完成：code 模式看目标仓库的 `openwiki/INSTRUCTIONS.md` 加 `modeId=code` 的引导配置；personal 模式看全局 `~/.openwiki/INSTRUCTIONS.md` 加已配置的调度（ingestionSchedule）。
@@ -65,10 +65,10 @@ out_of_scope:
 几个步骤的展开：
 
 - **凭据输入因 provider 而异**：大多数是粘贴 API key（遮罩输入，保存前不落盘）；OpenAI (ChatGPT login) 走浏览器 OAuth 登录；GitHub Copilot 检测本机 `gh` CLI 会话（没有可在凭据提示处按 `Tab` 登录）；AWS Bedrock 要 access key + secret key 两项；Gemini Enterprise（Vertex AI）免 key，填 GCP project ID（可选 location）。
-- **Provider 与模型**：可选项来自 `SELECTABLE_OPENWIKI_PROVIDERS`，共 13 个（`src/config/constants.ts:239-253`）；引导默认 OpenAI（`src/config/constants.ts:105`），默认模型 `gpt-5.6-terra`（仓库根 `README.md` Model providers 节）。深入内容见 `06-model-providers/`。
-- **wiki brief 的落点分两种**：code 模式先确认目标仓库（默认取当前目录向上最近的 git 仓库根，`src/setup/credentials/steps.ts:687-706`），brief 写入 `<仓库>/openwiki/INSTRUCTIONS.md`（0644，随仓库提交）；personal 模式写入 `~/.openwiki/INSTRUCTIONS.md`（0600）。数据层约定见 `10-ingestion-and-personal-mode/02-onboarding.md` 第 5、8 节。
+- **Provider 与模型**：可选项来自 `SELECTABLE_OPENWIKI_PROVIDERS`，共 13 个（`src/config/constants.ts:278-294`）；引导默认 OpenAI（`src/config/constants.ts:136`），默认模型 `gpt-5.6-terra`（仓库根 `README.md` Model providers 节）。深入内容见 `06-model-providers/`。
+- **wiki brief 的落点分两种**：code 模式先确认目标仓库（默认取当前目录向上最近的 git 仓库根，`src/setup/credentials/steps.ts:738-757`），brief 写入 `<仓库>/openwiki/INSTRUCTIONS.md`（0644，随仓库提交）；personal 模式写入 `~/.openwiki/INSTRUCTIONS.md`（0600）。数据层约定见 `10-ingestion-and-personal-mode/02-onboarding.md` 第 5、8 节。
 - **cron 调度（仅 personal）**：`global-cron-mode` 步骤设一个定时摄取计划（cron 表达式，含 macOS 电源管理选项），之后由调度系统自动跑 `ingest`。机制见 `11-scheduling-and-ci/`。
-- **已配置的步骤会自动跳过**：重新进向导时按缺失项定位起点；但显式 `--init` 会从第一步完整重走每一步（`walkAll`，`src/setup/credentials/steps.ts:376-380`），方便逐项检查。
+- **已配置的步骤会自动跳过**：重新进向导时按缺失项定位起点；但显式 `--init` 会从第一步完整重走每一步（`walkAll`，`src/setup/credentials/steps.ts:427-431`），方便逐项检查。
 - **输入去哪了**：凭据保存到 `~/.openwiki/.env`（0600，`process.env` 里已有的值优先于文件）；模式、源实例、调度保存到 `~/.openwiki/onboarding.json`。持久化细节见 `14-configuration-and-telemetry/01-credential-onboarding.md` 第 5 节。
 
 ## 4. 路径一：第一次 `openwiki`（code 模式）
@@ -138,16 +138,16 @@ openwiki personal
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/cli/commands.ts:526-530` | `parseRunCommand` 调用点 | 位置参数选模式；裸 `openwiki` 默认 `"code"` |
-| `src/cli/commands.ts:980-982` | 非 chat 命令缺省分支 | `--init`/`--update` 缺省也是 code 模式 |
-| `src/cli/commands.ts:1095-1096` | usage 文本 | `openwiki personal […]` 与 `--mode` 两种写法 |
+| `src/cli/commands.ts:621-625` | `parseRunCommand` 调用点 | 位置参数选模式；裸 `openwiki` 默认 `"code"` |
+| `src/cli/commands.ts:1075-1077` | 非 chat 命令缺省分支 | `--init`/`--update` 缺省也是 code 模式 |
+| `src/cli/commands.ts:1190-1191` | usage 文本 | `openwiki personal […]` 与 `--mode` 两种写法 |
 | `src/cli/app/app.tsx:743-749` | `InitSetup` 挂载 | `allowModeSelection={false}`，模式来自命令行 |
-| `src/setup/credentials/steps.ts:68-92` | `needsCredentialSetup` | 向导启动门（凭据 + 模式引导双条件） |
-| `src/setup/credentials/steps.ts:201-249` | `orderedSetupSteps` | 步骤骨架：provider → 凭据 → model → langsmith → code-repo-confirm |
-| `src/setup/credentials/steps.ts:376-380` | `walkAll` 分支 | 显式 `--init` 从第一步完整重走 |
-| `src/setup/credentials/steps.ts:687-706` | `getDefaultCodeRepoRootPath` | code 模式默认仓库根（向上找 `.git`） |
-| `src/config/constants.ts:105` | `DEFAULT_PROVIDER = "openai"` | 引导默认提供商 |
-| `src/config/constants.ts:239-253` | `SELECTABLE_OPENWIKI_PROVIDERS` | 13 个可选 provider 清单 |
+| `src/setup/credentials/steps.ts:74-98` | `needsCredentialSetup` | 向导启动门（凭据 + 模式引导双条件） |
+| `src/setup/credentials/steps.ts:229-290` | `orderedSetupSteps` | 步骤骨架：provider → 凭据 → model → langsmith → code-repo-confirm |
+| `src/setup/credentials/steps.ts:427-431` | `walkAll` 分支 | 显式 `--init` 从第一步完整重走 |
+| `src/setup/credentials/steps.ts:738-757` | `getDefaultCodeRepoRootPath` | code 模式默认仓库根（向上找 `.git`） |
+| `src/config/constants.ts:136` | `DEFAULT_PROVIDER = "openai"` | 引导默认提供商 |
+| `src/config/constants.ts:278-294` | `SELECTABLE_OPENWIKI_PROVIDERS` | 13 个可选 provider 清单 |
 | `src/config/openwiki-home.ts:6-28` | `OPENWIKI_CONFIG_DIR_ENV_KEY` / `resolveOpenWikiHomeDir` | 状态目录解析与 `~` 展开 |
 | `src/config/openwiki-home.ts:41-51` | `openWikiConnectorsDir` 等常量 | `~/.openwiki/` 子目录清单 |
 | `src/config/openwiki-home.ts:73-81` | `ensureOpenWikiHome` | 目录创建与 0700 / 当前用户限制 |

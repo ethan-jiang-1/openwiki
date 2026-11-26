@@ -32,7 +32,7 @@ out_of_scope:
 
 2026-09-13 re-baseline 后，本文件从 `src/ingestion.ts`（421 行）迁移至 `src/ingestion/ingestion.ts`（458 行）。除行号整体后移外，实质变化有四处：
 
-1. **import 重指向**：环境加载、openwiki home、onboarding 配置分别改从 `../config/env.js`、`../config/openwiki-home.js`、`../setup/onboarding.js` 导入（`src/ingestion/ingestion.ts:10-22`），并新增 `../telemetry/index.js` 的 `withRunTelemetry` 导入（:29-32）。
+1. **import 重指向**：环境加载、openwiki home、onboarding 配置分别改从 `../config/env.js`、`../config/openwiki-home.js`、`../setup/onboarding.js` 导入（`src/ingestion/ingestion.ts:11-24`），并新增 `../telemetry/index.js` 的 `withRunTelemetry` 导入（:29-32）。
 2. **新增遥测边界**：每个源实例的 agent 运行被 `withRunTelemetry("update", …)` 包裹（:190-198），摄取运行从此落入遥测统计。
 3. **信心标签 4→5**：合成策略新增 `contested`（有争议）标签与 "## Contested" 双主张保留规则（:352-353）。
 4. **guidance 签名升级**：`createConnectorSynthesisGuidance` 的入参从 `connectorId: ConnectorId` 改为 `connector: ConnectorRuntime`，并改为 **export**（:364-366），case 从 7 个扩到 9 个（新增 `custom-mcp` :379、`langsmith` :403）。
@@ -47,20 +47,20 @@ out_of_scope:
 
 | 导出 | 种类 | 行号 | 作用 |
 |------|------|------|------|
-| `runOpenWikiIngestion()` | 函数 | `src/ingestion/ingestion.ts:65-105` | 主入口：加载环境、解析实例、迭代摄取 |
-| `parseIngestionTarget()` | 函数 | `src/ingestion/ingestion.ts:107-122` | 将用户输入字符串解析为 `IngestionTarget` |
-| `createConnectorSynthesisGuidance()` | 函数 | `src/ingestion/ingestion.ts:364-418` | 各连接器的特化合成指导（2026-09-13 起为导出函数，被 `src/ingestion/code-mode.ts:15` 复用） |
-| `IngestionTarget` | 类型 | `src/ingestion/ingestion.ts:36` | 摄取目标的辨别联合类型 (discriminated union) |
-| `SourceInstanceTarget` | 类型 | `src/ingestion/ingestion.ts:38-41` | 按实例 ID 定位的目标 |
-| `SourceIngestionResult` | 类型 | `src/ingestion/ingestion.ts:43-51` | 单个数据源实例的摄取结果 |
-| `OpenWikiIngestionResult` | 类型 | `src/ingestion/ingestion.ts:53-55` | 所有实例结果的汇总 |
-| `OpenWikiIngestionOptions` | 类型 | `src/ingestion/ingestion.ts:57-63` | 摄取选项（包含 target、调度标志、模型和调试参数） |
+| `runOpenWikiIngestion()` | 函数 | `src/ingestion/ingestion.ts:67-107` | 主入口：加载环境、解析实例、迭代摄取 |
+| `parseIngestionTarget()` | 函数 | `src/ingestion/ingestion.ts:109-124` | 将用户输入字符串解析为 `IngestionTarget` |
+| `createConnectorSynthesisGuidance()` | 函数 | `src/ingestion/ingestion.ts:366-420` | 各连接器的特化合成指导（2026-09-13 起为导出函数，被 `src/ingestion/code-mode.ts:19` 复用） |
+| `IngestionTarget` | 类型 | `src/ingestion/ingestion.ts:38` | 摄取目标的辨别联合类型 (discriminated union) |
+| `SourceInstanceTarget` | 类型 | `src/ingestion/ingestion.ts:40-43` | 按实例 ID 定位的目标 |
+| `SourceIngestionResult` | 类型 | `src/ingestion/ingestion.ts:45-53` | 单个数据源实例的摄取结果 |
+| `OpenWikiIngestionResult` | 类型 | `src/ingestion/ingestion.ts:55-57` | 所有实例结果的汇总 |
+| `OpenWikiIngestionOptions` | 类型 | `src/ingestion/ingestion.ts:59-65` | 摄取选项（包含 target、调度标志、模型和调试参数） |
 
 ---
 
 ## 2. parseIngestionTarget() — 摄取目标解析
 
-`src/ingestion/ingestion.ts:107-122`
+`src/ingestion/ingestion.ts:109-124`
 
 `parseIngestionTarget(value: string): IngestionTarget | null` 将用户输入的字符串解析为三种可能的目标类型之一：
 
@@ -78,7 +78,7 @@ out_of_scope:
          （否则返回 null）
 ```
 
-**安全校验**：`isSafeSourceInstanceId()` (`src/ingestion/ingestion.ts:251-253`) 用正则 `/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/u` 验证实例 ID，防止注入攻击。ID 必须以字母数字开头，总长度 1-120 字符，只允许字母数字、点、下划线和连字符。
+**安全校验**：`isSafeSourceInstanceId()` (`src/ingestion/ingestion.ts:253-255`) 用正则 `/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/u` 验证实例 ID，防止注入攻击。ID 必须以字母数字开头，总长度 1-120 字符，只允许字母数字、点、下划线和连字符。
 
 **三个分支的优先级**：先匹配 `"all"`，再匹配已知连接器 ID，最后尝试按实例 ID 匹配。这意味着如果某个连接器 ID 恰好是 `"all"`（虽然当前没有），会被第一个分支捕获。
 
@@ -86,13 +86,13 @@ out_of_scope:
 
 ## 3. 摄取主流程 (The Ingestion Flow)
 
-`src/ingestion/ingestion.ts:65-105` — `runOpenWikiIngestion()`
+`src/ingestion/ingestion.ts:67-107` — `runOpenWikiIngestion()`
 
 ```
 runOpenWikiIngestion(_cwd, options)
     │
     ├─ 1. loadOpenWikiEnv()           — 加载 .env 和 OPENWIKI_* 环境变量
-    │     src/config/env.ts:267
+    │     src/config/env.ts:284
     │
     ├─ 2. ensureOpenWikiHome()       — 确保 ~/.openwiki 目录存在
     │     src/config/openwiki-home.ts:73
@@ -105,7 +105,7 @@ runOpenWikiIngestion(_cwd, options)
     │     src/connectors/registry.ts:24  返回 Record<ConnectorId, ConnectorRuntime>
     │
     ├─ 5. resolveIngestionSourceInstances() — 按 target 和 scheduledOnly 过滤
-    │     src/ingestion/ingestion.ts:222-249  返回 OnboardingSourceInstanceConfig[]
+    │     src/ingestion/ingestion.ts:224-251  返回 OnboardingSourceInstanceConfig[]
     │     （见第 4 节调度过滤逻辑）
     │
     ├─ 6. 如果 target !== "all" 且过滤结果为空 → 抛出 Error（:83-87）
@@ -125,7 +125,7 @@ runOpenWikiIngestion(_cwd, options)
               │
               ├─ 发送确定性拉取摘要事件
               │   （agentic 连接器无拉取结果时该函数提前返回，实际为 no-op，
-              │    见 `src/ingestion/ingestion.ts:424-426`）
+              │    见 `src/ingestion/ingestion.ts:426-428`）
               │
               ├─ 以 withRunTelemetry("update", …) 包裹 runOpenWikiAgent("update", …)
               │   — 启动 agent 进行 wiki 更新并记录遥测（:190-198，见第 8 节）
@@ -144,7 +144,7 @@ runOpenWikiIngestion(_cwd, options)
 
 ## 4. 调度过滤：scheduledOnly 标志
 
-`src/ingestion/ingestion.ts:222-249` — `resolveIngestionSourceInstances()`
+`src/ingestion/ingestion.ts:224-251` — `resolveIngestionSourceInstances()`
 
 这是摄取过滤的核心函数。它接收三个输入：
 
@@ -176,7 +176,7 @@ runOpenWikiIngestion(_cwd, options)
         → 保留当 sourceConfig.id === target.id
 ```
 
-**调度暂停的判断**：检查 `config.ingestionSchedule.pausedAt` 是否存在。只要调度被暂停，即使在 `scheduledOnly` 模式下也不会运行任何源。这是通过 `src/ingestion/ingestion.ts:232-237` 实现的：
+**调度暂停的判断**：检查 `config.ingestionSchedule.pausedAt` 是否存在。只要调度被暂停，即使在 `scheduledOnly` 模式下也不会运行任何源。这是通过 `src/ingestion/ingestion.ts:234-239` 实现的：
 
 ```typescript
 if (
@@ -197,7 +197,7 @@ if (
 
 ## 5. IngestionTarget 类型 — 辨别联合类型
 
-`src/ingestion/ingestion.ts:36-41`
+`src/ingestion/ingestion.ts:38-43`
 
 ```typescript
 export type IngestionTarget = ConnectorId | "all" | SourceInstanceTarget;
@@ -260,7 +260,7 @@ Notion 与 custom-mcp 是特殊的：它们都通过 MCP（Model Context Protoco
 
 ### 6.2 确定性拉取 vs Agentic 发现
 
-`src/ingestion/ingestion.ts:266-268` 中的 `isDeterministicConnector()` 是摄取的**关键分岔点**：
+`src/ingestion/ingestion.ts:268-270` 中的 `isDeterministicConnector()` 是摄取的**关键分岔点**：
 
 ```typescript
 function isDeterministicConnector(connector: ConnectorRuntime): boolean {
@@ -274,7 +274,7 @@ function isDeterministicConnector(connector: ConnectorRuntime): boolean {
 
 ### 6.3 确定性拉取的调用
 
-`src/ingestion/ingestion.ts:145-151`：
+`src/ingestion/ingestion.ts:147-153`：
 
 ```typescript
 const deterministicPull = isDeterministicConnector(connector)
@@ -286,7 +286,7 @@ const deterministicPull = isDeterministicConnector(connector)
   : undefined;
 ```
 
-`INGESTION_WINDOW_HOURS` 常量定义在 `src/ingestion/ingestion.ts:34`，值为 24。`ConnectorIngestOptions` 包含 (`src/connectors/types.ts:25-32`)：
+`INGESTION_WINDOW_HOURS` 常量定义在 `src/ingestion/ingestion.ts:36`，值为 24。`ConnectorIngestOptions` 包含 (`src/connectors/types.ts:25-32`)：
 - `connectorConfig` — 连接器特定配置（来自 onboarding.json）
 - `instanceId` — 源实例 ID
 - `windowHours` — 摄取时间窗口（个人模式统一为 24 小时；代码模式的增量窗口机制不同，见本区 03 号文档）
@@ -295,13 +295,13 @@ const deterministicPull = isDeterministicConnector(connector)
 
 ### 6.4 确定性拉取失败的处理
 
-`src/ingestion/ingestion.ts:154-171`：确定性拉取的结果状态为 `"error"` 且没有产出任何原始文件时，摄取短路返回 `status: "error"`，**不会**启动 agent。这避免了 agent 在无数据可处理时做无用的 wiki 更新。如果拉取失败但仍有部分文件产出，则继续运行 agent（agent 可以看到部分数据并在错误信息上下文下工作）。
+`src/ingestion/ingestion.ts:156-173`：确定性拉取的结果状态为 `"error"` 且没有产出任何原始文件时，摄取短路返回 `status: "error"`，**不会**启动 agent。这避免了 agent 在无数据可处理时做无用的 wiki 更新。如果拉取失败但仍有部分文件产出，则继续运行 agent（agent 可以看到部分数据并在错误信息上下文下工作）。
 
 ---
 
 ## 7. 错误处理和部分失败 (Error Handling and Partial Failures)
 
-`src/ingestion/ingestion.ts:124-220` — `runSourceIngestion()` 的 try-catch 结构：
+`src/ingestion/ingestion.ts:126-222` — `runSourceIngestion()` 的 try-catch 结构：
 
 ```typescript
 try {
@@ -319,20 +319,20 @@ try {
 
 | 层次 | 位置 | 触发条件 | 行为 |
 |------|------|---------|------|
-| 确定性拉取失败 | `src/ingestion/ingestion.ts:154-171` | `deterministicPull.status === "error" && rawFiles.length === 0` | 提前返回，不运行 agent |
-| Agent 运行失败 | `src/ingestion/ingestion.ts:193-198`（在 try 块内） | `runOpenWikiAgent()` 抛出异常 | 被外层 catch 捕获，返回 `status: "error"` |
-| 未预期异常 | `src/ingestion/ingestion.ts:209-218` | try 块内任何未捕获的错误 | 通过 emit 发送错误消息，返回 `status: "error"` |
+| 确定性拉取失败 | `src/ingestion/ingestion.ts:156-173` | `deterministicPull.status === "error" && rawFiles.length === 0` | 提前返回，不运行 agent |
+| Agent 运行失败 | `src/ingestion/ingestion.ts:195-200`（在 try 块内） | `runOpenWikiAgent()` 抛出异常 | 被外层 catch 捕获，返回 `status: "error"` |
+| 未预期异常 | `src/ingestion/ingestion.ts:211-220` | try 块内任何未捕获的错误 | 通过 emit 发送错误消息，返回 `status: "error"` |
 
 **关键设计决策**：
 - **部分失败不阻止其他源**：每个源实例有独立的 try-catch，一个源的失败不影响后续源的处理。结果数组会包含成功和失败两种 `SourceIngestionResult`。与 agent 工具侧的 `ingestAllConnectors` 相呼应——那里用 `Promise.allSettled` 隔离并发拉取的单连接器失败（`src/connectors/tools.ts:288-303`，re-baseline 从顺序循环改为 allSettled）。
-- **错误信息通过事件流推送**：使用 `emitText()` → `emit?.(event)` 将错误文本作为 `OpenWikiRunEvent` 推送出去（`src/ingestion/ingestion.ts:438-446`），调用方（通常是 CLI 的 Ink TUI）可以实时显示。
-- **错误消息提取**：`getErrorMessage()` (`src/ingestion/ingestion.ts:456-458`) 安全地提取 `Error.message` 或对非 Error 对象调用 `String()`。
+- **错误信息通过事件流推送**：使用 `emitText()` → `emit?.(event)` 将错误文本作为 `OpenWikiRunEvent` 推送出去（`src/ingestion/ingestion.ts:440-448`），调用方（通常是 CLI 的 Ink TUI）可以实时显示。
+- **错误消息提取**：`getErrorMessage()` (`src/ingestion/ingestion.ts:472-474`) 安全地提取 `Error.message` 或对非 Error 对象调用 `String()`。
 
 ---
 
 ## 8. 遥测边界：withRunTelemetry("update", …)
 
-`src/ingestion/ingestion.ts:190-198`
+`src/ingestion/ingestion.ts:192-200`
 
 re-baseline 后，每个源实例的 agent 运行被统一遥测边界（single telemetry boundary）包裹：
 
@@ -365,7 +365,7 @@ const agentResult = await withRunTelemetry(
 
 ### 9.1 createSourceUpdateMessage()
 
-`src/ingestion/ingestion.ts:270-347`
+`src/ingestion/ingestion.ts:272-349`
 
 根据是否存在确定性拉取结果，生成**两种不同的消息模板**：
 
@@ -390,7 +390,7 @@ const agentResult = await withRunTelemetry(
 
 ### 9.2 createSourceSynthesisPolicy()
 
-`src/ingestion/ingestion.ts:349-362`
+`src/ingestion/ingestion.ts:351-364`
 
 这是一段**通用合成策略**（synthesis policy），被注入到每个源摄取的消息中。它定义了 agent 应该如何组织 wiki 内容：
 
@@ -425,12 +425,12 @@ re-baseline 前只有 `confirmed`、`source-backed`、`watchlist`、`saved-conte
 
 ### 9.3 createConnectorSynthesisGuidance() — 签名升级与 9 个 case
 
-`src/ingestion/ingestion.ts:364-418`
+`src/ingestion/ingestion.ts:366-420`
 
 为每个连接器提供**特化的合成指导**（switch-case 结构）。re-baseline 带来三处变化：
 
 1. **入参升级**：从 `connectorId: ConnectorId` 改为 `connector: ConnectorRuntime`（:364-366），函数体内部用 `connector.id` 分派——这让调用方（包括代码模式，见本区 03 号文档）无需拆出 ID 就能取到指导。
-2. **改为导出**：`export function`（旧版是文件私有函数）。唯一的跨文件消费者是 `src/ingestion/code-mode.ts:15`。
+2. **改为导出**：`export function`（旧版是文件私有函数）。唯一的跨文件消费者是 `src/ingestion/code-mode.ts:19`。
 3. **case 从 7 个扩到 9 个**：新增 `custom-mcp`（:379-383）与 `langsmith`（:403-416）。
 
 | 连接器 | 行号 | 核心指导 |
@@ -449,7 +449,7 @@ re-baseline 前只有 `confirmed`、`source-backed`、`watchlist`、`saved-conte
 
 ### 9.4 Agent 调用
 
-`src/ingestion/ingestion.ts:175-198`：
+`src/ingestion/ingestion.ts:177-200`：
 
 ```typescript
 const runOptions: OpenWikiRunOptions = {
@@ -477,35 +477,35 @@ const agentResult = await withRunTelemetry("update", runOptions, telemetryContex
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/ingestion/ingestion.ts:29-32` | `withRunTelemetry`, `RunTelemetryContext` | 遥测边界导入（自 `../telemetry/index.js`） |
-| `src/ingestion/ingestion.ts:34` | `INGESTION_WINDOW_HOURS` | 摄取时间窗口常量（24 小时） |
-| `src/ingestion/ingestion.ts:36-41` | `IngestionTarget`, `SourceInstanceTarget` | 摄取目标的辨别联合类型 |
-| `src/ingestion/ingestion.ts:43-51` | `SourceIngestionResult` | 单源摄取结果（status 三态） |
-| `src/ingestion/ingestion.ts:53-55` | `OpenWikiIngestionResult` | 所有实例结果的汇总 |
-| `src/ingestion/ingestion.ts:57-63` | `OpenWikiIngestionOptions` | 摄取选项类型（含 target 和 scheduledOnly） |
-| `src/ingestion/ingestion.ts:65-105` | `runOpenWikiIngestion()` | 主入口：编排完整摄取流程 |
-| `src/ingestion/ingestion.ts:107-122` | `parseIngestionTarget()` | 将字符串解析为 IngestionTarget |
-| `src/ingestion/ingestion.ts:124-220` | `runSourceIngestion()` | 单个源实例的摄取执行（含 try-catch 与遥测） |
-| `src/ingestion/ingestion.ts:145-151` | `connector.ingest()` 调用点 | 确定性拉取（windowHours=24） |
-| `src/ingestion/ingestion.ts:154-171` | 短路返回 | 拉取失败且无文件 → status:"error" |
-| `src/ingestion/ingestion.ts:190-198` | `withRunTelemetry("update",…)` | 单源 agent 运行的遥测边界 |
-| `src/ingestion/ingestion.ts:209-218` | catch 块 | 未预期异常 → status:"error" |
-| `src/ingestion/ingestion.ts:222-249` | `resolveIngestionSourceInstances()` | 按 target 和 scheduledOnly 过滤源实例 |
-| `src/ingestion/ingestion.ts:251-253` | `isSafeSourceInstanceId()` | 实例 ID 安全校验正则 |
-| `src/ingestion/ingestion.ts:255-257` | `formatTarget()` | 将 IngestionTarget 格式化为可读字符串 |
-| `src/ingestion/ingestion.ts:259-264` | `getSourceDisplayName()` | 获取源实例的显示名称 |
-| `src/ingestion/ingestion.ts:266-268` | `isDeterministicConnector()` | 判断连接器是否需要确定性拉取 |
-| `src/ingestion/ingestion.ts:270-347` | `createSourceUpdateMessage()` | 为 agent 组装用户消息（两个分支） |
-| `src/ingestion/ingestion.ts:349-362` | `createSourceSynthesisPolicy()` | 通用 wiki 合成策略模板（5 信心标签 + contested） |
-| `src/ingestion/ingestion.ts:352-353` | 信心标签行 | confirmed/source-backed/**contested**/watchlist/saved-context + `## Contested` 双主张保留 |
-| `src/ingestion/ingestion.ts:364-418` | `createConnectorSynthesisGuidance()` | 各连接器的特化合成指导（**export**，9 case） |
-| `src/ingestion/ingestion.ts:379` | `case "custom-mcp"` | 新增 case |
-| `src/ingestion/ingestion.ts:403` | `case "langsmith"` | 新增 case |
-| `src/ingestion/ingestion.ts:420-436` | `emitDeterministicPullSummary()` | 发送确定性拉取摘要事件 |
-| `src/ingestion/ingestion.ts:438-446` | `emitText()` | 发送文本事件到事件流 |
+| `src/ingestion/ingestion.ts:31-34` | `withRunTelemetry`, `RunTelemetryContext` | 遥测边界导入（自 `../telemetry/index.js`） |
+| `src/ingestion/ingestion.ts:36` | `INGESTION_WINDOW_HOURS` | 摄取时间窗口常量（24 小时） |
+| `src/ingestion/ingestion.ts:38-43` | `IngestionTarget`, `SourceInstanceTarget` | 摄取目标的辨别联合类型 |
+| `src/ingestion/ingestion.ts:45-53` | `SourceIngestionResult` | 单源摄取结果（status 三态） |
+| `src/ingestion/ingestion.ts:55-57` | `OpenWikiIngestionResult` | 所有实例结果的汇总 |
+| `src/ingestion/ingestion.ts:59-65` | `OpenWikiIngestionOptions` | 摄取选项类型（含 target 和 scheduledOnly） |
+| `src/ingestion/ingestion.ts:67-107` | `runOpenWikiIngestion()` | 主入口：编排完整摄取流程 |
+| `src/ingestion/ingestion.ts:109-124` | `parseIngestionTarget()` | 将字符串解析为 IngestionTarget |
+| `src/ingestion/ingestion.ts:126-222` | `runSourceIngestion()` | 单个源实例的摄取执行（含 try-catch 与遥测） |
+| `src/ingestion/ingestion.ts:147-153` | `connector.ingest()` 调用点 | 确定性拉取（windowHours=24） |
+| `src/ingestion/ingestion.ts:156-173` | 短路返回 | 拉取失败且无文件 → status:"error" |
+| `src/ingestion/ingestion.ts:192-200` | `withRunTelemetry("update",…)` | 单源 agent 运行的遥测边界 |
+| `src/ingestion/ingestion.ts:211-220` | catch 块 | 未预期异常 → status:"error" |
+| `src/ingestion/ingestion.ts:224-251` | `resolveIngestionSourceInstances()` | 按 target 和 scheduledOnly 过滤源实例 |
+| `src/ingestion/ingestion.ts:253-255` | `isSafeSourceInstanceId()` | 实例 ID 安全校验正则 |
+| `src/ingestion/ingestion.ts:257-259` | `formatTarget()` | 将 IngestionTarget 格式化为可读字符串 |
+| `src/ingestion/ingestion.ts:261-266` | `getSourceDisplayName()` | 获取源实例的显示名称 |
+| `src/ingestion/ingestion.ts:268-270` | `isDeterministicConnector()` | 判断连接器是否需要确定性拉取 |
+| `src/ingestion/ingestion.ts:272-349` | `createSourceUpdateMessage()` | 为 agent 组装用户消息（两个分支） |
+| `src/ingestion/ingestion.ts:351-364` | `createSourceSynthesisPolicy()` | 通用 wiki 合成策略模板（5 信心标签 + contested） |
+| `src/ingestion/ingestion.ts:354-355` | 信心标签行 | confirmed/source-backed/**contested**/watchlist/saved-context + `## Contested` 双主张保留 |
+| `src/ingestion/ingestion.ts:366-420` | `createConnectorSynthesisGuidance()` | 各连接器的特化合成指导（**export**，9 case） |
+| `src/ingestion/ingestion.ts:381` | `case "custom-mcp"` | 新增 case |
+| `src/ingestion/ingestion.ts:405` | `case "langsmith"` | 新增 case |
+| `src/ingestion/ingestion.ts:422-438` | `emitDeterministicPullSummary()` | 发送确定性拉取摘要事件 |
+| `src/ingestion/ingestion.ts:440-448` | `emitText()` | 发送文本事件到事件流 |
 | `src/ingestion/ingestion.ts:448-454` | `formatRawFileList()` | 格式化原始文件路径列表 |
-| `src/ingestion/ingestion.ts:456-458` | `getErrorMessage()` | 安全提取错误消息 |
-| `src/ingestion/code-mode.ts:15` | `createConnectorSynthesisGuidance` 导入 | guidance 导出化的跨文件消费者 |
+| `src/ingestion/ingestion.ts:472-474` | `getErrorMessage()` | 安全提取错误消息 |
+| `src/ingestion/code-mode.ts:19` | `createConnectorSynthesisGuidance` 导入 | guidance 导出化的跨文件消费者 |
 | `src/connectors/types.ts:1-10` | `ConnectorId` | 连接器 ID 字面量联合类型（9 个） |
 | `src/connectors/types.ts:15-23` | `ConnectorDefinition` | 连接器定义（含 `mode` 与 supportsAgenticDiscovery） |
 | `src/connectors/types.ts:25-32` | `ConnectorIngestOptions` | 连接器 ingest() 方法的选项（含 repoRoot） |
@@ -515,7 +515,7 @@ const agentResult = await withRunTelemetry("update", runOptions, telemetryContex
 | `src/connectors/registry.ts:24-52` | `createConnectorRegistry()` | 构建连接器运行时注册表 |
 | `src/connectors/registry.ts:54-56` | `isConnectorId()` | 类型守卫：检查字符串是否为有效 ConnectorId |
 | `src/connectors/tools.ts:288-303` | `ingestAllConnectors()` | agent 工具侧并发拉取（Promise.allSettled 失败隔离） |
-| `src/config/env.ts:267` | `loadOpenWikiEnv()` | .env 与 OPENWIKI_* 环境变量加载 |
+| `src/config/env.ts:284` | `loadOpenWikiEnv()` | .env 与 OPENWIKI_* 环境变量加载 |
 | `src/config/openwiki-home.ts:46` | `openWikiLocalWikiDir` | 本地 wiki 目录（agent 工作目录） |
 | `src/config/openwiki-home.ts:57` | `getConnectorConfigPath()` | 连接器配置路径（分支 B 消息引用） |
 | `src/config/openwiki-home.ts:73` | `ensureOpenWikiHome()` | 确保 ~/.openwiki 存在 |

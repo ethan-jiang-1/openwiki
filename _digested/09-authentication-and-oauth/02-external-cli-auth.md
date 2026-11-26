@@ -34,7 +34,7 @@ OpenWiki 的模型提供商（model provider）里有一类特殊的认证方式
 
 ## 1. 定位与边界
 
-外部命令行认证是 `ProviderAuthMethod`（`src/config/constants.ts:129-130`）四个值之一：
+外部命令行认证是 `ProviderAuthMethod`（`src/config/constants.ts:162-163`）四个值之一：
 
 ```typescript
 export type ProviderAuthMethod =
@@ -54,7 +54,7 @@ export type ProviderAuthMethod =
 
 ## 2. constants.ts 中的 provider 侧配置
 
-**copilot 条目**：`src/config/constants.ts:280-301`
+**copilot 条目**：`src/config/constants.ts:329-350`
 
 ```typescript
 copilot: {
@@ -227,7 +227,7 @@ if (
 
 这条约束有三个推论：
 
-1. **生命周期跟随进程**：注入只发生在 `resolveExternalCliCredential` 被调用的那次进程/环境对象里，进程退出即消失。token 从头到尾没有经过任何 OpenWiki 持久化路径——对比 PKCE 流程里 `saveOpenWikiEnv()` 把 token 写进 `~/.openwiki/.env`（`src/config/env.ts:305`，见 01 号文档第 7.4 节），这里是**刻意的"不写"**。
+1. **生命周期跟随进程**：注入只发生在 `resolveExternalCliCredential` 被调用的那次进程/环境对象里，进程退出即消失。token 从头到尾没有经过任何 OpenWiki 持久化路径——对比 PKCE 流程里 `saveOpenWikiEnv()` 把 token 写进 `~/.openwiki/.env`（`src/config/env.ts:322`，见 01 号文档第 7.4 节），这里是**刻意的"不写"**。
 2. **没有刷新逻辑**：token 失效了不刷新——下次进程启动时重新执行一遍 detect，从 gh 会话再取一次。gh 自己管理会话的有效性。
 3. **gh 会话是唯一真相源**：用户 `gh auth logout` 之后，OpenWiki 立刻失去凭据来源（detect 返回 `null`），不存在"OpenWiki 还留着旧 token"的窗口期。
 
@@ -235,7 +235,7 @@ if (
 
 | 调用点 | 位置 | 语义 |
 |--------|------|------|
-| Agent 启动 | `src/agent/index.ts:305` | `resolveExternalCliCredential(provider)` 注入 `process.env`；随后 `:306-309` 取 key 并在 `providerUsesExternalCliAuth(provider) && providerApiKey` 时调 `validateExternalCliCredential` 做 PAT 拒绝检查 |
+| Agent 启动 | `src/agent/index.ts:322` | `resolveExternalCliCredential(provider)` 注入 `process.env`；随后 `:306-309` 取 key 并在 `providerUsesExternalCliAuth(provider) && providerApiKey` 时调 `validateExternalCliCredential` 做 PAT 拒绝检查 |
 | 非交互预检 | `src/cli/startup.ts:99-101` | `getMissingNonInteractiveProviderEnvKey` 中先尝试注入再判断凭据是否齐全——保证脚本化运行（CI、`--print`）也能复用 gh 会话，缺凭据才报错 |
 
 两处的顺序都是 **先 resolve 后 validate**：注入的 gh 会话 token 是 OAuth token，能通过 PAT 检查；用户手填的 PAT 则会在 validate 处被拦截。
@@ -248,7 +248,7 @@ if (
 
 OpenWiki CLI 主流程**不会自动弹出** `gh auth login`——交互登录只由凭据配置向导（credential onboarding wizard）显式触发：
 
-**探测**（`src/setup/credentials/use-init-setup.ts:485-520`）：向导进行到 copilot 相关步骤时，先 `detectExternalCliCredential`（`:497`）——检测到即标记 `detected`；没检测到再 `isExternalCliAvailable`（`:508`）区分"装了 gh 但没登录"与"没装 gh"，写入 `not-detected` 态。
+**探测**（`src/setup/credentials/use-init-setup.ts:506-541`）：向导进行到 copilot 相关步骤时，先 `detectExternalCliCredential`（`:497`）——检测到即标记 `detected`；没检测到再 `isExternalCliAvailable`（`:508`）区分"装了 gh 但没登录"与"没装 gh"，写入 `not-detected` 态。
 
 **登录**（`use-init-setup.ts:522-544` `launchExternalCliLogin`）：
 1. 置 `logging-in` 态，`setRawMode?.(false)`（`:524`）把终端从 Ink 的 raw 模式交还给 gh
@@ -257,7 +257,7 @@ OpenWiki CLI 主流程**不会自动弹出** `gh auth login`——交互登录�
 4. 成功后**再 detect 一次**（`:534`）：取到 token → `detected`；取不到（登录的账号没有 Copilot 授权等）→ `not-detected` 且 `cliAvailable: true`（`:536-540`）
 5. finally 里 `setRawMode?.(true)`（`:542`）收回终端
 
-UI 文案由 `getExternalCliAuthAdapter` 驱动（`src/setup/credentials/components.tsx:912`）：`checking` 态显示 credentialDescription，`logging-in` 态显示 loginCommand 并提示用户在当前终端完成 gh 的交互。
+UI 文案由 `getExternalCliAuthAdapter` 驱动（`src/setup/credentials/components.tsx:958`）：`checking` 态显示 credentialDescription，`logging-in` 态显示 loginCommand 并提示用户在当前终端完成 gh 的交互。
 
 ### 6.2 失败模式清单
 
@@ -280,11 +280,11 @@ UI 文案由 `getExternalCliAuthAdapter` 驱动（`src/setup/credentials/compone
 
 ### 7.1 createModel：无独立分支，走兜底
 
-`createModel()` 的 provider 分支链（`src/agent/index.ts:1077` 起）没有 copilot 专属分支——copilot 落入兜底 `ChatOpenAI` 构造（`agent/index.ts:1243-1263`）：`baseURL` 取自 `resolveProviderBaseUrl`（`:1243`），API key 就是 resolve 阶段注入的 `COPILOT_API_KEY`。适配器体系只负责"把可用的 key 放进环境"，模型构造层面 Copilot 就是一个带自定义 baseURL 的 OpenAI 兼容端点。
+`createModel()` 的 provider 分支链（`src/agent/index.ts:1123` 起）没有 copilot 专属分支——copilot 落入兜底 `ChatOpenAI` 构造（`agent/index.ts:1243-1263`）：`baseURL` 取自 `resolveProviderBaseUrl`（`:1243`），API key 就是 resolve 阶段注入的 `COPILOT_API_KEY`。适配器体系只负责"把可用的 key 放进环境"，模型构造层面 Copilot 就是一个带自定义 baseURL 的 OpenAI 兼容端点。
 
 ### 7.2 流式强制：providerUsesStreaming 恒 true
 
-**源码位置**：`src/config/constants.ts:486-503`（copilot 分支 `:498-500`）
+**源码位置**：`src/config/constants.ts:612-636`（copilot 分支 `:498-500`）
 
 ```typescript
 if (provider === "copilot") {
@@ -344,15 +344,15 @@ openwiki run --provider copilot
 | `src/auth/external-cli-auth.ts:134-156` | `resolveExternalCliCredential` | 三重前置检查后注入本进程 env（:154） |
 | `src/auth/external-cli-auth.ts:158-175` | `runExternalCliLogin` | spawn stdio inherit 交互登录，exit 0 即成功 |
 | `src/auth/external-cli-auth.ts:177-189` | `validateExternalCliCredential` | Copilot 拒绝 PAT（ghp_/github_pat_，:183） |
-| `src/config/constants.ts:129-130` | `ProviderAuthMethod` | api-key / aws-sdk / external-cli / oauth 四值 |
-| `src/config/constants.ts:137` | `ExternalCliAuthAdapter` | 适配器联合类型，当前仅 "github-cli" |
-| `src/config/constants.ts:280-301` | copilot provider 条目 | authMethod/adapter/baseURL/baseUrlEnvKey/modelOptions |
-| `src/config/constants.ts:451-455` | `providerUsesExternalCliAuth` | authMethod === "external-cli" 判定 |
-| `src/config/constants.ts:457-461` | `getProviderExternalCliAuthAdapter` | 读适配器 ID |
-| `src/config/constants.ts:486-503` | `providerUsesStreaming` | copilot 分支恒 true（:498-500，非流式被拒） |
-| `src/config/constants.ts:654-658` | `getProviderBaseUrlEnvKey` | hostname 推导的输入读取 |
-| `src/agent/index.ts:305-309` | resolve + validate 调用点 | Agent 启动时注入并做 PAT 检查 |
-| `src/agent/index.ts:1243-1263` | createModel 兜底分支 | Copilot 走 ChatOpenAI + 自定义 baseURL + streaming |
+| `src/config/constants.ts:162-163` | `ProviderAuthMethod` | api-key / aws-sdk / external-cli / oauth 四值 |
+| `src/config/constants.ts:170` | `ExternalCliAuthAdapter` | 适配器联合类型，当前仅 "github-cli" |
+| `src/config/constants.ts:329-350` | copilot provider 条目 | authMethod/adapter/baseURL/baseUrlEnvKey/modelOptions |
+| `src/config/constants.ts:518-522` | `providerUsesExternalCliAuth` | authMethod === "external-cli" 判定 |
+| `src/config/constants.ts:524-528` | `getProviderExternalCliAuthAdapter` | 读适配器 ID |
+| `src/config/constants.ts:612-636` | `providerUsesStreaming` | copilot 分支恒 true（:498-500，非流式被拒） |
+| `src/config/constants.ts:800-804` | `getProviderBaseUrlEnvKey` | hostname 推导的输入读取 |
+| `src/agent/index.ts:322-326` | resolve + validate 调用点 | Agent 启动时注入并做 PAT 检查 |
+| `src/agent/index.ts:1306-1356` | createModel 兜底分支 | Copilot 走 ChatOpenAI + 自定义 baseURL + streaming |
 | `src/cli/startup.ts:99-101` | 非交互预检 | 脚本化运行前尝试 gh 会话注入 |
-| `src/setup/credentials/use-init-setup.ts:485-544` | 探测与登录编排 | detect → available 区分 → launchExternalCliLogin → 复检 |
-| `src/setup/credentials/components.tsx:912` | 适配器驱动 UI | checking/logging-in 文案取自 adapter 配置 |
+| `src/setup/credentials/use-init-setup.ts:506-565` | 探测与登录编排 | detect → available 区分 → launchExternalCliLogin → 复检 |
+| `src/setup/credentials/components.tsx:958` | 适配器驱动 UI | checking/logging-in 文案取自 adapter 配置 |

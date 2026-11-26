@@ -47,7 +47,7 @@ code 模式下**唯一的主角**是当前 Git 仓库，它以三种面贡献输
 | 面 | 内容 | 机制 |
 |----|------|------|
 | 源码树 | 全部未被排除的文件 | 证据命题（claim）以 `repo://仓库相对路径#L起-L止` 锚定到行区间（07 区） |
-| git 历史 | 变更检测与增量 | `getRepositoryChangedPaths`（`src/agent/utils.ts:909-949`）+ sha256 源指纹（`SOURCE_FINGERPRINT_VERSION`，`:289`）；CI 里 `fetch-depth: 0` 就是为了 diff HEAD（`src/ingestion/code-mode.ts:366`） |
+| git 历史 | 变更检测与增量 | `getRepositoryChangedPaths`（`src/agent/utils.ts:946-1106`）+ sha256 源指纹（`SOURCE_FINGERPRINT_VERSION`，`:289`）；CI 里 `fetch-depth: 0` 就是为了 diff HEAD（`src/ingestion/code-mode.ts:557`） |
 | 工作区状态 | 分支/语言/结构 | 首跑解析 Git 根（拒绝 fs 根与 `~`，`src/integrations/core/repository-root.ts:122-133`） |
 
 输入范围由 `.openwikiignore` 圈定（gitignore 兼容语义 + last-match-wins，04/05）——它是 git 输入的「负空间」。
@@ -83,7 +83,7 @@ code 模式下**唯一的主角**是当前 Git 仓库，它以三种面贡献输
 | 输入 | 形态 | 进出 |
 |------|------|------|
 | wiki brief（`INSTRUCTIONS.md`） | 自然语言一段 | 首跑向导第 3 步写入；每轮生成/更新都读，决定覆盖面与侧重（10/02） |
-| language | BCP-47 码 | `openwiki_begin` 参数；无法识别零副作用拒绝，run 开始后不可改（`src/generation/repository-run.ts:321-328`） |
+| language | BCP-47 码 | `openwiki_begin` 参数；无法识别零副作用拒绝，run 开始后不可改（`src/generation/repository-run.ts:403-410`） |
 
 ## 5. 控制输入
 
@@ -125,7 +125,7 @@ code 模式下**唯一的主角**是当前 Git 仓库，它以三种面贡献输
 | `src/connectors/sources/langsmith/index.ts:92` | `mode: "code"` | 唯一 code mode 连接器 |
 | `src/connectors/sources/langsmith/repo-config.ts:66-68` | repo 提交配置 | `<repo>/openwiki/.langsmith.json` |
 | `src/config/openwiki-home.ts:57-59` | personal config 路径 | `~/.openwiki/connectors/<id>/config.json` |
-| `src/agent/utils.ts:289,909-949` | `SOURCE_FINGERPRINT_VERSION` / `getRepositoryChangedPaths` | git 输入的变更检测 |
-| `src/ingestion/code-mode.ts:366` | `fetch-depth: 0` | CI 全历史 diff |
+| `src/agent/utils.ts:277,909-949` | `SOURCE_FINGERPRINT_VERSION` / `getRepositoryChangedPaths` | git 输入的变更检测 |
+| `src/ingestion/code-mode.ts:557` | `fetch-depth: 0` | CI 全历史 diff |
 | `src/integrations/core/repository-root.ts:122-133` | `assertSafeRepositoryRoot` | Git 根守卫 |
-| `src/generation/repository-run.ts:321-328` | language 前置校验 | 意图输入的零副作用拒绝 |
+| `src/generation/repository-run.ts:403-410` | language 前置校验 | 意图输入的零副作用拒绝 |

@@ -41,9 +41,9 @@ out_of_scope:
 
 | 导出 | 种类 | 行号 | 作用 |
 |------|------|------|------|
-| `CodeModeRepoSetupOptions` | 接口 | `src/ingestion/code-mode.ts:28-44` | 仓库设置选项：`createWorkflow?`、`cronExpression?`、`env?` |
-| `ensureCodeModeRepoSetup()` | 函数 | `src/ingestion/code-mode.ts:51-63` | 仓库设置入口：可选创建工作流 + 总是刷新 agent 片段 |
-| `runCodeModeConnectors()` | 函数 | `src/ingestion/code-mode.ts:105-148` | code 模式连接器增量拉取，把合成指导追加进 agent 消息 |
+| `CodeModeRepoSetupOptions` | 接口 | `src/ingestion/code-mode.ts:52-68` | 仓库设置选项：`createWorkflow?`、`cronExpression?`、`env?` |
+| `ensureCodeModeRepoSetup()` | 函数 | `src/ingestion/code-mode.ts:75-87` | 仓库设置入口：可选创建工作流 + 总是刷新 agent 片段 |
+| `runCodeModeConnectors()` | 函数 | `src/ingestion/code-mode.ts:129-172` | code 模式连接器增量拉取，把合成指导追加进 agent 消息 |
 
 模块常量：`OPENWIKI_AGENTS_SNIPPET_START/END`（:18-19，`<!-- OPENWIKI:START/END -->` 管理标记）、`DEFAULT_CODE_MODE_CRON`（:20，`"0 8 * * *"`）、`CODE_MODE_AGENT_FILES`（:24，`["AGENTS.md", "CLAUDE.md"]`）、`CLAUDE_AGENTS_IMPORT`（:25，`"@AGENTS.md"`）。
 
@@ -53,7 +53,7 @@ out_of_scope:
 
 ## 2. ensureCodeModeRepoSetup() — 仓库设置编排
 
-`src/ingestion/code-mode.ts:51-63`
+`src/ingestion/code-mode.ts:75-87`
 
 ```typescript
 export async function ensureCodeModeRepoSetup(
@@ -81,7 +81,7 @@ export async function ensureCodeModeRepoSetup(
 
 ## 3. runCodeModeConnectors() — 增量窗口拉取
 
-`src/ingestion/code-mode.ts:105-148`
+`src/ingestion/code-mode.ts:129-172`
 
 ```typescript
 export async function runCodeModeConnectors(
@@ -118,7 +118,7 @@ runCodeModeConnectors(repoRoot, baseMessage, onEvent)
 
 ### 3.2 增量窗口：readLastUpdatedAt → windowHoursSince
 
-`src/ingestion/code-mode.ts:111` 是增量机制的起点：
+`src/ingestion/code-mode.ts:135` 是增量机制的起点：
 
 ```typescript
 const windowHours = windowHoursSince(await readLastUpdatedAt(repoRoot));
@@ -230,13 +230,13 @@ OpenWiki 本体以 `openwiki@<版本>` 锁定安装（版本来自 `OPENWIKI_VER
 
 ## 6. createWorkflowProviderEnv() — provider env 块派生
 
-`src/ingestion/code-mode.ts:287-339`
+`src/ingestion/code-mode.ts:469-530`
 
 私有函数，把**本机已配置的 provider**翻译成工作流 `env:` 块的 YAML 片段。动机（注释 :278-285）：如果模板硬编码某个 provider 的 env，其他 provider 的用户会得到一个首次定时运行就因缺凭据而失败的工作流；只有按 provider 配置实际推导出的块才每个都可用。
 
 派生规则按顺序：
 
-1. **provider 解析**（:288-289）：`resolveConfiguredProvider(env)`（`src/config/constants.ts:837`）+ `getProviderConfig(provider)`（:421）。第一行固定输出 `OPENWIKI_PROVIDER: <provider>`（:290）。
+1. **provider 解析**（:288-289）：`resolveConfiguredProvider(env)`（`src/config/constants.ts:993`）+ `getProviderConfig(provider)`（:421）。第一行固定输出 `OPENWIKI_PROVIDER: <provider>`（:290）。
 2. **OAuth provider 特判**（:292-298）：`getProviderAuthMethod(provider) === "oauth"`（:435）时**不输出任何凭据行**，只输出注释——浏览器登录没有无人值守等价物，把短生命周期 token 钉成 repo secret 会在首次轮换时坏掉；CI 凭据需用户自行准备。
 3. **API key → `secrets.`**（:299-308）：`config.apiKeyEnvKey`（及可选 `secretKeyEnvKey`，如 Bedrock）映射为 `${{ secrets.<KEY> }}`。敏感值一律走 secrets。
 4. **非敏感设置 → `vars.`**（:310-318）：`requiresBaseUrl` 的 `baseUrlEnvKey`、`projectEnvKey`、`requiresRegion` 的 `regionEnvKey` 映射为 `${{ vars.<KEY> }}`——endpoint/project/region 不是机密，走 vars 让用户不用为它们建 secret。
@@ -264,9 +264,9 @@ OpenWiki 在仓库根维护两个 agent 指令文件中的管理块（`<!-- OPEN
 
 ## 8. 与个人 brain wiki 概念的关系 (Relation to the Personal Brain Wiki)
 
-代码模式的拉取虽以代码仓库为主体，但它复用的合成纪律来自个人模式（personal mode）沉淀的 **brain wiki** 概念——围绕 `/open-questions.md`（未决问题）、`/themes.md`（重复主题）、`/commitments.md`（承诺事项）等规范页面组织知识，并以信心标签（confirmed / source-backed / contested / watchlist / saved-context）与 `## Contested` 双主张保留规则约束写入。这些页面语义与标签体系的完整叙述在 02-architecture/03-personal-mode.md（03 号），提示词模板的本体在本区 01 号第 9 节（`createSourceSynthesisPolicy`，`src/ingestion/ingestion.ts:349-362`）。
+代码模式的拉取虽以代码仓库为主体，但它复用的合成纪律来自个人模式（personal mode）沉淀的 **brain wiki** 概念——围绕 `/open-questions.md`（未决问题）、`/themes.md`（重复主题）、`/commitments.md`（承诺事项）等规范页面组织知识，并以信心标签（confirmed / source-backed / contested / watchlist / saved-context）与 `## Contested` 双主张保留规则约束写入。这些页面语义与标签体系的完整叙述在 02-architecture/03-personal-mode.md（03 号），提示词模板的本体在本区 01 号第 9 节（`createSourceSynthesisPolicy`，`src/ingestion/ingestion.ts:351-364`）。
 
-代码模式一侧的落点只有一处却很关键：`runCodeModeConnectors` 对每个拉取成功的连接器调用 `createConnectorSynthesisGuidance(connector)`（:135），把该连接器的合成指导直接注入 agent 消息。对当前唯一的 code 模式连接器 LangSmith，这段指导（`src/ingestion/ingestion.ts:403-416`）把上述纪律具体化：Observed/Correlated/Hypothesis 三层置信、异常加权采样的解读纪律、增量更新 `runtime-behavior.md` 而非覆盖既有结论、隐私强制（不得复制原始运行输入输出）。换言之：**个人模式定义「知识怎么组织」，代码模式借同一套词汇把运行时证据并进同一本 wiki**。
+代码模式一侧的落点只有一处却很关键：`runCodeModeConnectors` 对每个拉取成功的连接器调用 `createConnectorSynthesisGuidance(connector)`（:135），把该连接器的合成指导直接注入 agent 消息。对当前唯一的 code 模式连接器 LangSmith，这段指导（`src/ingestion/ingestion.ts:405-418`）把上述纪律具体化：Observed/Correlated/Hypothesis 三层置信、异常加权采样的解读纪律、增量更新 `runtime-behavior.md` 而非覆盖既有结论、隐私强制（不得复制原始运行输入输出）。换言之：**个人模式定义「知识怎么组织」，代码模式借同一套词汇把运行时证据并进同一本 wiki**。
 
 ---
 
@@ -274,39 +274,39 @@ OpenWiki 在仓库根维护两个 agent 指令文件中的管理块（`<!-- OPEN
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/ingestion/code-mode.ts:15` | `createConnectorSynthesisGuidance` 导入 | 复用 ingestion.ts 的导出（本区 01 号） |
-| `src/ingestion/code-mode.ts:18-25` | 管理标记与常量 | OPENWIKI:START/END、默认 cron、AGENTS/CLAUDE 文件名、`@AGENTS.md` |
-| `src/ingestion/code-mode.ts:28-44` | `CodeModeRepoSetupOptions` | createWorkflow / cronExpression / env 选项 |
-| `src/ingestion/code-mode.ts:51-63` | `ensureCodeModeRepoSetup()` | 仓库设置编排入口 |
-| `src/ingestion/code-mode.ts:70-97` | `ensureCodeModeWorkflow()` | 工作流仅缺失时创建 |
-| `src/ingestion/code-mode.ts:105-148` | `runCodeModeConnectors()` | code 连接器增量拉取与消息增强 |
-| `src/ingestion/code-mode.ts:111` | 窗口计算起点 | `windowHoursSince(await readLastUpdatedAt(…))` |
-| `src/ingestion/code-mode.ts:125` | `connector.ingest({ repoRoot, windowHours })` | 拉取调用（窗口传入） |
-| `src/ingestion/code-mode.ts:166-171` | `windowHoursSince()` | 上次更新至今小时数；undefined = 无下限 |
-| `src/ingestion/code-mode.ts:177-190` | `readLastUpdatedAt()` | 读 `openwiki/.last-update.json` 的 updatedAt |
-| `src/ingestion/code-mode.ts:192-225` | `writeCodeModeAgentSnippets()` | 片段刷新编排（符号链接特判 :197-202） |
-| `src/ingestion/code-mode.ts:227-275` | `prepareCodeModeAgentSnippet()` | 标记状态机（畸形抛错 :265-269） |
-| `src/ingestion/code-mode.ts:287-339` | `createWorkflowProviderEnv()` | provider env 块派生 |
-| `src/ingestion/code-mode.ts:341-421` | `createCodeModeWorkflow()` | 工作流 YAML 模板生成 |
-| `src/ingestion/code-mode.ts:361-366` | checkout 步骤 | SHA 锁定 + `fetch-depth: 0`（:366） |
-| `src/ingestion/code-mode.ts:373-375` | Install 步骤 | `openwiki@<ver>` + 可选 mermaid@11.16.0 + jsdom@29.1.1 |
-| `src/ingestion/code-mode.ts:377-390` | Run OpenWiki 步骤 | `id`/`continue-on-error`（:379）/env 块（:382 起） |
-| `src/ingestion/code-mode.ts:392-419` | 收尾三步骤 | 清理 `.run.json`、创建 PR（:396-415）、失败传播（:417-419） |
-| `src/ingestion/code-mode.ts:423-436` | `createCodeModeAgentsSnippet()` | AGENTS.md 片段内容 |
-| `src/ingestion/code-mode.ts:449-457` | `createCodeModeClaudeSnippet()` | CLAUDE.md 片段（`@AGENTS.md` :454） |
-| `src/ingestion/code-mode.ts:464-474` | `resolvesToSameFile()` | dev+ino 同文件判定 |
+| `src/ingestion/code-mode.ts:19` | `createConnectorSynthesisGuidance` 导入 | 复用 ingestion.ts 的导出（本区 01 号） |
+| `src/ingestion/code-mode.ts:22-49` | 管理标记与常量 | OPENWIKI:START/END、默认 cron、AGENTS/CLAUDE 文件名、`@AGENTS.md` |
+| `src/ingestion/code-mode.ts:52-68` | `CodeModeRepoSetupOptions` | createWorkflow / cronExpression / env 选项 |
+| `src/ingestion/code-mode.ts:75-87` | `ensureCodeModeRepoSetup()` | 仓库设置编排入口 |
+| `src/ingestion/code-mode.ts:94-121` | `ensureCodeModeWorkflow()` | 工作流仅缺失时创建 |
+| `src/ingestion/code-mode.ts:129-172` | `runCodeModeConnectors()` | code 连接器增量拉取与消息增强 |
+| `src/ingestion/code-mode.ts:135` | 窗口计算起点 | `windowHoursSince(await readLastUpdatedAt(…))` |
+| `src/ingestion/code-mode.ts:149` | `connector.ingest({ repoRoot, windowHours })` | 拉取调用（窗口传入） |
+| `src/ingestion/code-mode.ts:190-195` | `windowHoursSince()` | 上次更新至今小时数；undefined = 无下限 |
+| `src/ingestion/code-mode.ts:201-214` | `readLastUpdatedAt()` | 读 `openwiki/.last-update.json` 的 updatedAt |
+| `src/ingestion/code-mode.ts:216-249` | `writeCodeModeAgentSnippets()` | 片段刷新编排（符号链接特判 :197-202） |
+| `src/ingestion/code-mode.ts:251-457` | `prepareCodeModeAgentSnippet()` | 标记状态机（畸形抛错 :265-269） |
+| `src/ingestion/code-mode.ts:469-530` | `createWorkflowProviderEnv()` | provider env 块派生 |
+| `src/ingestion/code-mode.ts:532-623` | `createCodeModeWorkflow()` | 工作流 YAML 模板生成 |
+| `src/ingestion/code-mode.ts:552-557` | checkout 步骤 | SHA 锁定 + `fetch-depth: 0`（:366） |
+| `src/ingestion/code-mode.ts:564-566` | Install 步骤 | `openwiki@<ver>` + 可选 mermaid@11.16.0 + jsdom@29.1.1 |
+| `src/ingestion/code-mode.ts:568-581` | Run OpenWiki 步骤 | `id`/`continue-on-error`（:379）/env 块（:382 起） |
+| `src/ingestion/code-mode.ts:583-621` | 收尾三步骤 | 清理 `.run.json`、创建 PR（:396-415）、失败传播（:417-419） |
+| `src/ingestion/code-mode.ts:633-650` | `createCodeModeAgentsSnippet()` | AGENTS.md 片段内容 |
+| `src/ingestion/code-mode.ts:663-671` | `createCodeModeClaudeSnippet()` | CLAUDE.md 片段（`@AGENTS.md` :454） |
+| `src/ingestion/code-mode.ts:678-688` | `resolvesToSameFile()` | dev+ino 同文件判定 |
 | `src/cli/app/app.tsx:34-36` | 导入 | TUI 路径调用方（setup :580、connectors :592） |
 | `src/cli/runners.ts:13-15` | 导入 | `--print` 路径调用方（setup :300、connectors :310） |
-| `src/generation/repository-run.ts:32` | 导入 | 生成生命周期调用方（setup :334） |
+| `src/generation/repository-run.ts:39` | 导入 | 生成生命周期调用方（setup :334） |
 | `src/telemetry/with-run-telemetry.ts:59-85` | `withRunTelemetry()` | app.tsx 与 runners.ts 两条 CLI 路径的遥测边界 |
 | `src/config/constants.ts:3` | `UPDATE_METADATA_PATH` | `openwiki/.last-update.json` |
-| `src/config/constants.ts:66` | `OPENWIKI_MODEL_ID_ENV_KEY` | 模型 ID env 键 |
-| `src/config/constants.ts:421` | `getProviderConfig()` | provider 配置查询 |
-| `src/config/constants.ts:435` | `getProviderAuthMethod()` | oauth/apikey 判定 |
-| `src/config/constants.ts:837` | `resolveConfiguredProvider()` | 从 env 解析当前 provider |
-| `src/config/constants.ts:1077` | `resolveOpenAiCompatibleStreaming()` | SSE 流式覆盖判定 |
+| `src/config/constants.ts:78` | `OPENWIKI_MODEL_ID_ENV_KEY` | 模型 ID env 键 |
+| `src/config/constants.ts:488` | `getProviderConfig()` | provider 配置查询 |
+| `src/config/constants.ts:502` | `getProviderAuthMethod()` | oauth/apikey 判定 |
+| `src/config/constants.ts:993` | `resolveConfiguredProvider()` | 从 env 解析当前 provider |
+| `src/config/constants.ts:1301` | `resolveOpenAiCompatibleStreaming()` | SSE 流式覆盖判定 |
 | `src/connectors/types.ts:19` | `mode` 字段 | `"code" \| "personal"`，拉取过滤判据 |
 | `src/connectors/sources/langsmith/index.ts:92` | `mode: "code"` | 当前唯一的 code 模式连接器 |
 | `src/connectors/tools.ts:288-303` | `ingestAllConnectors()` | agent 工具侧拉取（Promise.allSettled），与本文件 agent 前拉取互补 |
-| `src/ingestion/ingestion.ts:349-362` | `createSourceSynthesisPolicy()` | brain wiki 规范页面与信心标签本体（第 8 节引用） |
-| `src/ingestion/ingestion.ts:403-416` | langsmith guidance | code 模式注入的合成纪律 |
+| `src/ingestion/ingestion.ts:351-364` | `createSourceSynthesisPolicy()` | brain wiki 规范页面与信心标签本体（第 8 节引用） |
+| `src/ingestion/ingestion.ts:405-418` | langsmith guidance | code 模式注入的合成纪律 |

@@ -49,9 +49,9 @@ beginRepositoryRun ──► phase=planning ──► submitRepositoryPlan ─�
    finishRepositoryRun（删除/收尾/最终证明/整表替换 manifest/删 .run.json）
 ```
 
-分工上，`src/generation/` 是**持久化核心**（durable core），`src/agent/repository-runner.ts` 是 **CLI 侧唯一驱动方** `runNativeRepositoryGeneration`（`src/agent/repository-runner.ts:205-254`）。入口分流在 `src/agent/index.ts:178-230`：`outputMode === "repository"` 且命令为 `init|update` 时不进入共享 agent 流程，直接构建模型并调用 `runNativeRepositoryGeneration`。除 CLI 外，`src/integrations/core/session-manager.ts:3-10,130,161,177,211` 也直接调用同一组生命周期函数——核心对驱动方是无差别的。
+分工上，`src/generation/` 是**持久化核心**（durable core），`src/agent/repository-runner.ts` 是 **CLI 侧唯一驱动方** `runNativeRepositoryGeneration`（`src/agent/repository-runner.ts:363-417`）。入口分流在 `src/agent/index.ts:191-245`：`outputMode === "repository"` 且命令为 `init|update` 时不进入共享 agent 流程，直接构建模型并调用 `runNativeRepositoryGeneration`。除 CLI 外，`src/integrations/core/session-manager.ts:3-10,130,161,177,211` 也直接调用同一组生命周期函数——核心对驱动方是无差别的。
 
-worker 之上没有内存 checkpointer：`src/agent/repository-runner.ts:197-200` 明确「模型对象复用，但 repository 生成的 checkpointer 与 worker 状态都不存活于持久化核心之外」。可恢复性完全由 `.run.json`（§4）与页清单（02 号）承担。
+worker 之上没有内存 checkpointer：`src/agent/repository-runner.ts:355-358` 明确「模型对象复用，但 repository 生成的 checkpointer 与 worker 状态都不存活于持久化核心之外」。可恢复性完全由 `.run.json`（§4）与页清单（02 号）承担。
 
 ## 2. `.run.json` 检查点
 
@@ -103,14 +103,14 @@ worker 之上没有内存 checkpointer：`src/agent/repository-runner.ts:197-200
 ### 3.1 前置步骤
 
 1. **语言先验**：请求语言无法识别时直接抛 `invalid_input`（`repository-run.ts:327-332`），不落盘错误语言——因为恢复语义拒绝变更已开始 run 的语言，调用方将无法纠正。
-2. **仓库准备**：第一步执行 `ensureCodeModeRepoSetup`（`repository-run.ts:334-336`，实现在 `src/ingestion/code-mode.ts:51`），init 时顺带生成 CI 工作流。
+2. **仓库准备**：第一步执行 `ensureCodeModeRepoSetup`（`repository-run.ts:334-336`，实现在 `src/ingestion/code-mode.ts:75`），init 时顺带生成 CI 工作流。
 3. **已有检查点即恢复**：读到 `.run.json` 立即转 `resumeRepositoryRun`（`repository-run.ts:338-341`，语义见 §9）。
 
 ### 3.2 全新 run 的装配（`repository-run.ts:343-528`）
 
 - `createRunContext` 解析语言与上次成功元数据；`languageChanged` 由请求语言与 `lastUpdate.language` 的主子标签比较得出（`repository-run.ts:349-352`，辅助函数在 `src/platform/language.ts:25,63,82`）。
 - `prepareClaimsRuntime` 重建进程内 claims 运行时（`repository-run.ts:364-371`；claims 语义详见 07 区），`ClaimsStore.discoverPages` 得到 `initialPages`（`376-377`）。
-- `createRepositorySourceSnapshot` 捕获源指纹与 gitHead（`repository-run.ts:378`；接口 `src/agent/utils.ts:307-319`，实现 `utils.ts:331`）。
+- `createRepositorySourceSnapshot` 捕获源指纹与 gitHead（`repository-run.ts:378`；接口 `src/agent/utils.ts:295-307`，实现 `utils.ts:331`）。
 - update 模式追加两步：`seedRepositoryPageManifest` 从上次成功 gitHead 播种 legacy 覆盖（`384-389`）、fast-forward 推进无变更页（`390-400`）——两步的细节均在 02 号 §4/§5。
 - **no-op 严格前置门**：update 且未 `force` 时，干净更新在此直接短路返回 `NoopBeginView`（`409-458`）。该门是 02 号 §6 的主题，此处只需知道：它是 begin 的一部分，且任何前置条件不满足都会落回正常生成路径。
 
@@ -132,7 +132,7 @@ worker 之上没有内存 checkpointer：`src/agent/repository-runner.ts:197-200
 - **重复提交幂等**：已有持久化计划时，重新规范化新提案并与旧计划做「忽略任务 ID 与进度」的语义比较 `samePlanIgnoringJobIds`（`887-903`、`935-953`）；相同则直接返回 accepted，不同则 `invalid_state`——不静默替换已持久化的计划。
 - **落盘即换相**：计划写入同一份 `.run.json`，`phase` 同步置 `generating`（`918-925`）。
 
-计划本体由 `createRepositoryPlan` 校验规范化（`src/generation/page-jobs.ts:123-190`）：
+计划本体由 `createRepositoryPlan` 校验规范化（`src/generation/page-jobs.ts:126-205`）：
 
 - 每页规范化为 pending 任务：UUID、路径规范化、title/purpose 非空、seedPaths 禁 `..` 逃逸（`page-jobs.ts:198-225,331-340`）；`_` 前缀保留工作页路径被拒（`233-246`）。
 - init 计划不得携带 `deletePages`（`134-139`）且**必须包含** `/openwiki/quickstart.md`（`168-173`）；quickstart 永不可删（`141-146`）。
@@ -151,7 +151,7 @@ worker 之上没有内存 checkpointer：`src/agent/repository-runner.ts:197-200
 
 ### 5.1 驱动方：每页一个受限 worker
 
-驱动方循环 `runPendingPageAgents`（`src/agent/repository-runner.ts:373-397`）反复调用 `nextRepositoryPage` 直到队列空。每页派发一个**全新 agent**（`runPageAgent`，`repository-runner.ts:407-518`）：
+驱动方循环 `runPendingPageAgents`（`src/agent/repository-runner.ts:633-761`）反复调用 `nextRepositoryPage` 直到队列空。每页派发一个**全新 agent**（`runPageAgent`，`repository-runner.ts:407-518`）：
 
 - 后端为 docs-only、`virtualMode` 的本地 shell backend，`writableWikiPages` 只含**本页一个路径**（`repository-runner.ts:415-424`，关键在 `417`）。
 - 工具白名单仅文件读写四件套 + `write_file`/`edit_file` + `submit_plan`/`inspect_claims`/`submit_page`（`repository-runner.ts:74-85`）；无 shell、无连接器工具、并通过中间件摘除 DeepAgents 的通用 `task` 委派工具（`90-97`）。提示词与后端边界详见 04 区 01/02/04 号。
@@ -178,7 +178,7 @@ worker 之上没有内存 checkpointer：`src/agent/repository-runner.ts:197-200
 
 ### 6.1 稀疏对账的边界行为
 
-`reconcilePageClaims`（`src/generation/page-jobs.ts:402-519`）在本事务中的关键行为：省略且无 issue 的现有 claim 自动 confirm（`498-507`）；**带 issue 的 claim 若被省略直接 `invalid_input`**——必需的 grounding 工作不可被沉默跳过（`500-504`）；同一 claim 给出两种决策、claim 不属于本页均为 `invalid_input`（`414-431`）；对账后页必须保有至少一个实质 claim（`509-516`）。协议全貌与 claims 语义详见 07 区。
+`reconcilePageClaims`（`src/generation/page-jobs.ts:417-534`）在本事务中的关键行为：省略且无 issue 的现有 claim 自动 confirm（`498-507`）；**带 issue 的 claim 若被省略直接 `invalid_input`**——必需的 grounding 工作不可被沉默跳过（`500-504`）；同一 claim 给出两种决策、claim 不属于本页均为 `invalid_input`（`414-431`）；对账后页必须保有至少一个实质 claim（`509-516`）。协议全貌与 claims 语义详见 07 区。
 
 ## 7. worker 失败：快照还原 + skip
 
@@ -193,7 +193,7 @@ worker 异常退出且未成功提交时，驱动方调用 `skipRepositoryPage`�
 5. 写 `interrupted` 元数据（`1130-1138`）；
 6. 该任务 status→`skipped` 并原子落盘（`1140-1152`）——**不推进 pending 检查点**。
 
-skipped 页不阻塞本轮：finish 时用驱动方保留的快照**统一还原**所有 skipped 页（`repository-run.ts:1547-1549`），在最终 claims 证明中排除（`1551-1552`），并在整表替换 manifest 时保留其旧条目（`1553-1559`）。下一次 update 的规划会重新考虑这些页——驱动方的用户提示也如此声明（`src/agent/repository-runner.ts:520-529`）；而**同一 run 恢复时 skipped 页重置回 pending**（§9），给失败页一次原地重试。
+skipped 页不阻塞本轮：finish 时用驱动方保留的快照**统一还原**所有 skipped 页（`repository-run.ts:1547-1549`），在最终 claims 证明中排除（`1551-1552`），并在整表替换 manifest 时保留其旧条目（`1553-1559`）。下一次 update 的规划会重新考虑这些页——驱动方的用户提示也如此声明（`src/agent/repository-runner.ts:1049-1058`）；而**同一 run 恢复时 skipped 页重置回 pending**（§9），给失败页一次原地重试。
 
 ## 8. finish：单次收尾
 
@@ -205,9 +205,9 @@ skipped 页不阻塞本轮：finish 时用驱动方保留的快照**统一还原
 4. **还原 skipped 页**（`1547-1549`）。
 5. **最终 claims 证明**：`claimsRuntime.finalize`（排除 skipped 页）+ 全仓级 `assertRepositoryClaimsDurable`（`1551-1552`；实现 `1411-1444`）：任何存在 sidecar 的页必须真实存在，会话中每个非空 claim 集必须逐页通过页级证明。
 6. **整表替换 manifest**：以最终存活页集 + 当前源检查点重建（`1553-1559`），机制详见 02 号 §4。
-7. **元数据**：有 skipped 页或源指纹在收尾前后发生过漂移→`interrupted`（`1562-1571`）；否则写 `complete`（`1573-1581`，经 `persistRunMetadataIfChanged`，`src/agent/utils.ts:249-272`——repository run 总会刷新时间戳并清除上一轮 interrupted 状态；语义详见 02 号 §7）。
+7. **元数据**：有 skipped 页或源指纹在收尾前后发生过漂移→`interrupted`（`1562-1571`）；否则写 `complete`（`1573-1581`，经 `persistRunMetadataIfChanged`，`src/agent/utils.ts:237-260`——repository run 总会刷新时间戳并清除上一轮 interrupted 状态；语义详见 02 号 §7）。
 8. **最后删 `.run.json`**（`1584-1585`）：注释明言「Delete this LAST」——之前任何失败都让 begin 能重建重试。
-9. 返回值携带 `sourceChanged` 标志（`1587-1589`，判定 `1598-1603`），驱动方据此提示用户稍后再跑一次 update（`src/agent/repository-runner.ts:244-250`）。
+9. 返回值携带 `sourceChanged` 标志（`1587-1589`，判定 `1598-1603`），驱动方据此提示用户稍后再跑一次 update（`src/agent/repository-runner.ts:407-413`）。
 
 ## 9. 恢复语义（resume）
 
@@ -251,7 +251,7 @@ skipped 页不阻塞本轮：finish 时用驱动方保留的快照**统一还原
 | `conflict` | 与既有可恢复 run 冲突 | resume 的 mode/语言冲突（`569-582`） |
 | `not_found` | 引用了不存在的任务 | `submit_page` 未知 jobId（`1195-1198`） |
 
-驱动方对两码的处理截然不同：`invalid_input` 的 `submit_plan`/`submit_page` 拒绝被转换为 `status: "error"` 的 ToolMessage 返回给 worker 继续自修正（`src/agent/repository-runner.ts:113-134`，挂接于 `317-331,452-467`）；其余错误码穿透为运行失败。
+驱动方对两码的处理截然不同：`invalid_input` 的 `submit_plan`/`submit_page` 拒绝被转换为 `status: "error"` 的 ToolMessage 返回给 worker 继续自修正（`src/agent/repository-runner.ts:249-270`，挂接于 `317-331,452-467`）；其余错误码穿透为运行失败。
 
 ## 11. init 从零重建（wiki-replacement 备份）
 
@@ -268,38 +268,38 @@ init 对已存在 `openwiki/` 的仓库不是增量更新，而是**先备份、
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/generation/repository-run.ts:319-544` | `beginRepositoryRun` | 开始/恢复入口、no-op 门、持久化点、init 回滚 |
-| `src/generation/repository-run.ts:564-662` | `resumeRepositoryRun` | 冲突拒绝、skipped 重置、漂移作废、manifest 复核 |
-| `src/generation/repository-run.ts:673-733` | `reconcileManifestPageJobs` | pending→complete 提升、complete 复证 |
-| `src/generation/repository-run.ts:846-874` | `fastForwardUnchangedRepositoryPageCoverage` | fast-forward（详见 02 号） |
-| `src/generation/repository-run.ts:883-926` | `submitRepositoryPlan` | 计划持久化与换相 |
-| `src/generation/repository-run.ts:976-1009` | `nextRepositoryPage` | 第一个 pending，不预留 |
-| `src/generation/repository-run.ts:1022-1039` | `inspectRepositoryPageClaims` | 当前页 claims 视图 |
-| `src/generation/repository-run.ts:1044-1085` | `captureRepositoryPageSnapshot` | 页快照 |
+| `src/generation/repository-run.ts:401-626` | `beginRepositoryRun` | 开始/恢复入口、no-op 门、持久化点、init 回滚 |
+| `src/generation/repository-run.ts:646-744` | `resumeRepositoryRun` | 冲突拒绝、skipped 重置、漂移作废、manifest 复核 |
+| `src/generation/repository-run.ts:755-815` | `reconcileManifestPageJobs` | pending→complete 提升、complete 复证 |
+| `src/generation/repository-run.ts:933-968` | `fastForwardUnchangedRepositoryPageCoverage` | fast-forward（详见 02 号） |
+| `src/generation/repository-run.ts:977-1020` | `submitRepositoryPlan` | 计划持久化与换相 |
+| `src/generation/repository-run.ts:1088-1125` | `nextRepositoryPage` | 第一个 pending，不预留 |
+| `src/generation/repository-run.ts:1138-1147` | `inspectRepositoryPageClaims` | 当前页 claims 视图 |
+| `src/generation/repository-run.ts:1152-1185` | `captureRepositoryPageSnapshot` | 页快照 |
 | `src/generation/repository-run.ts:1090-1153` | `skipRepositoryPage` | 失败还原 + skipped |
-| `src/generation/repository-run.ts:1183-1298` | `submitRepositoryPage` | 页事务序 |
-| `src/generation/repository-run.ts:1307-1384` | `assertPageClaimsDurable` | 页级耐久证明 |
-| `src/generation/repository-run.ts:1411-1444` | `assertRepositoryClaimsDurable` | 全仓最终证明 |
-| `src/generation/repository-run.ts:1485-1590` | `finishRepositoryRun` | 单次收尾、最后删 `.run.json` |
-| `src/generation/repository-run.ts:301-308` | `getRepositoryRunSourceCheckpoint` | run 源检查点投影 |
-| `src/generation/run-state.ts:121-218` | `RepositoryRunState` / `PageJob` | 检查点 schema（schema 见 `251-298`） |
-| `src/generation/run-state.ts:313-363` | `read/write/removeRepositoryRunState` | 检查点原子读写删 |
-| `src/generation/page-jobs.ts:123-190` | `createRepositoryPlan` | 计划校验、必需任务、排序 |
-| `src/generation/page-jobs.ts:402-519` | `reconcilePageClaims` | 稀疏对账展开与守卫 |
+| `src/generation/repository-run.ts:1309-1453` | `submitRepositoryPage` | 页事务序 |
+| `src/generation/repository-run.ts:1462-1539` | `assertPageClaimsDurable` | 页级耐久证明 |
+| `src/generation/repository-run.ts:1566-1599` | `assertRepositoryClaimsDurable` | 全仓最终证明 |
+| `src/generation/repository-run.ts:1640-1818` | `finishRepositoryRun` | 单次收尾、最后删 `.run.json` |
+| `src/generation/repository-run.ts:383-390` | `getRepositoryRunSourceCheckpoint` | run 源检查点投影 |
+| `src/generation/run-state.ts:124-221` | `RepositoryRunState` / `PageJob` | 检查点 schema（schema 见 `251-298`） |
+| `src/generation/run-state.ts:317-367` | `read/write/removeRepositoryRunState` | 检查点原子读写删 |
+| `src/generation/page-jobs.ts:126-205` | `createRepositoryPlan` | 计划校验、必需任务、排序 |
+| `src/generation/page-jobs.ts:417-534` | `reconcilePageClaims` | 稀疏对账展开与守卫 |
 | `src/generation/errors.ts:4-24` | `RepositoryRunError` | 稳定错误码 |
-| `src/generation/page-manifest.ts:186-377` | `recordRepositoryPageCompletion` 等 | manifest 写入/一致性（详见 02 号） |
-| `src/agent/repository-runner.ts:205-254` | `runNativeRepositoryGeneration` | CLI 唯一驱动方 |
-| `src/agent/repository-runner.ts:373-518` | `runPendingPageAgents` / `runPageAgent` | 逐页受限 worker、失败分支 |
-| `src/agent/repository-runner.ts:113-134` | `createSubmissionRejection` | invalid_input → 可重试 ToolMessage |
+| `src/generation/page-manifest.ts:186-422` | `recordRepositoryPageCompletion` 等 | manifest 写入/一致性（详见 02 号） |
+| `src/agent/repository-runner.ts:363-417` | `runNativeRepositoryGeneration` | CLI 唯一驱动方 |
+| `src/agent/repository-runner.ts:633-1047` | `runPendingPageAgents` / `runPageAgent` | 逐页受限 worker、失败分支 |
+| `src/agent/repository-runner.ts:249-270` | `createSubmissionRejection` | invalid_input → 可重试 ToolMessage |
 | `src/agent/wiki-replacement.ts:42-196` | `beginRepositoryWikiReplacement` | init 备份事务与信号恢复 |
-| `src/agent/index.ts:178-230` | repository 分流 | init/update 提前进入原生路径 |
-| `src/agent/utils.ts:307-331` | `createRepositorySourceSnapshot` | 源快照接口与实现入口 |
-| `src/agent/utils.ts:126,208,249` | `getUpdateNoopStatus` 等 | no-op 预检与元数据写入 |
+| `src/agent/index.ts:191-245` | repository 分流 | init/update 提前进入原生路径 |
+| `src/agent/utils.ts:295-319` | `createRepositorySourceSnapshot` | 源快照接口与实现入口 |
+| `src/agent/utils.ts:119,208,249` | `getUpdateNoopStatus` 等 | no-op 预检与元数据写入 |
 | `src/claims/brains/code/runtime.ts:21-41,64-102` | `ClaimsRuntime` / `prepareClaimsRuntime` | claims 运行时（语义详见 07 区） |
 | `src/agent/wiki-finalizer.ts:226-248` | `prepareWikiForAuthoring` / `finalizeWikiArtifacts` | finalize 管线（详见 03 号） |
-| `src/agent/types.ts:92-99` | `UpdateMetadata` | 元数据 schema（语义详见 02 号） |
+| `src/agent/types.ts:121-128` | `UpdateMetadata` | 元数据 schema（语义详见 02 号） |
 | `src/config/constants.ts:1-3` | `OPEN_WIKI_DIR` / `PAGE_MANIFEST_PATH` / `UPDATE_METADATA_PATH` | 三个持久化路径 |
 | `src/platform/language.ts:25,63,82` | `resolveLanguage` 等 | 语言解析与主子标签 |
-| `src/ingestion/code-mode.ts:51` | `ensureCodeModeRepoSetup` | begin 第一步仓库准备 |
+| `src/ingestion/code-mode.ts:75` | `ensureCodeModeRepoSetup` | begin 第一步仓库准备 |
 | `src/version.ts:81` | `OPENWIKI_PRODUCER_ACTOR` | producer 身份 |
 | `src/integrations/core/session-manager.ts:3-10` | 生命周期导入 | 非 CLI 驱动方复用同一组函数 |

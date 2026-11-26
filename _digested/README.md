@@ -142,8 +142,8 @@ re-baseline 后写出的内容文档加 `sync_event: "2026-09-13"`。
 所有源码引用使用仓库根相对路径 + 行号：
 
 ```
-`src/cli/commands.ts:168`
-`src/generation/repository-run.ts:976-1009`
+`src/cli/commands.ts:232`
+`src/generation/repository-run.ts:1088-1125`
 ```
 
 ### Source Anchor 表
@@ -156,7 +156,7 @@ re-baseline 后写出的内容文档加 `sync_event: "2026-09-13"`。
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
 | `src/generation/run-state.ts:14` | `REPOSITORY_RUN_STATE_BASENAME` | `.run.json` 检查点路径 |
-| `src/agent/index.ts:1077-1264` | `createModel` | 按 provider 分支的模型工厂 |
+| `src/agent/index.ts:1123-1465` | `createModel` | 按 provider 分支的模型工厂 |
 ```
 
 ---

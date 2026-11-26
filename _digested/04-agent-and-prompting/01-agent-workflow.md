@@ -25,13 +25,13 @@ out_of_scope:
 
 # 01 — 运行路径与编排 (Run Paths and Orchestration)
 
-OpenWiki 的 agent 编排入口是 `runOpenWikiAgent()`（`src/agent/index.ts:154-274`）。它在最外层做一次**双路径分流（dual-path dispatch）**：repository 模式的 `init`/`update` 走原生 page-job 快速路径，不创建 DeepAgent；`chat` 与 `local-wiki` 走 DeepAgent 主路径。旧基线（d4e94ab 时代）"一次运行 = 10 步流水线"的叙事只对主路径仍然成立，对 repository 生成已失效。
+OpenWiki 的 agent 编排入口是 `runOpenWikiAgent()`（`src/agent/index.ts:167-290`）。它在最外层做一次**双路径分流（dual-path dispatch）**：repository 模式的 `init`/`update` 走原生 page-job 快速路径，不创建 DeepAgent；`chat` 与 `local-wiki` 走 DeepAgent 主路径。旧基线（d4e94ab 时代）"一次运行 = 10 步流水线"的叙事只对主路径仍然成立，对 repository 生成已失效。
 
 > **源码是唯一真相源。** 本文所有行号锚定 `src/agent/index.ts`（2373 行）、`src/agent/types.ts`（105 行）、`src/agent/crash-guard.ts`（185 行）、`src/agent/repository-runner.ts`（607 行）在分支 `ethan` 基线 `e92cc11` 的当前状态。
 
 ## 1. 双路径分流（Dual-Path Dispatch）
 
-**源码位置**：`src/agent/index.ts:178-230`
+**源码位置**：`src/agent/index.ts:191-245`
 
 ```typescript
 // index.ts:178-179
@@ -58,7 +58,7 @@ Repository init/update use the OpenWiki page-job runner; call runOpenWikiAgent i
 
 | 维度 | repository init/update（快速路径） | chat / local-wiki（主路径） |
 |------|-----------------------------------|----------------------------|
-| 编排者 | `runNativeRepositoryGeneration`（`src/agent/repository-runner.ts:205-254`） | `runOpenWikiAgentCore`（`index.ts:539-781`） |
+| 编排者 | `runNativeRepositoryGeneration`（`src/agent/repository-runner.ts:363-417`） | `runOpenWikiAgentCore`（`index.ts:539-781`） |
 | DeepAgent | 不走 `createDeepAgent` 主图；planner/page worker 各建一次性 DeepAgent | 一个常驻 `createDeepAgent` 图（`index.ts:481-536`） |
 | 检查点（checkpoint） | 无 agent 级 checkpointer；持久化靠 `.run.json`（05 区） | `SqliteSaver`（chat 持久化 / init、update 内存，见第 7 节） |
 | 连接器工具 | repository 模式零暴露（`createOpenWikiConnectorTools("repository")` 返回空数组，08 区） | personal/local-wiki 模式注入完整连接器工具 |
@@ -69,7 +69,7 @@ Repository init/update use the OpenWiki page-job runner; call runOpenWikiAgent i
 
 ## 2. repository 快速路径（Native Repository Generation）
 
-**源码位置**：`src/agent/index.ts:181-230`
+**源码位置**：`src/agent/index.ts:194-245`
 
 快速路径在分支内完成三件事：
 
@@ -81,7 +81,7 @@ Repository init/update use the OpenWiki page-job runner; call runOpenWikiAgent i
 
 ### repository_progress 事件
 
-**类型定义**：`src/agent/types.ts:13-51`
+**类型定义**：`src/agent/types.ts:13-68`
 
 repository 快速路径不流式输出模型文本，而是发出**结构化生命周期进度事件** `RepositoryGenerationProgressEvent`：`type: "repository_progress"`，`stage` 取 `"planning" | "generating" | "finalizing" | "replanning" | "noop"`，可携带 `resumed`（是否续跑中断的持久化运行）、`page` / `pageIndex` / `pageCount`（仅页面生成阶段）。发射点在 `src/agent/repository-runner.ts`：
 
@@ -97,7 +97,7 @@ worker 内部的工具事件由 `streamWorkerTools`（`repository-runner.ts:538-
 
 ## 3. resolveRunConfig 与模型可用性检查
 
-**源码位置**：`src/agent/index.ts:283-372`
+**源码位置**：`src/agent/index.ts:299-394`
 
 `resolveRunConfig()` 是两条路径共用的**运行前配置解析**。它把"provider 解析 → 凭据验证 → 模型解析 → 可用性检查 → 重试/输出预算解析"收敛为一个带遥测阶段标签（`catch` 里 `tagErrorStage(error, "config")`，`index.ts:368-371`）的步骤序列，返回五个字段：`provider`、`modelId`、`providerRetryAttempts`、`maxOutputTokens?`、`streamIdleTimeout?`（`index.ts:286-292`）。
 
@@ -120,13 +120,13 @@ worker 内部的工具事件由 `streamWorkerTools`（`repository-runner.ts:538-
 
 ## 4. chat/local-wiki 主路径（10 步流水线的现存边界）
 
-**源码位置**：`src/agent/index.ts:539-781`
+**源码位置**：`src/agent/index.ts:580-822`
 
 > **边界声明**：旧文档把整条 agent 流程统称"10 步流水线"。本基线中这套叙事**只适用于本节描述的 chat/local-wiki 主路径**；repository init/update 的流水线是 page-job 状态机（planning → generating → finalizing，见 05 区），与下列步骤无对应关系。
 
 主路径按顺序执行（步骤编号为本文叙事，非源码注释）：
 
-1. **构建 RunContext**（`index.ts:552-556`）：`createRunContext(cwd, outputMode, options.language)`，带 `build_error/run_context` 错误标签。`RunContext` 现为 `{ lastUpdate, language?, wikiGoal? }`（`src/agent/types.ts:101-105`）——**旧基线的 `gitSummary` 字段已删除**，文本型 Git 证据不复存在（源指纹体系见 03 篇）。
+1. **构建 RunContext**（`index.ts:552-556`）：`createRunContext(cwd, outputMode, options.language)`，带 `build_error/run_context` 错误标签。`RunContext` 现为 `{ lastUpdate, language?, wikiGoal? }`（`src/agent/types.ts:130-134`）——**旧基线的 `gitSummary` 字段已删除**，文本型 Git 证据不复存在（源指纹体系见 03 篇）。
 2. **内容快照**（`index.ts:558-566`）：非 chat 命令对 wiki 内容目录做 SHA-256 快照（`createOpenWikiContentSnapshot`），chat 为 `null`。
 3. **构建模型**（`index.ts:567-578`）：`createModel(provider, modelId, providerRetryAttempts, maxOutputTokens, streamIdleTimeout)`。
 4. **解析 thread ID**（`index.ts:581-582`）：优先 `options.threadId`（跨调用恢复对话），否则 `createThreadId(cwd, createRunThreadId())`。
@@ -158,18 +158,18 @@ worker 内部的工具事件由 `streamWorkerTools`（`repository-runner.ts:538-
 
 ### 5.1 流模式的决定
 
-**源码位置**：`src/agent/index.ts:623-649`
+**源码位置**：`src/agent/index.ts:664-690`
 
 主路径用 `agent.stream(input, { configurable: { thread_id }, streamMode, subgraphs: true })` 取代旧基线的 `agent.streamEvents(…, { version: "v3" })`。流模式（stream mode）有两种组合：
 
 - 默认 `["messages", "tools"]`（`index.ts:633-634`）；
-- `openai-compatible` provider **默认退到 `["updates", "tools"]`**（`index.ts:631-632`），已知良好的端点可设环境变量 `OPENWIKI_OPENAI_COMPATIBLE_STREAM_MESSAGES=true`（`src/config/constants.ts:24-25`，解析函数 `constants.ts:1054-1061`）选择回到 messages 模式。
+- `openai-compatible` provider **默认退到 `["updates", "tools"]`**（`index.ts:631-632`），已知良好的端点可设环境变量 `OPENWIKI_OPENAI_COMPATIBLE_STREAM_MESSAGES=true`（`src/config/constants.ts:36-37`，解析函数 `constants.ts:1054-1061`）选择回到 messages 模式。
 
 退避的原因写在源码注释里（`index.ts:623-630`）：`messages` 模式强制 chunk 聚合，某些在首个 `role:"assistant"` delta 之前先流 reasoning 增量的端点会聚合成 `ChatMessageChunk`，被 agent 循环校验器拒绝（上游 issue #659）。`subgraphs: true` 让 chunk 携带命名空间（namespace），用于区分主图与子图输出。
 
 ### 5.2 chunk 解析函数族
 
-**源码位置**：`src/agent/index.ts:1447-1549`
+**源码位置**：`src/agent/index.ts:1651-1753`
 
 ```typescript
 // index.ts:1447-1471
@@ -190,7 +190,7 @@ chunk 形状是三元组 `[namespace: string[], mode: "messages" | "tools" | "up
 
 ### 5.3 命名空间归类：model_request 归 "main"
 
-**源码位置**：`src/agent/index.ts:1857-1875`
+**源码位置**：`src/agent/index.ts:2061-2079`
 
 ```typescript
 const MODEL_REQUEST_NAMESPACE_PREFIX = "model_request:";
@@ -202,7 +202,7 @@ DeepAgents 把主模型调用包在单个 `model_request` 命名空间里；`get
 
 ### 5.4 数组参数渲染
 
-**源码位置**：`src/agent/index.ts:1881-1901`
+**源码位置**：`src/agent/index.ts:2085-2105`
 
 `formatToolArgs` 在检查 record **之前**先检查 `Array.isArray`（`index.ts:1886-1888`）：数组是 `typeof "object"` 且非空，若先走 record 分支会被渲染成 `0=…, 1=…`。数组渲染为逗号连接的值列表，record 渲染为 `key=value` 对。输入若是 JSON 字符串会先经 `parseStringifiedJson` 解析（`index.ts:1907`）。
 
@@ -214,7 +214,7 @@ repository 快速路径不走上述解析族：planner/page worker 的 `streamWo
 
 ### 6.1 注册窗口
 
-**源码位置**：`src/agent/index.ts:652-662`（注册）、`index.ts:711-719`（注销）
+**源码位置**：`src/agent/index.ts:693-703`（注册）、`index.ts:711-719`（注销）
 
 ```typescript
 // index.ts:655-662 —— 恰好在流消费开始前注册
@@ -231,7 +231,7 @@ registerActiveRun({
 
 ### 6.2 失败也写 interrupted 元数据
 
-**源码位置**：`src/agent/index.ts:684-708`（流中途失败）、`index.ts:749-763`（收尾写入失败）
+**源码位置**：`src/agent/index.ts:725-749`（流中途失败）、`index.ts:749-763`（收尾写入失败）
 
 流中途抛错时，`catch` 块先 `tagErrorStage(error, "run")`，然后**仍调用 `persistRunMetadataIfChanged(…, "interrupted", context.language)`**（`index.ts:693-701`）：已生成的部分内容保持可被后续 update diff，且 `interrupted` 状态让下一次调度更新不会对着半成品 wiki 误判 no-op。持久化自身失败被吞掉（只发 `metadata=writeFailed` debug），原始运行错误照常传播。
 
@@ -241,7 +241,7 @@ registerActiveRun({
 
 ### 检查点目标选择
 
-**源码位置**：`src/agent/index.ts:901-915`
+**源码位置**：`src/agent/index.ts:942-956`
 
 | command | persistent | connString |
 |---------|-----------|------------|
@@ -252,7 +252,7 @@ registerActiveRun({
 
 ### Thread ID
 
-**源码位置**：`src/agent/index.ts:927-941`
+**源码位置**：`src/agent/index.ts:968-982`
 
 ```typescript
 // index.ts:931-935
@@ -271,13 +271,13 @@ function createRunThreadId(): string {
 
 ### Checkpoint 历史裁剪
 
-**源码位置**：`src/agent/index.ts:843-899`
+**源码位置**：`src/agent/index.ts:884-940`
 
 `SqliteSaver.put()` 只插入不清理；chat 会话每轮复用同一 thread_id，SQLite 会随图步数无限增长。`pruneCheckpointHistory()`（`index.ts:843-881`，export 供测试）在每个 `checkpoint_ns` 分区内只保留最新一条 checkpoint（窗口函数 `ROW_NUMBER() ... rank = 1`），并清理不再被引用的 `writes` 行。包装函数 `prunePersistentCheckpointHistory`（`index.ts:883-899`）只对持久化目标执行、吞掉裁剪失败（只发 `checkpoint.pruneFailed` debug），在主路径 `finally` 中调用（`index.ts:713-718`）。
 
 ## 8. OpenRouter 调试 fetch 的并发安全
 
-**源码位置**：`src/agent/index.ts:2003-2099`
+**源码位置**：`src/agent/index.ts:2217-2553`
 
 `installOpenRouterDebugFetch()`（`index.ts:2068-2099`）为每次运行返回一个隔离的失败收集器（sink），并采用**引用计数**安装：`activeOpenRouterSinks` 集合（`index.ts:2003`）非空时复用已安装的全局 `fetch` 包装（`openRouterDebugFetch`，`index.ts:2006-2060`），只有最后一个运行 detach 时才恢复原始 fetch。这修复了旧基线"重叠的 install/restore 会泄漏或丢失补丁"的问题——并发运行的**安装/恢复互不干扰**；但失败捕获不是隔离的：`recordFailure` 把每次非 2xx/网络失败**广播写入所有已注册 sink**（`index.ts:2020-2024`，调用点 `:2040,:2053-2056`），并发下某 run 的 sink 也会捕获到其他 run 的失败（单运行场景无差别）。非 2xx 时记入的是请求摘要与脱敏后的响应预览（`index.ts:2030-2049`）。入口处的 `attachOpenRouterDebugInfo`（`index.ts:2101`）在两条路径的 `catch` 里把失败挂到 error 对象上供 CLI 调试 UI 使用。provider 侧细节（何时启用、脱敏规则）归 06 区 02。
 
@@ -287,7 +287,7 @@ function createRunThreadId(): string {
 
 ### OpenWikiRunEvent：事件联合已扩展
 
-`src/agent/types.ts:53-76`
+`src/agent/types.ts:70-105`
 
 ```typescript
 export type OpenWikiRunEvent =
@@ -302,13 +302,13 @@ export type OpenWikiRunEvent =
 
 ### OpenWikiRunOptions
 
-`src/agent/types.ts:78-88`
+`src/agent/types.ts:107-117`
 
 新增 `language?: string | null`（`types.ts:81`），贯穿 `resolveRunConfig`、`runNativeRepositoryGeneration` 与 no-op 判定。其余字段（`debug`、`isFollowup`、`modelId`、`onEvent`、`outputMode`、`threadId`、`userMessage`、`telemetryFile`）语义沿用。
 
 ### RunContext：gitSummary 已删除
 
-`src/agent/types.ts:101-105`
+`src/agent/types.ts:130-134`
 
 ```typescript
 export type RunContext = {
@@ -318,11 +318,11 @@ export type RunContext = {
 };
 ```
 
-旧基线的 `gitSummary: string` 字段已随文本型 Git 证据一并删除（对照 `git show d4e94ab:src/agent/types.ts`）。提示词不再注入 Git 文本块；`{GIT_HISTORY_HINT}` 占位符现在只表达"是否可用 git 历史"的一句话提示（`src/agent/prompt.ts:152-156`）。
+旧基线的 `gitSummary: string` 字段已随文本型 Git 证据一并删除（对照 `git show d4e94ab:src/agent/types.ts`）。提示词不再注入 Git 文本块；`{GIT_HISTORY_HINT}` 占位符现在只表达"是否可用 git 历史"的一句话提示（`src/agent/prompt.ts:150-154`）。
 
 ### UpdateRunStatus / UpdateMetadata
 
-`src/agent/types.ts:90`、`types.ts:92-99`
+`src/agent/types.ts:119`、`types.ts:92-99`
 
 `UpdateRunStatus = "complete" | "interrupted"`；`UpdateMetadata` 新增可选 `status` 与 `language` 字段。完整读写与消费语义在 03 篇第 4 节。
 
@@ -341,50 +341,50 @@ export type RunContext = {
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/agent/index.ts:154-274` | `runOpenWikiAgent()` | 运行入口：环境加载、双路径分流、OpenRouter 包装 |
-| `src/agent/index.ts:178-230` | `isRepositoryGeneration` 分支 | repository init/update 快速路径 |
-| `src/agent/index.ts:232-239` | `OpenWikiIgnore.load` | 主路径加载 ignore 边界（repository 模式） |
-| `src/agent/index.ts:283-372` | `resolveRunConfig()` | 配置解析：provider→凭据→模型→可用性→重试/预算 |
-| `src/agent/index.ts:329-347` | `getSelectedModelAvailability` 调用 | 模型可用性检查（unavailable 阻断 / unknown 放行） |
-| `src/agent/index.ts:393-427` | `createOpenWikiAgent()` | 低层工厂；repository+非 chat 抛错（:400-404） |
-| `src/agent/index.ts:451-537` | `createOpenWikiAgentGraph()` | 主图组装：backend、翻译/索引中间件、`subagents: []` |
-| `src/agent/index.ts:539-781` | `runOpenWikiAgentCore()` | chat/local-wiki 主路径（10 步叙事的现存边界） |
-| `src/agent/index.ts:552-566` | `createRunContext` / `createOpenWikiContentSnapshot` 调用 | RunContext（无 gitSummary）与运行前快照 |
-| `src/agent/index.ts:623-649` | `streamMessagesEnabled` / `agent.stream` | 流模式组合决策与流打开 |
-| `src/agent/index.ts:652-662` | `registerActiveRun()` 调用 | crash-guard 注册窗口起点 |
-| `src/agent/index.ts:664-682` | `parseAgentStreamChunk` 消费循环 | 逐 chunk 解析 + `scheduler.yield()` 让 Ink 重绘 |
-| `src/agent/index.ts:684-708` | interrupted 元数据写入 | 流失败仍写 `status: "interrupted"` |
-| `src/agent/index.ts:711-719` | `clearActiveRun` / `prunePersistentCheckpointHistory` | crash-guard 注销与 checkpoint 裁剪 |
-| `src/agent/index.ts:735-764` | `persistRunMetadataIfChanged`（complete） | 正常收尾写入；失败降级 interrupted |
-| `src/agent/index.ts:792-809` | `createRunUserMessage()` | followup 直透 vs 模板装配 |
-| `src/agent/index.ts:811-835` | `checkpointPath` / `createCheckpointer` / `prepareCheckpointDirectory` | 持久化 SQLite 路径与 0700 目录 |
-| `src/agent/index.ts:843-899` | `pruneCheckpointHistory` / `prunePersistentCheckpointHistory` | 只保留每 ns 最新 checkpoint |
-| `src/agent/index.ts:901-915` | `resolveCheckpointTarget()` | chat 持久化 vs 其余 `:memory:` |
-| `src/agent/index.ts:927-941` | `createThreadId()` / `createRunThreadId()` | SHA-256 前缀 + base36 唯一后缀 |
-| `src/agent/index.ts:954-1018` | `ensureProviderCredentials` 等四守卫 | 凭据/base URL/secret key/region 校验 |
-| `src/agent/index.ts:1020-1046` | `resolveModelId()` | CLI → env → provider 默认，含校验 |
-| `src/agent/index.ts:1048-1075` | `warnOnProviderModelMismatch()` | 跨 provider 模型名非致命警告 |
-| `src/agent/index.ts:1329-1351` | `resolveAnthropicMaxOutputTokens()` | Claude 4/5 默认输出预算 |
-| `src/agent/index.ts:1447-1471` | `parseAgentStreamChunk()` | 三元组 chunk 分派（messages/tools/updates） |
-| `src/agent/index.ts:1476-1498` | `parseStreamEvent()` | Agent Protocol 事件形状解析（并存回退） |
-| `src/agent/index.ts:1510-1520` | `isAgentStreamChunk()` | `[namespace, mode, payload]` 类型守卫 |
-| `src/agent/index.ts:1528-1549` | `parseUpdatesChunk()` | updates 模式状态差量提取 assistant 文本 |
-| `src/agent/index.ts:664,675-680` | `unhandledChunkCount` / `stream.unhandledChunk` 调试兜底 | 解析失败 chunk 的 shape 日志（每运行 debug 上限 3 条） |
-| `src/agent/index.ts:1824-1855` | `parseToolStreamEvent()` | tool_start / tool_end 解析 |
-| `src/agent/index.ts:1857-1875` | `MODEL_REQUEST_NAMESPACE_PREFIX` / `getStreamSource()` | model_request 命名空间归类 "main" |
-| `src/agent/index.ts:1881-1901` | `formatToolArgs()` | 数组参数优先于 record 的渲染 |
-| `src/agent/index.ts:2003-2099` | `activeOpenRouterSinks` / `installOpenRouterDebugFetch()` | 引用计数的并发安全 fetch 包装 |
+| `src/agent/index.ts:167-290` | `runOpenWikiAgent()` | 运行入口：环境加载、双路径分流、OpenRouter 包装 |
+| `src/agent/index.ts:191-245` | `isRepositoryGeneration` 分支 | repository init/update 快速路径 |
+| `src/agent/index.ts:247-254` | `OpenWikiIgnore.load` | 主路径加载 ignore 边界（repository 模式） |
+| `src/agent/index.ts:299-394` | `resolveRunConfig()` | 配置解析：provider→凭据→模型→可用性→重试/预算 |
+| `src/agent/index.ts:346-364` | `getSelectedModelAvailability` 调用 | 模型可用性检查（unavailable 阻断 / unknown 放行） |
+| `src/agent/index.ts:415-449` | `createOpenWikiAgent()` | 低层工厂；repository+非 chat 抛错（:400-404） |
+| `src/agent/index.ts:473-578` | `createOpenWikiAgentGraph()` | 主图组装：backend、翻译/索引中间件、`subagents: []` |
+| `src/agent/index.ts:580-822` | `runOpenWikiAgentCore()` | chat/local-wiki 主路径（10 步叙事的现存边界） |
+| `src/agent/index.ts:593-607` | `createRunContext` / `createOpenWikiContentSnapshot` 调用 | RunContext（无 gitSummary）与运行前快照 |
+| `src/agent/index.ts:664-690` | `streamMessagesEnabled` / `agent.stream` | 流模式组合决策与流打开 |
+| `src/agent/index.ts:693-703` | `registerActiveRun()` 调用 | crash-guard 注册窗口起点 |
+| `src/agent/index.ts:705-723` | `parseAgentStreamChunk` 消费循环 | 逐 chunk 解析 + `scheduler.yield()` 让 Ink 重绘 |
+| `src/agent/index.ts:725-749` | interrupted 元数据写入 | 流失败仍写 `status: "interrupted"` |
+| `src/agent/index.ts:752-760` | `clearActiveRun` / `prunePersistentCheckpointHistory` | crash-guard 注销与 checkpoint 裁剪 |
+| `src/agent/index.ts:776-805` | `persistRunMetadataIfChanged`（complete） | 正常收尾写入；失败降级 interrupted |
+| `src/agent/index.ts:833-850` | `createRunUserMessage()` | followup 直透 vs 模板装配 |
+| `src/agent/index.ts:852-876` | `checkpointPath` / `createCheckpointer` / `prepareCheckpointDirectory` | 持久化 SQLite 路径与 0700 目录 |
+| `src/agent/index.ts:884-940` | `pruneCheckpointHistory` / `prunePersistentCheckpointHistory` | 只保留每 ns 最新 checkpoint |
+| `src/agent/index.ts:942-956` | `resolveCheckpointTarget()` | chat 持久化 vs 其余 `:memory:` |
+| `src/agent/index.ts:968-982` | `createThreadId()` / `createRunThreadId()` | SHA-256 前缀 + base36 唯一后缀 |
+| `src/agent/index.ts:995-1059` | `ensureProviderCredentials` 等四守卫 | 凭据/base URL/secret key/region 校验 |
+| `src/agent/index.ts:1061-1092` | `resolveModelId()` | CLI → env → provider 默认，含校验 |
+| `src/agent/index.ts:1094-1121` | `warnOnProviderModelMismatch()` | 跨 provider 模型名非致命警告 |
+| `src/agent/index.ts:1530-1552` | `resolveAnthropicMaxOutputTokens()` | Claude 4/5 默认输出预算 |
+| `src/agent/index.ts:1651-1675` | `parseAgentStreamChunk()` | 三元组 chunk 分派（messages/tools/updates） |
+| `src/agent/index.ts:1680-1702` | `parseStreamEvent()` | Agent Protocol 事件形状解析（并存回退） |
+| `src/agent/index.ts:1714-1724` | `isAgentStreamChunk()` | `[namespace, mode, payload]` 类型守卫 |
+| `src/agent/index.ts:1732-1753` | `parseUpdatesChunk()` | updates 模式状态差量提取 assistant 文本 |
+| `src/agent/index.ts:705,675-680` | `unhandledChunkCount` / `stream.unhandledChunk` 调试兜底 | 解析失败 chunk 的 shape 日志（每运行 debug 上限 3 条） |
+| `src/agent/index.ts:2028-2059` | `parseToolStreamEvent()` | tool_start / tool_end 解析 |
+| `src/agent/index.ts:2061-2079` | `MODEL_REQUEST_NAMESPACE_PREFIX` / `getStreamSource()` | model_request 命名空间归类 "main" |
+| `src/agent/index.ts:2085-2105` | `formatToolArgs()` | 数组参数优先于 record 的渲染 |
+| `src/agent/index.ts:2217-2553` | `activeOpenRouterSinks` / `installOpenRouterDebugFetch()` | 引用计数的并发安全 fetch 包装 |
 | `src/agent/crash-guard.ts:15-77` | `ActiveRunRecord` / `registerActiveRun` / `clearActiveRun` | 进程级单槽注册 |
 | `src/agent/crash-guard.ts:103-159` | `handleFatal()` | 同步认领崩溃 → 遥测 → interrupted 戳 → 非零退出 |
-| `src/agent/repository-runner.ts:205-254` | `runNativeRepositoryGeneration()` | 快速路径编排：noop/planning/generating/finalizing |
-| `src/agent/repository-runner.ts:538-554` | `streamWorkerTools()` | worker 仅订阅 `["tools"]` 流 |
-| `src/agent/repository-runner.ts:562-597` | `parseWorkerToolEvent()` | worker 工具白名单事件归一化 |
-| `src/agent/types.ts:13-51` | `RepositoryGenerationProgressEvent` | repository_progress 结构化事件 |
-| `src/agent/types.ts:53-76` | `OpenWikiRunEvent` | 五成员事件联合 |
-| `src/agent/types.ts:78-88` | `OpenWikiRunOptions` | 运行选项（含 `language`） |
-| `src/agent/types.ts:90,92-99` | `UpdateRunStatus` / `UpdateMetadata` | 状态与语言字段 |
-| `src/agent/types.ts:101-105` | `RunContext` | `lastUpdate` + `language` + `wikiGoal`（gitSummary 已删） |
+| `src/agent/repository-runner.ts:363-417` | `runNativeRepositoryGeneration()` | 快速路径编排：noop/planning/generating/finalizing |
+| `src/agent/repository-runner.ts:1069-1099` | `streamWorkerTools()` | worker 仅订阅 `["tools"]` 流 |
+| `src/agent/repository-runner.ts:1107-1142` | `parseWorkerToolEvent()` | worker 工具白名单事件归一化 |
+| `src/agent/types.ts:13-68` | `RepositoryGenerationProgressEvent` | repository_progress 结构化事件 |
+| `src/agent/types.ts:70-105` | `OpenWikiRunEvent` | 五成员事件联合 |
+| `src/agent/types.ts:107-117` | `OpenWikiRunOptions` | 运行选项（含 `language`） |
+| `src/agent/types.ts:119,92-99` | `UpdateRunStatus` / `UpdateMetadata` | 状态与语言字段 |
+| `src/agent/types.ts:130-134` | `RunContext` | `lastUpdate` + `language` + `wikiGoal`（gitSummary 已删） |
 | `src/cli/startup.ts:123-147` | `canSkipCleanUpdateBeforeCredentials()` | 主路径 update 的 no-op 预检调用点 |
 | `src/cli/run-log/reducer.ts:21-25` | run-log reducer 的 `repository_progress` 分派 | 进度事件在 TUI 日志中的折叠归并 |
 | `src/cli/runners.ts:273` | runner 的事件分派分支 | CLI 层按 `event.type` 消费 repository_progress |
-| `src/config/constants.ts:24-25,1054-1061` | `OPENAI_COMPATIBLE_STREAM_MESSAGES_ENV_KEY` / `resolveOpenAiCompatibleStreamMessages()` | openai-compatible 默认 updates 的退避开关 |
+| `src/config/constants.ts:36-37,1054-1061` | `OPENAI_COMPATIBLE_STREAM_MESSAGES_ENV_KEY` / `resolveOpenAiCompatibleStreamMessages()` | openai-compatible 默认 updates 的退避开关 |

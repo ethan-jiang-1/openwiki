@@ -411,7 +411,7 @@ if (expiresIn && provider.tokenMapping.expiresAtEnvKey) {
 
 ### 7.4 持久化到 .env 文件
 
-**源码位置**：`src/auth/oauth.ts:96`（函数定义在 `src/config/env.ts:305`）
+**源码位置**：`src/auth/oauth.ts:96`（函数定义在 `src/config/env.ts:322`）
 
 `saveOpenWikiEnv(updates)` 将映射后的 environment variable records 写入 `~/.openwiki/.env` 文件。这一步使用 key=value 格式追加/覆盖，使 token 在后续 OpenWiki 运行中可用。
 
@@ -743,4 +743,4 @@ OAuth PKCE 流程中的错误处理分布在多个层级。
 | `src/auth/providers.ts:19-98` | `AUTH_PROVIDERS` | 四个 provider 的完整 OAuth 配置（gmail/slack/x/notion） |
 | `src/auth/providers.ts:45` | notion `oauthAllowedHosts` | `["notion.com"]` 发现链路白名单 |
 | `src/auth/providers.ts:100-104` | `getAuthProvider` | 按 provider ID 查找配置 |
-| `src/config/env.ts:305` | `saveOpenWikiEnv` | token 持久化到 ~/.openwiki/.env |
+| `src/config/env.ts:322` | `saveOpenWikiEnv` | token 持久化到 ~/.openwiki/.env |

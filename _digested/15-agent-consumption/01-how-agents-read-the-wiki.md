@@ -34,7 +34,7 @@ out_of_scope:
 | 读者 | 界面 | 进入方式 |
 |------|------|---------|
 | 人类 | 可视化器（12 区）：live server / 静态导出网页 | `openwiki visualize` |
-| 生产者 Agent（写 wiki） | 6 个 MCP 生命周期工具 + SKILL.md 写作协议 | `integrations/openwiki/SKILL.md`（160 行）+ `src/integrations/core/protocol.ts:14-20` |
+| 生产者 Agent（写 wiki） | 6 个 MCP 生命周期工具 + SKILL.md 写作协议 | `integrations/openwiki/SKILL.md`（160 行）+ `src/integrations/core/protocol.ts:14-24` |
 | 消费者 Agent（读 wiki） | **裸文件树 + 宿主原生文件工具（Read/Grep/Glob）** | 宿主指令文件（AGENTS.md/CLAUDE.md）里的引导块 |
 
 ```mermaid
@@ -68,7 +68,7 @@ openwiki/
 
 两个关键点：
 
-- **谁写的**：页面正文由生产者 Agent 写；`index.md` 由 finalize 管线的索引同步（index sync）确定性重生成——`src/okf/index-sync.ts:14` 把 `INDEX_FILE` 固定为 `index.md`，且写作契约明确禁止 agent 规划生成 index 页（`integrations/openwiki/SKILL.md:33`）；`.claims/` 由 claims 运行时持久化（07 区）。消费者对全部内容只读。
+- **谁写的**：页面正文由生产者 Agent 写；`index.md` 由 finalize 管线的索引同步（index sync）确定性重生成——`src/okf/index-sync.ts:15` 把 `INDEX_FILE` 固定为 `index.md`，且写作契约明确禁止 agent 规划生成 index 页（`integrations/openwiki/SKILL.md:81`）；`.claims/` 由 claims 运行时持久化（07 区）。消费者对全部内容只读。
 - **可 grep 性**：一切皆 UTF-8 Markdown/JSON，没有数据库、没有二进制格式。`grep -r "<术语>" openwiki/` 就是它的全文检索。
 
 ## 3. 渐进披露漏斗：六层
@@ -86,13 +86,13 @@ flowchart TD
 
 ### L0 宿主指令块 —「这里有一份 wiki」
 
-引导块由 code 模式 init 写入宿主指令文件（agent instruction files）：`CODE_MODE_AGENT_FILES = ["AGENTS.md", "CLAUDE.md"]`（`src/ingestion/code-mode.ts:24`），CLAUDE.md 只挂一行 `@AGENTS.md` 导入（`src/ingestion/code-mode.ts:26`）。刷新只替换 `<!-- OPENWIKI:START/END -->` 标记对之间的内容；标记缺失、重复或错位时拒绝写入而不是破坏文件（`src/ingestion/code-mode.ts:241-273`）。
+引导块由 code 模式 init 写入宿主指令文件（agent instruction files）：`CODE_MODE_AGENT_FILES = ["AGENTS.md", "CLAUDE.md"]`（`src/ingestion/code-mode.ts:48`），CLAUDE.md 只挂一行 `@AGENTS.md` 导入（`src/ingestion/code-mode.ts:50`）。刷新只替换 `<!-- OPENWIKI:START/END -->` 标记对之间的内容；标记缺失、重复或错位时拒绝写入而不是破坏文件（`src/ingestion/code-mode.ts:241-273`）。
 
-块内文字极其克制——当前模板只有三句话（`src/ingestion/code-mode.ts:421-432`），第一句甚至是「**可选**的即时上下文，**不是**必读启动材料」（"optional just-in-time context, not required startup reading"）。这是渐进披露的第一刀：**先声明存在与位置，不强迫阅读**。本仓库 `AGENTS.md:13-24` 是该块的活实例（`AGENTS.md:1-11` 的 quickstart 指路段出自更早版本模板，文字与当前基线略有出入）。
+块内文字极其克制——当前模板只有三句话（`src/ingestion/code-mode.ts:623-646`），第一句甚至是「**可选**的即时上下文，**不是**必读启动材料」（"optional just-in-time context, not required startup reading"）。这是渐进披露的第一刀：**先声明存在与位置，不强迫阅读**。本仓库 `AGENTS.md:13-24` 是该块的活实例（`AGENTS.md:1-11` 的 quickstart 指路段出自更早版本模板，文字与当前基线略有出入）。
 
 ### L1 quickstart 任务路由 —「你的任务该读哪页」
 
-`openwiki/quickstart.md` 是唯一被计划（plan）强制要求的页面：init 必含；update 只要不增删/移动/重组页面就绝不能删，且页面结构一旦变化必须重刷它的路由图（`integrations/openwiki/SKILL.md:36-39`）。它自称「entry-point orientation for a coding agent」（front matter description，`openwiki/quickstart.md:3-7`），正文第 112 行起是任务路由（task routing）表：「Find your task on the left, then read the page on the right」——按「理解系统 / 学核心概念 / 走工作流 / 运维配置 / 集成 / 测试」六组意图各给一张「我想要…→ 读哪页」表（`openwiki/quickstart.md:112-163`）。
+`openwiki/quickstart.md` 是唯一被计划（plan）强制要求的页面：init 必含；update 只要不增删/移动/重组页面就绝不能删，且页面结构一旦变化必须重刷它的路由图（`integrations/openwiki/SKILL.md:84-87`）。它自称「entry-point orientation for a coding agent」（front matter description，`openwiki/quickstart.md:3-7`），正文第 112 行起是任务路由（task routing）表：「Find your task on the left, then read the page on the right」——按「理解系统 / 学核心概念 / 走工作流 / 运维配置 / 集成 / 测试」六组意图各给一张「我想要…→ 读哪页」表（`openwiki/quickstart.md:112-163`）。
 
 这一层解决的是检索里最贵的决策：「我预算有限，先打开哪个文件」。
 
@@ -102,7 +102,7 @@ flowchart TD
 
 ### L3 页面 front matter —「这页值不值得读」
 
-每页头部是机器可读摘要（页面文件契约，`integrations/openwiki/SKILL.md:92-104`）：
+每页头部是机器可读摘要（页面文件契约，`integrations/openwiki/SKILL.md:144-156`）：
 
 ```yaml
 type: orientation-guide       # 短概念类型
@@ -111,11 +111,11 @@ description: Entry-point orientation for a coding agent...   # ← 检索导向�
 tags: [openwiki, quickstart, cli, orientation, task-routing] # 稳定英文标签
 ```
 
-`description` 的契约原文是「一到两句**检索导向摘要**（retrieval-oriented summary）」（`integrations/openwiki/SKILL.md:96`）——写的就是给消费者浏览/grep 时判断相关性用的。`generated`、`verified`、`sources` 等控制字段由 OpenWiki 拥有，agent 不得伪造（`integrations/openwiki/SKILL.md:101-102`）。
+`description` 的契约原文是「一到两句**检索导向摘要**（retrieval-oriented summary）」（`integrations/openwiki/SKILL.md:148`）——写的就是给消费者浏览/grep 时判断相关性用的。`generated`、`verified`、`sources` 等控制字段由 OpenWiki 拥有，agent 不得伪造（`integrations/openwiki/SKILL.md:153-154`）。
 
 ### L4 页面正文 — 知识本体
 
-到这里才读全文。页内 wiki 链接（`](xxx.md)` 形式）与计划阶段的 relatedPages 契约（要求为每页声明概念/工作流邻居，`integrations/openwiki/SKILL.md:34-35`）把相邻知识缝起来，Agent 可以横向跳转而不必回 index。
+到这里才读全文。页内 wiki 链接（`](xxx.md)` 形式）与计划阶段的 relatedPages 契约（要求为每页声明概念/工作流邻居，`integrations/openwiki/SKILL.md:82-83`）把相邻知识缝起来，Agent 可以横向跳转而不必回 index。
 
 ### L5 证据层 —「这句话凭什么可信」
 
@@ -123,7 +123,7 @@ tags: [openwiki, quickstart, cli, orientation, task-routing] # 稳定英文标�
 
 ## 4. 知识组织的三个 consumer-first 原则
 
-1. **按系统组织，不按目录镜像**。规划契约要求「围绕有意义的系统与工作流设计仓库专属分类法（taxonomy），而不是镜像源码目录」，并「用层级路径做有意义的分组，不要 flat 堆砌」（`integrations/openwiki/SKILL.md:29-33`）。
+1. **按系统组织，不按目录镜像**。规划契约要求「围绕有意义的系统与工作流设计仓库专属分类法（taxonomy），而不是镜像源码目录」，并「用层级路径做有意义的分组，不要 flat 堆砌」（`integrations/openwiki/SKILL.md:77-81`）。
 2. **每页自带检索摘要**。description 契约（L3）把「判断相关性」的成本压到一两句话；tags 用稳定英文词，保证 grep 命中。
 3. **导航双向编织**。relatedPages 在规划期声明、页间 wiki 链接在正文互联、index.md 在 finalize 全量收口——三个入口指向同一批页面，不产生孤岛页。
 
@@ -166,13 +166,13 @@ verified:
 
 对消费者的语义：
 
-- 证据定位是 `repo://路径#L起-L止` 加内容哈希版本 token；preflight 重检时源码对不上就标记 stale/unresolved（`src/claims/brains/code/preflight.ts:71-85`）——「页面说的话」与「源码现状」的偏差被**显式化**，消费者 Agent 遇到可疑论断可以查 sidecar 状态而不是盲信。
+- 证据定位是 `repo://路径#L起-L止` 加内容哈希版本 token；preflight 重检时源码对不上就标记 stale/unresolved（`src/claims/brains/code/preflight.ts:83-97`）——「页面说的话」与「源码现状」的偏差被**显式化**，消费者 Agent 遇到可疑论断可以查 sidecar 状态而不是盲信。
 - `verified` 块给出最近一次全页校验的时间与校验者版本，是新鲜度的一级信号。
 - 机制与校验管线的完整描述在 07 区：模型见 `07-claims-and-okf/01-claims-model.md`，版本/歧义语义见 `07-claims-and-okf/02-evidence-versions-and-preflight.md`。
 
 ## 6. 读侧为什么「没有 API」——一个刻意的取舍
 
-本基线的 6 个 MCP 工具（`src/integrations/core/protocol.ts:14-20`：begin / submit_plan / next_page / inspect_page_claims / submit_page / finish）**全部是生产协议**。没有 read-page、没有 search、没有 retrieval 工具；上游存在 `codex/openwiki-retrieval-tools` 探索分支但未合入本基线。
+本基线的 6 个 MCP 工具（`src/integrations/core/protocol.ts:14-24`：begin / submit_plan / next_page / inspect_page_claims / submit_page / finish）**全部是生产协议**。没有 read-page、没有 search、没有 retrieval 工具；上游存在 `codex/openwiki-retrieval-tools` 探索分支但未合入本基线。
 
 | 若做成服务/检索工具 | 文件系统直读（现状） |
 |------|------|
@@ -215,16 +215,16 @@ verified:
 
 | 源文件 | 关键符号/内容 | 说明 |
 |--------|--------------|------|
-| `src/ingestion/code-mode.ts:18-19` | `OPENWIKI_AGENTS_SNIPPET_START/END` | AGENTS.md 管理块标记 |
-| `src/ingestion/code-mode.ts:24-26` | `CODE_MODE_AGENT_FILES`、`CLAUDE_AGENTS_IMPORT` | 引导块落点；CLAUDE.md 只挂 `@AGENTS.md` |
+| `src/ingestion/code-mode.ts:22-23` | `OPENWIKI_AGENTS_SNIPPET_START/END` | AGENTS.md 管理块标记 |
+| `src/ingestion/code-mode.ts:48-50` | `CODE_MODE_AGENT_FILES`、`CLAUDE_AGENTS_IMPORT` | 引导块落点；CLAUDE.md 只挂 `@AGENTS.md` |
 | `src/ingestion/code-mode.ts:241-273` | 管理块刷新守卫 | 标记缺失/重复即拒绝写入 |
-| `src/ingestion/code-mode.ts:421-432` | `createCodeModeAgentsSnippet` | 「optional just-in-time context」最小模板 |
-| `src/integrations/core/protocol.ts:14-20` | `ProtocolToolName` | 6 个工具全为生产协议，无读/检索工具 |
-| `src/okf/index-sync.ts:14` | `INDEX_FILE` | index.md 由管线确定性生成 |
-| `src/claims/brains/code/preflight.ts:71-85` | stale/unresolved 分类 | 证据新鲜度显式化 |
-| `integrations/openwiki/SKILL.md:29-35` | taxonomy / relatedPages 契约 | 系统化分组 + 跨页导航 |
-| `integrations/openwiki/SKILL.md:36-39` | quickstart 强制规则 | init 必含；update 结构变化必含 |
-| `integrations/openwiki/SKILL.md:92-104` | 页面文件契约 | description = 检索导向摘要；控制字段 OpenWiki 拥有 |
+| `src/ingestion/code-mode.ts:623-646` | `createCodeModeAgentsSnippet` | 「optional just-in-time context」最小模板 |
+| `src/integrations/core/protocol.ts:14-24` | `ProtocolToolName` | 6 个工具全为生产协议，无读/检索工具 |
+| `src/okf/index-sync.ts:15` | `INDEX_FILE` | index.md 由管线确定性生成 |
+| `src/claims/brains/code/preflight.ts:83-97` | stale/unresolved 分类 | 证据新鲜度显式化 |
+| `integrations/openwiki/SKILL.md:77-83` | taxonomy / relatedPages 契约 | 系统化分组 + 跨页导航 |
+| `integrations/openwiki/SKILL.md:84-87` | quickstart 强制规则 | init 必含；update 结构变化必含 |
+| `integrations/openwiki/SKILL.md:144-156` | 页面文件契约 | description = 检索导向摘要；控制字段 OpenWiki 拥有 |
 | `openwiki/quickstart.md:3-7` | orientation-guide front matter | 活实例 |
 | `openwiki/quickstart.md:44-45` | "agents to read as memory" | 产物设计自述 |
 | `openwiki/quickstart.md:112-163` | Task-routing map | 任务路由表 |

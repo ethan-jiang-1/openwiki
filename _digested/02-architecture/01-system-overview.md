@@ -66,17 +66,17 @@ OpenWiki 是一个 CLI 工具：**它让一个被有意约束的 AI Agent，把�
 | 1 | 命令解析 | `CliCommand` 9-variant 解析、环境加载判定 | `src/cli/commands.ts` | 03 区 02 号 |
 | 2 | 启动判定 | TTY/凭据预检；缺凭据时干净的 no-op update 豁免 | `src/cli/startup.ts:24-147` | 03 区 03 号 |
 | 3 | 模式映射 | `code` → cwd=仓库根、outputMode=`repository` | `src/cli/run-mode.ts:40-55` | 03 区 03 号 |
-| 4 | 运行分流 | repository init/update **不走 DeepAgent**，快速路径直入 page-job 生命周期 | `src/agent/index.ts:178-230` | 04 区 01 号 |
-| 5 | no-op 前置门 | 源指纹未变 + claims 无 issue + 基线全覆盖 + 语言未变 → 干净退出 | `src/generation/repository-run.ts:411-458` | 05 区 02 号 |
-| 6 | begin/resume | `.run.json` 检查点新建或恢复；源指纹漂移则整计划作废重规划 | `src/generation/repository-run.ts:319`（begin） | 05 区 01 号 |
+| 4 | 运行分流 | repository init/update **不走 DeepAgent**，快速路径直入 page-job 生命周期 | `src/agent/index.ts:191-245` | 04 区 01 号 |
+| 5 | no-op 前置门 | 源指纹未变 + claims 无 issue + 基线全覆盖 + 语言未变 → 干净退出 | `src/generation/repository-run.ts:493-540` | 05 区 02 号 |
+| 6 | begin/resume | `.run.json` 检查点新建或恢复；源指纹漂移则整计划作废重规划 | `src/generation/repository-run.ts:401`（begin） | 05 区 01 号 |
 | 7 | planning | planner agent 经 `submit_plan` 提交有序页任务（page job）队列 | `src/agent/repository-runner.ts`（runPlanningAgent） | 05 区 01 号 |
 | 8 | generating | 每页一个受限 worker（`writableWikiPages` 单页写白名单）研究并写页；**稀疏对账（sparse reconciliation）**裁决本页证据命题（claim） | `src/generation/repository-run.ts`（submitRepositoryPage :1183-1298 八步事务序）；对账协议详见 07 区 01 号 | 05 区 + 07 区 |
 | 9 | 页事务 | 写页→frontmatter 修复→claims 对账→claimsRuntime.finalize→durable 断言→manifest 记录→`.run.json`→改内存 | 同上 | 05 区 01 号 |
 | 10 | 失败处理 | worker 失败 → 快照还原 + 标 skipped，不中断整轮；finish 时统一还原重试 | `src/generation/repository-run.ts:1090-1153` | 05 区 01 号 |
-| 11 | finish | pending=0 → 删废弃页 → **finalize 五步** → 整表替换 manifest → 元数据 complete/interrupted → 删 `.run.json` | `src/generation/repository-run.ts:1498-1585`；五步管线 `src/agent/wiki-finalizer.ts:263-284` | 05 区 03 号 |
+| 11 | finish | pending=0 → 删废弃页 → **finalize 五步** → 整表替换 manifest → 元数据 complete/interrupted → 删 `.run.json` | `src/generation/repository-run.ts:1654-1782`；五步管线 `src/agent/wiki-finalizer.ts:263-284` | 05 区 03 号 |
 | 12 | 收尾五步 | mermaid 校验降级 → index_sync → link_validation → claims_sources 投影 → generated 溯源（provenance）盖章（最后） | 同上 | 05 区 03 号 + 07 区 03 号 |
 
-claims 运行时在第 6 步 begin/resume 内装配（`prepareClaimsRuntime`，`src/generation/repository-run.ts:364`（begin）/:639（resume）；`src/claims/brains/code/runtime.ts:64`，仅 repository 模式启用）；OKF 的 `sources`/`verified` 投影在 11-12 步发生，`generated` 章最后盖以免被覆盖（`src/okf/index-sync.ts:243` 的 `okf_version: "0.2"` 根戳也在 index_sync 写入）。
+claims 运行时在第 6 步 begin/resume 内装配（`prepareClaimsRuntime`，`src/generation/repository-run.ts:446`（begin）/:639（resume）；`src/claims/brains/code/runtime.ts:64`，仅 repository 模式启用）；OKF 的 `sources`/`verified` 投影在 11-12 步发生，`generated` 章最后盖以免被覆盖（`src/okf/index-sync.ts:288` 的 `okf_version: "0.2"` 根戳也在 index_sync 写入）。
 
 **init 的差别**：不走 manifest 增量，而是从零重建——先建 wiki-replacement 备份、状态落盘后才提交备份、失败可回滚（详见 05 区 01 号）。
 
@@ -127,14 +127,14 @@ claims 运行时在第 6 步 begin/resume 内装配（`prepareClaimsRuntime`，`
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/agent/index.ts:178-230` | run 分流 | repository 快速路径入口 |
-| `src/generation/repository-run.ts:319` | `beginRepositoryRun` | 生命周期开始/恢复 |
-| `src/generation/repository-run.ts:411-458` | no-op 前置门 | update 短路判定 |
-| `src/generation/repository-run.ts:1183-1298` | `submitRepositoryPage` 事务序 | 逐页八步持久化 |
-| `src/generation/repository-run.ts:1498-1585` | finish | 收尾与元数据定稿 |
+| `src/agent/index.ts:191-245` | run 分流 | repository 快速路径入口 |
+| `src/generation/repository-run.ts:401` | `beginRepositoryRun` | 生命周期开始/恢复 |
+| `src/generation/repository-run.ts:493-540` | no-op 前置门 | update 短路判定 |
+| `src/generation/repository-run.ts:1309-1453` | `submitRepositoryPage` 事务序 | 逐页八步持久化 |
+| `src/generation/repository-run.ts:1654-1782` | finish | 收尾与元数据定稿 |
 | `src/agent/wiki-finalizer.ts:263-284` | finalize 五步 | mermaid→index_sync→link_validation→claims_sources→generated |
 | `src/claims/brains/code/runtime.ts:64` | `prepareClaimsRuntime` | claims 运行时装配（repository 门禁） |
-| `src/okf/index-sync.ts:243` | `okf_version "0.2"` | 确定性 index 根戳 |
+| `src/okf/index-sync.ts:288` | `okf_version "0.2"` | 确定性 index 根戳 |
 | `src/cli/run-mode.ts:40-55` | cwd/outputMode 映射 | 双模式实现钥匙 |
 | `src/cli/startup.ts:24-147` | 启动判定链 | TTY/凭据/no-op 豁免 |
 | `src/agent/docs-only-backend.ts` | 11 方法覆写 | agent 三层边界 |

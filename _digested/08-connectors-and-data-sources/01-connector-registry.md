@@ -139,7 +139,7 @@ export type ConnectorDefinition = {
 | | `mode: "code"` | `mode: "personal"` |
 |---|---|---|
 | 配置位置 | 随仓库提交：`<repoRoot>/openwiki/.langsmith.json`（`src/connectors/sources/langsmith/repo-config.ts:66-68`） | 用户主目录：`~/.openwiki/connectors/<id>/config.json`（`src/config/openwiki-home.ts:57-59`） |
-| 触发管线 | code 模式摄取 `runCodeModeConnectors`（`src/ingestion/code-mode.ts:105-148`） | 个人模式摄取 + agent 工具（`openwiki_ingest_*`） |
+| 触发管线 | code 模式摄取 `runCodeModeConnectors`（`src/ingestion/code-mode.ts:129-172`） | 个人模式摄取 + agent 工具（`openwiki_ingest_*`） |
 | 仓库存什么 | workspaces/projects 等团队共享配置（密钥只存环境变量**名**） | 用户私有配置与凭证引用 |
 | 当前成员 | `langsmith` | 其余 8 个连接器 |
 
@@ -378,8 +378,8 @@ connectors/<id>/
 | `src/connectors/sources/slack.ts:128,150-165` | `DEFAULT_STREAMS` + definition | 三流；`OPENWIKI_SLACK_USER_TOKEN` |
 | `src/connectors/sources/web-search.ts:41-56` | definition + `createWebSearchConnector` | `TAVILY_API_KEY` |
 | `src/connectors/sources/x.ts:47,55-70` | `DEFAULT_STREAMS` + definition | 五流；`OPENWIKI_X_ACCESS_TOKEN` |
-| `src/ingestion/code-mode.ts:105-148` | `runCodeModeConnectors` | code 连接器管线；mode 分流 `:115`、`ingest({repoRoot, windowHours})` `:125`、fail-open `:126-129` |
-| `src/ingestion/ingestion.ts:379,403` | `createConnectorSynthesisGuidance` cases | `custom-mcp` / `langsmith` 的合成引导 |
+| `src/ingestion/code-mode.ts:129-172` | `runCodeModeConnectors` | code 连接器管线；mode 分流 `:115`、`ingest({repoRoot, windowHours})` `:125`、fail-open `:126-129` |
+| `src/ingestion/ingestion.ts:381,403` | `createConnectorSynthesisGuidance` cases | `custom-mcp` / `langsmith` 的合成引导 |
 | `src/connectors/tools.ts:30-40` | `createOpenWikiConnectorTools` 开头 | repository 门控：`outputMode === "repository"` 返回 `[]`（#444） |
 | `src/connectors/tools.ts:44-218` | 7 个 `DynamicStructuredTool` | 工具 schema 与枚举（MCP enum `:62,:85`；ingest enum 8 值 `:111-120`；raw enum 9 值 `:159-169,:188-198`） |
 | `src/connectors/tools.ts:288-326` | `ingestAllConnectors`、`ingestFailureResult` | `Promise.allSettled` 失败隔离 |

@@ -69,7 +69,7 @@ claims 的可信度最终落在证据（evidence）上：一条证据命题（cl
 
 resource 是唯一跨越全部边界的身份字符串，规范形在三处被依赖：
 
-- **对账去重**：`claimFingerprint`/`sameEvidence`（`src/generation/page-jobs.ts:596`/`page-jobs.ts:578`）把证据集排序后逐字符串比较——非规范形会让「同一证据的两种写法」逃过复述检测，或相反地制造假差异；
+- **对账去重**：`claimFingerprint`/`sameEvidence`（`src/generation/page-jobs.ts:611`/`page-jobs.ts:578`）把证据集排序后逐字符串比较——非规范形会让「同一证据的两种写法」逃过复述检测，或相反地制造假差异；
 - **落盘断言**：`assertEvidenceStillCurrent`（`src/claims/brains/code/session.ts:473`）用 `(resource, version)` 对当前源码重解析——resource 若不唯一，重解析就可能落到别的文件；
 - **预检分类**：preflight 以 resource 归集 stale/unresolved 的 `resources` 列表（`preflight.ts:76`/`preflight.ts:83`），该列表再被转成页作业 seedPaths（`page-jobs.ts:279-283`）。
 
@@ -136,7 +136,7 @@ repo-lines-v1:sha256:<21 行选中文本的整体哈希>:<base64url 的 JSON>
 
 这一条在协议两侧同时成立：
 
-- **提交侧**：`ProposedEvidence` 只有 `resource`（01 篇 §2.2）。页提交载荷里的 evidence 元素同样只有 resource（`src/generation/page-jobs.ts:72-77`），提示词与 `submit_page` 工具描述也只要求 `repo://<相对路径>[#Lx-Ly]` 形式（`src/claims/guidance.ts:11`、`src/agent/repository-runner.ts:437-439`）。
+- **提交侧**：`ProposedEvidence` 只有 `resource`（01 篇 §2.2）。页提交载荷里的 evidence 元素同样只有 resource（`src/generation/page-jobs.ts:72-77`），提示词与 `submit_page` 工具描述也只要求 `repo://<相对路径>[#Lx-Ly]` 形式（`src/claims/guidance.ts:11`、`src/agent/repository-runner.ts:964-966`）。
 - **解析侧**：`resolveEvidence`（`src/claims/core/mutations.ts:138`）对每条输入调用 `resolver.resolve(resource, previousVersion?)`（`mutations.ts:150-151`）——新证据不带给定版本，confirm/update 重解析时才把持久化的旧版本作为 `previousVersion` 传入供重定位。resolver 返回的 `version` 就是持久化的真相，模型没有任何通道指定或预知它。
 
 配缓存的语义见 01 篇 §3.2（`cacheEvidenceResolver` 以 `[resource, previousVersion]` 为键，`src/claims/core/resolver-cache.ts:22`）；同一资源在同一批内带着不同 `previousVersion` 会得到不同缓存键，不会串批。
@@ -209,7 +209,7 @@ confirm 不是无操作：它带着持久化的旧版本重解析一次（`mutat
 
 ## 6. Preflight：启动全量预检与证据债
 
-`runClaimsPreflight`（`src/claims/brains/code/preflight.ts:36`）在每次 update/resume 准备 runtime 时对全部边车做一次确定性全量预检（结果类型 `ClaimsPreflightResult`，`preflight.ts:9`：`issues` + `persisted` + `orphanPages`）。流程：
+`runClaimsPreflight`（`src/claims/brains/code/preflight.ts:40`）在每次 update/resume 准备 runtime 时对全部边车做一次确定性全量预检（结果类型 `ClaimsPreflightResult`，`preflight.ts:9`：`issues` + `persisted` + `orphanPages`）。流程：
 
 1. `store.discoverPages()` 加载全部 grounded 页的边车（`preflight.ts:40-41`）；
 2. `discoverSidecarPages()` 相对页集合求差得孤儿清单（`preflight.ts:42-45`）——孤儿在 01 篇 §7.5 的 finalize 中清理；
@@ -240,17 +240,17 @@ issue 的数据形状是 `GroundingIssue`（`src/claims/brains/code/types.ts:122
 
 ### 7.1 驱动规划：issue → 必做页作业
 
-规划阶段 `createRepositoryPlan`（`src/generation/page-jobs.ts:123`）接收 preflight 的 `claimIssues`（`page-jobs.ts:126`）。update 模式下 `addRequiredClaimIssueJobs`（`page-jobs.ts:256`，调用点 `page-jobs.ts:177`）把 issue 按页分组，凡规划器没有排进队列、也没被显式删除的涉事页，**强制注入一个页作业**（`page-jobs.ts:270-289`）：其 purpose 明示「对账 stale/unresolved claims 并依据当前仓库证据更新本页、保留无关的准确内容」（`page-jobs.ts:277-278`），seedPaths 由 issue 的证据资源剥掉行区间片段得到（`evidenceResourceToSeedPath`，`page-jobs.ts:348-351`），把模型直接带到漂移的源码面前。规划器因此无法「假装没看见」任何一条证据债。
+规划阶段 `createRepositoryPlan`（`src/generation/page-jobs.ts:126`）接收 preflight 的 `claimIssues`（`page-jobs.ts:126`）。update 模式下 `addRequiredClaimIssueJobs`（`page-jobs.ts:256`，调用点 `page-jobs.ts:177`）把 issue 按页分组，凡规划器没有排进队列、也没被显式删除的涉事页，**强制注入一个页作业**（`page-jobs.ts:270-289`）：其 purpose 明示「对账 stale/unresolved claims 并依据当前仓库证据更新本页、保留无关的准确内容」（`page-jobs.ts:277-278`），seedPaths 由 issue 的证据资源剥掉行区间片段得到（`evidenceResourceToSeedPath`，`page-jobs.ts:348-351`），把模型直接带到漂移的源码面前。规划器因此无法「假装没看见」任何一条证据债。
 
 ### 7.2 驱动 no-op 裁决
 
-update 的 no-op 判定把 claims 状态置于 Git 状态之上：`src/generation/repository-run.ts:411-423` 要求 `issueCount === 0`（`repository-run.ts:419`）且基线全覆盖（`:420`）才允许跳过整轮——源码指纹没变也不能掩盖 stale/unresolved（`:409-410` 注释；`getUpdateNoopStatus` 定义于 `src/agent/utils.ts:126`）。`issueCount` 与 `issues` 由 runtime 暴露（01 篇 §8）。
+update 的 no-op 判定把 claims 状态置于 Git 状态之上：`src/generation/repository-run.ts:493-505` 要求 `issueCount === 0`（`repository-run.ts:419`）且基线全覆盖（`:420`）才允许跳过整轮——源码指纹没变也不能掩盖 stale/unresolved（`:409-410` 注释；`getUpdateNoopStatus` 定义于 `src/agent/utils.ts:119`）。`issueCount` 与 `issues` 由 runtime 暴露（01 篇 §8）。
 
 ### 7.3 驱动检视与对账
 
 issue 以两种方式到达模型：
 
-- **检视侧**：`inspect_claims` 返回的每条 claim 附带 `issue {kind, resources}`（`toInspectedClaim`，`src/claims/brains/code/session.ts:600`；类型 `InspectedClaim`，`src/claims/brains/code/types.ts:162`）；工具描述明确「stale 或 unresolved 的 claim 已经随任务出现」（`src/agent/repository-runner.ts:430-432`）。
+- **检视侧**：`inspect_claims` 返回的每条 claim 附带 `issue {kind, resources}`（`toInspectedClaim`，`src/claims/brains/code/session.ts:600`；类型 `InspectedClaim`，`src/claims/brains/code/types.ts:162`）；工具描述明确「stale 或 unresolved 的 claim 已经随任务出现」（`src/agent/repository-runner.ts:957-959`）。
 - **协议侧**：稀疏对账（sparse reconciliation，协议细节见 01-claims-model.md §5）规定带 issue 的 claim 必须被 `confirmedClaimIds`/`claims`/`retractedClaimIds` 之一显式点名，遗漏即 `RepositoryRunError`（`page-jobs.ts:498-505`）；对账规则文本（`CLAIMS_RECONCILIATION_GUIDANCE`，`src/claims/guidance.ts:18`）明确「stale/unresolved 是重新核对的要求，不是自动 retract 指令」（`guidance.ts:19`）。
 
 对账成功即还债：`resolveClaims` 在操作命中后清除对应 claim 的 issue（`session.ts:210-213`）。
@@ -278,7 +278,7 @@ preflight 发现债（stale/unresolved，preflight.ts:49-87）
 
 ### 7.7 与 04 区提示词的衔接
 
-证据的「形式规则」在提示词层只有一小段、且与代码强约束一一对应：实质标准与对账规则两条常量注入生成提示词（`src/agent/repository-prompts.ts:162-164`，机制见 ../04-agent-and-prompting/02-prompting-strategy.md），其中 `CLAIMS_SUBSTANCE_GUIDANCE` 要求证据一律 `repo://<相对路径>` 可带 `#Lx-Ly`、禁止裸路径（`src/claims/guidance.ts:11`）——这正是 `resource.ts` 解析器在代码侧强制的前缀与片段语法。提示词是「劝」，resolver 是「拦」：模型提交不合规 resource 不会污染边车，只会让 `submit_page` 收到结构化拒绝（01 篇 §5.4）。
+证据的「形式规则」在提示词层只有一小段、且与代码强约束一一对应：实质标准与对账规则两条常量注入生成提示词（`src/agent/repository-prompts.ts:194-196`，机制见 ../04-agent-and-prompting/02-prompting-strategy.md），其中 `CLAIMS_SUBSTANCE_GUIDANCE` 要求证据一律 `repo://<相对路径>` 可带 `#Lx-Ly`、禁止裸路径（`src/claims/guidance.ts:11`）——这正是 `resource.ts` 解析器在代码侧强制的前缀与片段语法。提示词是「劝」，resolver 是「拦」：模型提交不合规 resource 不会污染边车，只会让 `submit_page` 收到结构化拒绝（01 篇 §5.4）。
 
 ## 8. 常见误读
 
@@ -328,28 +328,28 @@ preflight 发现债（stale/unresolved，preflight.ts:49-87）
 | `src/claims/evidence/repository/resolver.ts:153` | `RepositoryEvidenceResolver` | 仓库证据解析器 |
 | `src/claims/evidence/repository/resolver.ts:189` | `resolve` | 解析主流程（边界/symlink/物理包含） |
 | `src/claims/evidence/repository/resolver.ts:294` | `resolveLineRangeEvidence` | 行区间三分支裁决 |
-| `src/claims/evidence/repository/resolver.ts:404` | `locateUnchangedLineRange` | 同 span 未变优先 + 扫描/上下文消歧 |
-| `src/claims/evidence/repository/resolver.ts:459` | `locateChangedLineRange` | 锚点夹逼，歧义返回 `null` |
-| `src/claims/evidence/repository/resolver.ts:498` | `findContextBoundaries` | 上下文哈希定位边界 |
-| `src/claims/evidence/repository/resolver.ts:593` | `formatLineRangeVersion` | 行区间版本令牌（7 字段 + base64url） |
-| `src/claims/evidence/repository/resolver.ts:635` | `parseLineRangeVersion` | 旧版本严格解析，失败回退行号提示 |
-| `src/claims/evidence/repository/resolver.ts:731` | `createWholeFileEvidence` | 整文件证据 |
-| `src/claims/evidence/repository/resolver.ts:768` | `createHashedVersion` | `repo-file-v1:sha256:<hash>` |
+| `src/claims/evidence/repository/resolver.ts:424` | `locateUnchangedLineRange` | 同 span 未变优先 + 扫描/上下文消歧 |
+| `src/claims/evidence/repository/resolver.ts:479` | `locateChangedLineRange` | 锚点夹逼，歧义返回 `null` |
+| `src/claims/evidence/repository/resolver.ts:518` | `findContextBoundaries` | 上下文哈希定位边界 |
+| `src/claims/evidence/repository/resolver.ts:613` | `formatLineRangeVersion` | 行区间版本令牌（7 字段 + base64url） |
+| `src/claims/evidence/repository/resolver.ts:655` | `parseLineRangeVersion` | 旧版本严格解析，失败回退行号提示 |
+| `src/claims/evidence/repository/resolver.ts:751` | `createWholeFileEvidence` | 整文件证据 |
+| `src/claims/evidence/repository/resolver.ts:788` | `createHashedVersion` | `repo-file-v1:sha256:<hash>` |
 | `src/claims/evidence/repository/resolver.ts:19` | `RANGE_CONTEXT_LINE_COUNT` | 锚点上下文窗口（±3 行） |
 | `src/claims/core/mutations.ts:138` | `resolveEvidence` | 模型只提交 resource，版本由 resolver 分配 |
 | `src/claims/core/resolver-cache.ts:12` | `cacheEvidenceResolver` | `[resource, previousVersion]` 键 memoize |
-| `src/claims/brains/code/preflight.ts:36` | `runClaimsPreflight` | 全量预检 → stale/unresolved issue |
-| `src/claims/brains/code/preflight.ts:105` | `compareGroundingIssues` | issue 确定性排序 |
+| `src/claims/brains/code/preflight.ts:40` | `runClaimsPreflight` | 全量预检 → stale/unresolved issue |
+| `src/claims/brains/code/preflight.ts:117` | `compareGroundingIssues` | issue 确定性排序 |
 | `src/claims/brains/code/types.ts:122` | `GroundingIssue` | 证据债的页级表达 |
 | `src/claims/brains/code/session.ts:210` | issue 清除 | 对账命中即还债 |
 | `src/claims/brains/code/session.ts:473` | `assertEvidenceStillCurrent` | 落盘前逐证据重校验 |
 | `src/claims/guidance.ts:11` | 证据 URI 形式要求 | 禁止裸路径 |
-| `src/generation/page-jobs.ts:256` | `addRequiredClaimIssueJobs` | issue → 强制页作业 |
-| `src/generation/page-jobs.ts:348` | `evidenceResourceToSeedPath` | 证据资源 → 种子路径 |
-| `src/generation/page-jobs.ts:498` | 遗漏裁决守卫 | 带 issue 未点名即拒绝 |
-| `src/generation/repository-run.ts:411` | no-op claims 前置 | `issueCount === 0` 才可跳过 |
+| `src/generation/page-jobs.ts:271` | `addRequiredClaimIssueJobs` | issue → 强制页作业 |
+| `src/generation/page-jobs.ts:363` | `evidenceResourceToSeedPath` | 证据资源 → 种子路径 |
+| `src/generation/page-jobs.ts:513` | 遗漏裁决守卫 | 带 issue 未点名即拒绝 |
+| `src/generation/repository-run.ts:493` | no-op claims 前置 | `issueCount === 0` 才可跳过 |
 | `src/generation/repository-run.ts:1251` | 页事务中的对账调用 | 债的裁决点在生命周期 |
-| `src/agent/utils.ts:126` | `getUpdateNoopStatus` | no-op 判定的源状态输入 |
+| `src/agent/utils.ts:119` | `getUpdateNoopStatus` | no-op 判定的源状态输入 |
 | `src/agent/wiki-finalizer.ts:263` | `finalizeWikiArtifacts` | 收尾管线中 claims 步骤的位置 |
 | `src/okf/claim-sources.ts:38` | `synchronizeClaimSources` | `sources` 投影（详见 03） |
 | `src/okf/claims-verification.ts:35` | `synchronizeClaimsVerification` | `verified` 投影（详见 03） |
