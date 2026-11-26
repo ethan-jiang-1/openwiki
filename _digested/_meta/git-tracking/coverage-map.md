@@ -4,11 +4,13 @@ doc_type: "reference-data"
 status: "active"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-09-13"
-sync_event: "2026-09-13"
-last_updated: "2026-09-13"
-baseline_ref: "origin/main"
-baseline_commit: "e92cc11"
+updated: "2026-11-26"
+sync_event: "2026-11-26"
+last_updated: "2026-11-26"
+baseline_ref: "v0.9.0"
+baseline_tag: "v0.9.0"
+baseline_commit: "b7027e3"
+matrix_built_on: "e92cc11"
 purpose: "回答「哪段源码由哪篇 _digested doc 覆盖」——给追平批次与覆盖审计做索引"
 owns: "source→doc 映射关系、覆盖度标注"
 update_when:
@@ -20,9 +22,12 @@ out_of_scope:
 
 # _digested 源码覆盖地图
 
-> 基线：`e92cc11`（2026-09-13 re-baseline，追平期间锁定不 fetch）。
+> 基线：**`v0.9.0`（`b7027e3`）**，2026-11-26 release-level re-baseline。
+> ⚠️ **矩阵本体仍按 `e92cc11` 的 168 文件构建**（见 `matrix_built_on`）：`full` 标记目前只代表
+> 「叙事成立」，**行号锚尚未按 v0.9.0 重扫**；重扫属于批 7。
 > 口径：覆盖度 = 该 source area 的**架构关键路径**在 `_digested` 中被解释的程度，不是逐函数覆盖。
-> 结构依据：`../catch-up-plan.md` §2（14 主题区）。事实底稿：`upstream-sync/2026-09-13-rebaseline-reports.md`。
+> 结构依据：`../catch-up-plan.md` §2（14 主题区，磁盘现为 16 区）。事实底稿：`upstream-sync/2026-09-13-rebaseline-reports.md`。
+> 基线前移的增量清单：`upstream-sync/2026-11-26-rebaseline.md`；逐版本裁决：`upstream-sync/release-log.md`。
 
 ## 覆盖度语义
 

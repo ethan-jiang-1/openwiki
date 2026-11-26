@@ -4,8 +4,8 @@ doc_type: "archive"
 status: "archive"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-09-13"
-sync_event: "2026-09-13"
+updated: "2026-11-26"
+sync_event: "2026-11-26"
 purpose: "记录 _digested 目录结构的创建、变更和重大重组"
 owns: "_digested 结构变更历史"
 update_when:
@@ -16,6 +16,23 @@ out_of_scope:
 ---
 
 # _digested 结构演进日志
+
+## 2026-11-26 — 基线前移至 v0.9.0 ＋ 确立「只跟正式发布」口径
+
+**事件**：upstream 自 `e92cc11` 起跨了 **9 个正式发布**（`v0.5.2` 2026-09-14 → `v0.9.0` 2026-11-05），131 个提交。
+同时确定一条长期口径：**只跟 upstream 的 stable `vX.Y.Z` tag，不跟 `main` HEAD**——因为按 PR 粒度追会让基线漂移，
+且说不清「我们停在哪一版」。`upstream/main` 当前 `dcb803e`，比 `v0.9.0` 多 7 个未发版提交，不计入基线。
+
+**变更内容**：
+1. 追踪层：`git-branch-and-upstream-tracking.md` 增 §同步口径（7 条硬规则），基线改为 `baseline_tag: v0.9.0` + `baseline_commit: b7027e3` 双记；sync 历史加一行。
+2. 新增 **`upstream-sync/release-log.md`（发布台账）**：一个 release 一节，固定回答「升了什么 / 对我们好不好（🟢跟进 / 🟡订正 / ⚪略过）/ 文档动作」。这是本次新增的**常设文件**，以后每个 tag 追加一节。
+3. 新增 `upstream-sync/2026-11-26-rebaseline.md`：结构增量（providers 13→15、MCP 工具 6→10、Node `>=22.22.0`、page 并行）+ 27 项受影响文档清单。
+4. `catch-up-plan.md` 补 §7（批 7–9）：批 7 基线重扫、批 8 语义变化（🟢 14 项）、批 9 数字订正（🟡 12 项）；§0.4「锁定 e92cc11 不 fetch」与 §5 对应风险项作废。
+5. `coverage-map.md` 基线前移，但新增 `matrix_built_on: e92cc11` 标注——**矩阵本体与行号锚尚未重扫**，`full` 只代表叙事成立。
+6. `scripts/track.sh` 增 `releases` 子命令，`status` 增「最新发布 / 记录基线 / 积压 release / main 领先数」四行；基线从追踪文档 frontmatter 读取。
+
+**结构判断**：本次**不是**结构级 re-baseline——`src/` 0 删除，168 → 178 文件（+10），14 区骨架仍成立（磁盘现为 16 区）。
+变化是在既有骨架上长出的新内容，故批次按「内容增量」而非「结构重排」设计。
 
 ## 2026-09-13 — 16 区补篇：输入与证据源（16/04）
 

@@ -16,11 +16,23 @@ out_of_scope:
 # Upstream Sync 事件模板
 
 > 每次从 upstream 同步变更后，复制此模板，按实际数据填充。
+> **口径**：只登记 stable `vX.Y.Z` 发布；基线取最新 stable tag 的 commit，不取 `upstream/main` HEAD。
+> 先补 `release-log.md` 的逐版本台账，再写本文件。
+
+## 基线
+
+```
+baseline_tag:     vX.Y.Z
+baseline_commit:  <sha>
+previous_baseline: <sha> (<package version>)
+release_range:    vA.B.C … vX.Y.Z   （共 N 个正式发布）
+not_tracked:      baseline 之后 main 上的 M 个未发版提交
+```
 
 ## 变更范围
 
 ```bash
-# 运行: git diff --stat <baseline_commit>..<new_commit>
+# 运行: git diff --stat <previous_baseline>..<baseline_commit>
 # 粘贴输出:
 ```
 
