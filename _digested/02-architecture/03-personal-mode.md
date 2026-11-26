@@ -4,10 +4,10 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-07-18"
-updated: "2026-09-13"
-sync_event: "2026-09-13"
+updated: "2026-11-26"
+sync_event: "2026-11-26"
 audience: "需要理解 OpenWiki Personal Mode 如何从外部数据源提取数据、生成个人知识 brain 的人"
-purpose: "解释 Personal Mode 的四层流水线（数据源层、认证层、摄取层、Agent 处理层）、特殊输出文件、以及定时调度机制"
+purpose: "解释 Personal Mode 的四层流水线（数据源层、认证层、摄取层、Agent 处理层）、特殊输出文件、以及定时调度机制（基线 v0.9.0）"
 owns: "`src/ingestion/ingestion.ts`, `src/connectors/`, `src/auth/`, `src/agent/index.ts` 中与 personal mode 相关的部分, `src/scheduling/schedules.ts`, `src/setup/onboarding.ts`"
 update_when:
   - "ingestion.ts 或 connector registry 的结构发生显著变化时"
@@ -35,11 +35,13 @@ Personal Mode 是 OpenWiki 的两大运行模式之一（`src/cli/commands.ts:26
 外部数据源 → 认证层 → 摄取流水线 → Agent 处理 → ~/.openwiki/wiki/
 ```
 
-与 Code Mode 的不同：Code Mode 以"理解一个代码仓库并生成文档"为目标，而 Personal Mode 以"理解一个人的信息流并持续维护知识库"为目标。两者共享同一套 Agent 引擎 (`src/agent/index.ts:167-290` 的 `runOpenWikiAgent`)，但使用不同的提示词（prompt）模板和输出格式。
+与 Code Mode 的不同：Code Mode 以"理解一个代码仓库并生成文档"为目标，而 Personal Mode 以"理解一个人的信息流并持续维护知识库"为目标。两者共享同一套 Agent 引擎 (`src/agent/index.ts:167-297` 的 `runOpenWikiAgent`)，但使用不同的提示词（prompt）模板和输出格式；Personal Mode 的 agent 没有 shell（提示词与后端双重禁止，见 3.4）。
 
 ## 2. 一张图看懂
 
 ![Personal Mode 流程图](figures/personal-mode-flow.svg)
+
+> 图里画出了 8 个 personal 连接器中的 7 个；`custom-mcp` 是通用 MCP 入口，未单独画出。
 
 ## 3. 四层流水线
 
@@ -81,7 +83,7 @@ OAuth 端点校验、回调安全与 token 落盘规则的细节见 ../09-authen
 
 ### 3.3 摄取层：`ingestion.ts` 编排
 
-`src/ingestion/ingestion.ts`（458 行）是整个摄取流水线的编排器（orchestrator），核心入口是 `runOpenWikiIngestion()`（`:65-105`）：
+`src/ingestion/ingestion.ts`（474 行）是整个摄取流水线的编排器（orchestrator），核心入口是 `runOpenWikiIngestion()`（`:67-107`）：
 
 ```
 parseIngestionTarget() → resolveIngestionSourceInstances() → for each source: runSourceIngestion()
@@ -89,26 +91,28 @@ parseIngestionTarget() → resolveIngestionSourceInstances() → for each source
 
 **步骤拆解**：
 
-1. **`parseIngestionTarget()`**（`:107-122`）：解析用户指定的摄取目标，可以是 `"all"`（全部连接器）、单个 connector ID（如 `"google"`）、或特定 source instance ID
-2. **`resolveIngestionSourceInstances()`**（`:222`）：从 `~/.openwiki/onboarding.json`（`src/setup/onboarding.ts`，482 行；路径常量 `openWikiOnboardingPath` 在 `:11`）读取已配置的 source instances，按目标过滤：
+1. **`parseIngestionTarget()`**（`:109-122`）：解析用户指定的摄取目标，可以是 `"all"`（全部连接器）、单个 connector ID（如 `"google"`）、或特定 source instance ID
+2. **`resolveIngestionSourceInstances()`**（`src/ingestion/ingestion.ts:224`）：从 `~/.openwiki/onboarding.json`（`src/setup/onboarding.ts`，482 行；路径常量 `openWikiOnboardingPath` 在 `:11`）读取已配置的 source instances，按目标过滤：
    - 仅返回 `connectedAt` 存在的（已完成首次配置的）
    - `scheduledOnly` 模式下跳过 paused 状态的 schedule
-3. **`runSourceIngestion()`**（`:124`）：对每个 source instance 依次执行：
-   - **确定性拉取**（如果是确定性连接器）：调用 `connector.ingest()`，传入 `windowHours=24`（最近 24 小时数据，`INGESTION_WINDOW_HOURS = 24`，`:34`）
+3. **`runSourceIngestion()`**（`:126`，对象参数）：对每个 source instance 依次执行：
+   - **确定性拉取**（如果是确定性连接器）：调用 `connector.ingest()`，传入 `windowHours=24`（最近 24 小时数据，`INGESTION_WINDOW_HOURS = 24`，`:36`）；拉取本身失败且没有 raw file 时直接以 `status: "error"` 返回（`:156-173`）
    - **Agent 更新**：调用 `runOpenWikiAgent("update", ...)` 并传入 `outputMode: "local-wiki"`，Agent 会根据 source 类型执行不同的处理策略
-   - **遥测边界**：每次单源 agent 更新被 `withRunTelemetry("update", …)`（`:190-198`）包裹——这是该次运行的唯一遥测记录边界，与 CLI 路径同构，使定时摄取的运行也进入遥测；包裹范围覆盖 agent 运行本身，连接器抛错在此边界内被转为 error 结果而非逃逸异常
-   - **单源失败隔离**：整个单源流程包在 try/catch 中（`:209-218`）——任何异常（含确定性拉取失败）被捕获并输出 `"<连接器> ingestion failed: …"`，该源以 `status: "error"` 记入结果后继续处理下一个源。单个连接器失败**不会阻断**其他连接器的摄取
-4. **24 小时摄取窗口**：`INGESTION_WINDOW_HOURS = 24`（`:34`），所有连接器的确定性拉取默认取最近 24 小时数据
+   - **遥测边界**：每次单源 agent 更新被 `withRunTelemetry("update", …)`（`:195-200`）包裹——这是该次运行的唯一遥测记录边界，与 CLI 路径同构，使定时摄取的运行也进入遥测；包裹范围覆盖 agent 运行本身，连接器抛错在此边界内被转为 error 结果而非逃逸异常
+   - **单源失败隔离**：整个单源流程包在 try/catch 中（`:211-220`）——任何异常（含确定性拉取失败）被捕获并输出 `"<连接器> ingestion failed: …"`，该源以 `status: "error"` 记入结果后继续处理下一个源。单个连接器失败**不会阻断**其他连接器的摄取
+4. **24 小时摄取窗口**：`INGESTION_WINDOW_HOURS = 24`（`:36`），所有连接器的确定性拉取默认取最近 24 小时数据，同一数值也写进单源 user message（`src/ingestion/ingestion.ts:295`）
 
 ### 3.4 Agent 处理层
 
-Personal Mode 和 Code Mode 共享同一个 Agent 引擎（`src/agent/index.ts:167-290` 的 `runOpenWikiAgent()`），但 Personal Mode 使用 `outputMode: "local-wiki"`，会触发 personal 模板（`src/agent/prompts/personal.ts`，612 行）。
+Personal Mode 和 Code Mode 共享同一个 Agent 引擎（`src/agent/index.ts:167-297` 的 `runOpenWikiAgent()`），但 Personal Mode 使用 `outputMode: "local-wiki"`，会触发 personal 模板（`src/agent/prompts/personal.ts`，612 行）。
 
-**Personal Mode 特有的合成策略**（定义在 `src/ingestion/ingestion.ts` 的 `createSourceSynthesisPolicy()` `:349` 与 `createConnectorSynthesisGuidance()` `:364`）：
+**shell 被彻底关掉**：`OpenWikiLocalShellBackend.execute`（`src/agent/docs-only-backend.ts:545-576`）在 `outputMode === "local-wiki"` 时直接返回 `exitCode: 1` 与"Shell execution is disabled in personal mode"，提示词侧也明写同一句。这是 v0.6.0 之后的语义：personal 模式消费的是不可信的外部内容（邮件、帖子、MCP 响应），无人值守摄取时更不能把宿主 shell 交给它。
+
+**Personal Mode 特有的合成策略**（定义在 `src/ingestion/ingestion.ts` 的 `createSourceSynthesisPolicy()` `:351` 与 `createConnectorSynthesisGuidance()` `:366`，后者已导出供 code 模式连接器复用）：
 
 1. **跨源综合**：数据不按 source 孤立存放，而是综合到跨源规范文件（canonical cross-source files）中
-2. **置信度标签（信心标签）4 → 5**：每条信息标记为 `confirmed`、`source-backed`、`contested`、`watchlist` 或 `saved-context`——re-baseline 新增了 **`contested`（有争议）** 标签（`:352`）
-3. **Contested 双主张保留**：当可信来源互相矛盾且没有 ground truth 裁决时，不再"新覆盖旧"，而是在规范页面新增 **`## Contested`** 小节同时保留双方主张（各带来源与日期）；争议事实在被解决前不得表现为 confirmed/source-backed，也**不允许仅按时间新近度裁决**（`:353`）。同一纪律也写入 personal 提示词模板（`src/agent/prompts/personal.ts:223-229`）：争议解决时需留解决说明（日期、决定性证据、被取代的来源）
+2. **置信度标签（信心标签）5 个**：每条信息标记为 `confirmed`、`source-backed`、`contested`、`watchlist` 或 `saved-context`，其中 **`contested`（有争议）** 表示可信来源互相矛盾且现有证据无法裁决（`:354-355`）
+3. **Contested 双主张保留**：当可信来源互相矛盾且没有 ground truth 裁决时，不再"新覆盖旧"，而是在规范页面新增 **`## Contested`** 小节同时保留双方主张（各带来源与日期）；争议事实在被解决前不得表现为 confirmed/source-backed，也**不允许仅按时间新近度裁决**（`ingestion.ts:355`）。同一纪律也写入 personal 提示词模板（`src/agent/prompts/personal.ts:223-230`）：争议解决时需留解决说明（日期、决定性证据、被取代的来源）
 4. **去重**：使用稳定的 topic key 去重，更新已有的 themes、open questions、commitments，不在多个 source 页面中重复同一事实
 5. **按连接器定制策略**：每个连接器有专用的合成指南：
    - Gmail：分类为 `action_required` / `scheduled_commitment` / `decision_or_approval` 等 13 个类别，只写高/中优先级且持久的信息
@@ -119,7 +123,7 @@ Personal Mode 和 Code Mode 共享同一个 Agent 引擎（`src/agent/index.ts:1
    - Web Search：单弱结果标记为 `watchlist`，跨查询合并到已有主题
    - Git Repo：用仓库路径、分支、HEAD、提交作为证据，不镜像仓库清单
 
-**Agent 创建用户消息**：`createSourceUpdateMessage()`（`:270`）根据是否确定性拉取生成不同的用户提示，包含 wiki goal、source 特定指令、合成策略、以及确定性拉取的原始数据文件路径。
+**Agent 创建用户消息**：`createSourceUpdateMessage()`（`src/ingestion/ingestion.ts:272`）根据是否确定性拉取生成不同的用户提示，包含 wiki goal、source 特定指令、合成策略、以及确定性拉取的原始数据文件路径。
 
 ## 4. Personal Brain 的特殊文件
 
@@ -139,7 +143,7 @@ Personal Mode 支持通过 macOS LaunchAgent 实现定时自动摄取（`src/sch
 **调度机制**：
 - 用户通过 CLI 配置 cron 表达式：`openwiki cron` 相关子命令
 - `installConnectorSchedule()`（`:132`）将 cron 表达式转换为 macOS `launchd` 的 `StartCalendarInterval` 格式，写入 `~/Library/LaunchAgents/com.openwiki.ingestion.plist`；cron 语义与 launchd 语义的边界（`day+weekday` 同设被拒）见 ../11-scheduling-and-ci/01-macos-launchagents.md
-- LaunchAgent 的 `ProgramArguments` 为：`node <cli-path> ingest all --scheduled --print`（`:849-851`）；plist 同时注入 `EnvironmentVariables`（`:836-839`，经 `escapePlist` 转义）以支持 `OPENWIKI_CONFIG_DIR`
+- LaunchAgent 的 `ProgramArguments` 为：`node <cli-path> ingest all --scheduled --print`（`:826-833`）；plist 同时注入 `EnvironmentVariables`（`:834-841`，经 `escapePlist` 转义）以支持 `OPENWIKI_CONFIG_DIR`
 - 定时触发时，自动执行全部已配置连接器的摄取流水线，输出写入日志文件 `~/.openwiki/logs/ingestion.schedule.log`（`:182`）
 
 **电源管理集成**：
@@ -155,16 +159,16 @@ Personal Mode 支持通过 macOS LaunchAgent 实现定时自动摄取（`src/sch
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/ingestion/ingestion.ts:36` | `INGESTION_WINDOW_HOURS` | 24 小时摄取窗口 |
+| `src/ingestion/ingestion.ts:36` | `INGESTION_WINDOW_HOURS` | 24 小时摄取窗口（同时写进单源 user message `:295`） |
 | `src/ingestion/ingestion.ts:67-107` | `runOpenWikiIngestion()` | 摄取流水线总入口，遍历 source instances |
-| `src/ingestion/ingestion.ts:109-124` | `parseIngestionTarget()` | 解析摄取目标（"all" / connector ID / source instance ID） |
-| `src/ingestion/ingestion.ts:126` | `runSourceIngestion()` | 单 source 摄取：确定性拉取 + Agent 更新 |
-| `src/ingestion/ingestion.ts:192-200` | `withRunTelemetry` 边界 | 单源 agent 更新的唯一遥测记录边界 |
+| `src/ingestion/ingestion.ts:109-122` | `parseIngestionTarget()` | 解析摄取目标（"all" / connector ID / source instance ID） |
+| `src/ingestion/ingestion.ts:126-221` | `runSourceIngestion()` | 单 source 摄取：确定性拉取 + Agent 更新（内部函数，对象参数） |
+| `src/ingestion/ingestion.ts:195-200` | `withRunTelemetry` 边界 | 单源 agent 更新的唯一遥测记录边界 |
 | `src/ingestion/ingestion.ts:211-220` | 单源失败隔离 | catch → `status: "error"`，不阻断其他源 |
 | `src/ingestion/ingestion.ts:224` | `resolveIngestionSourceInstances()` | 从 onboarding 配置解析已连接的源实例 |
 | `src/ingestion/ingestion.ts:272` | `createSourceUpdateMessage()` | 按 source 生成 agent 用户消息 |
-| `src/ingestion/ingestion.ts:351` | `createSourceSynthesisPolicy()` | 跨源综合策略（5 个信心标签 + Contested 纪律 `:352-353`） |
-| `src/ingestion/ingestion.ts:366` | `createConnectorSynthesisGuidance()` | 按连接器定制的合成指南（Gmail 分类、Slack 路由等） |
+| `src/ingestion/ingestion.ts:351-364` | `createSourceSynthesisPolicy()` | 跨源综合策略（5 个信心标签 + Contested 纪律 `:354-355`） |
+| `src/ingestion/ingestion.ts:366-420` | `createConnectorSynthesisGuidance()` | 按连接器定制的合成指南（Gmail 分类、Slack 路由等，code 模式复用） |
 | `src/connectors/registry.ts:24` | `createConnectorRegistry()` | 注册全部 9 个连接器 |
 | `src/connectors/types.ts:1-10` | `ConnectorId` | 连接器 ID 联合类型（9 个取值） |
 | `src/connectors/types.ts:20` | `ConnectorDefinition.mode` | `"code" \| "personal"` 模式轴 |
@@ -179,9 +183,10 @@ Personal Mode 支持通过 macOS LaunchAgent 实现定时自动摄取（`src/sch
 | `src/scheduling/schedules.ts:274` | `resumeConnectorSchedules()` | 恢复定时调度 |
 | `src/scheduling/schedules.ts:327` | `deleteConnectorSchedules()` | 完全移除 schedule 配置 |
 | `src/scheduling/schedules.ts:357` | `installOpenWikiPowerSchedule()` | 配置 pmset 唤醒/sleep 与调度对齐 |
-| `src/scheduling/schedules.ts:812` | `createLaunchAgentPlist()` | 生成 LaunchAgent plist XML（含 `EnvironmentVariables` `:836-839`） |
-| `src/agent/index.ts:167-290` | `runOpenWikiAgent()` | Agent 运行入口（Personal 和 Code Mode 共享） |
+| `src/scheduling/schedules.ts:812` | `createLaunchAgentPlist()` | 生成 LaunchAgent plist XML（含 `EnvironmentVariables` `:834-841`） |
+| `src/agent/index.ts:167-297` | `runOpenWikiAgent()` | Agent 运行入口（Personal 和 Code Mode 共享） |
+| `src/agent/docs-only-backend.ts:545-576` | `execute()` | personal 模式禁 shell（`exitCode: 1`） |
 | `src/agent/prompt.ts:21` | `createSystemPrompt()` | Agent 系统提示词，`outputMode: "local-wiki"` 选 personal 模板 |
-| `src/agent/prompts/personal.ts:223-229` | 信心标签与 Contested 纪律 | 5 个信心标签 + 双主张保留规则（提示词侧） |
+| `src/agent/prompts/personal.ts:223-230` | 信心标签与 Contested 纪律 | 5 个信心标签 + 双主张保留规则（提示词侧，:445-452 为多语言变体） |
 | `src/agent/types.ts:130-134` | `RunContext` | 运行上下文（`lastUpdate` + `language` + `wikiGoal`） |
 | `src/cli/commands.ts:26` | `OpenWikiRunMode` | `"personal" \| "code"` 运行模式联合类型 |

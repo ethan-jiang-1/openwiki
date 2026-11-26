@@ -4,11 +4,11 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-09-13"
-sync_event: "2026-09-13"
+updated: "2026-11-26"
+sync_event: "2026-11-26"
 audience: "需要理解 OpenWiki 连接器 OAuth PKCE 认证完整流程、PKCE 参数生成、本地回调服务器、发现端点校验、token 交换和不同 provider 差异的人"
-purpose: "详细解释 OAuth 2.0 PKCE 浏览器授权流程的每一步，从 CLI 触发到 env 文件持久化，以及 2026-09-13 基线加入的发现端点安全校验层"
-owns: "src/auth/oauth.ts（635 行）、src/auth/oauth-discovery.ts（176 行）、src/auth/types.ts、src/auth/providers.ts 中的 OAuth PKCE 流程实现；src/auth/tokens.ts 刷新路径的安全校验（存储/过期细节归 03 号）"
+purpose: "详细解释 OAuth 2.0 PKCE 浏览器授权流程的每一步，从 CLI 触发到 env 文件持久化，以及发现端点与 token 端点的统一校验层"
+owns: "src/auth/oauth.ts（635 行）、src/auth/oauth-discovery.ts（176 行）、src/auth/types.ts、src/auth/providers.ts 中的 OAuth PKCE 流程实现；src/auth/tokens.ts 刷新路径的安全校验（存储/过期细节归 04 号）"
 update_when:
   - "runOAuthAuth() 的编排步骤发生变化时"
   - "PKCE 参数生成逻辑（createRandomUrlToken / createCodeChallenge）变化时"
@@ -19,10 +19,11 @@ update_when:
   - "token 响应映射（mapTokenResponse）逻辑变化时"
   - "浏览器打开和剪贴板复制逻辑变化时"
 out_of_scope:
-  - "token 的存储、过期判定与刷新全貌（归 03-token-management.md，计划中；本文第 11 节只覆盖刷新路径的安全校验）"
+  - "token 的存储、过期判定与刷新全貌（归 04-token-management.md，计划中；本文第 11 节只覆盖刷新路径的安全校验）"
   - "外部命令行认证（external CLI auth）与 GitHub Copilot provider（在 02-external-cli-auth.md）"
+  - "模型提供商侧的 Entra ID 认证（在 03-entra-id-auth.md）"
   - "交互式凭据配置向导的 TUI 实现（在 14-configuration-and-telemetry/）"
-  - "ngrok HTTPS 隧道建立（在 05-ngrok-tunnel.md）"
+  - "ngrok HTTPS 隧道建立（在 06-ngrok-tunnel.md）"
   - "MCP 子系统的认证集成（在 08-connectors-and-data-sources/）"
   - "连接器运行时的 token 使用（在 08-connectors-and-data-sources/）"
 ---
@@ -33,9 +34,11 @@ OpenWiki 的连接器（connector）认证基于 **OAuth 2.0 证明密钥（Proo
 
 整个过程在用户的本地机器上完成：打开浏览器授权 → 本地 HTTP 服务器接收回调 → 交换 token → 写入 `~/.openwiki/.env` 文件持久化。
 
-2026-09-13 re-baseline 后，这套流程多了一层安全外壳：**所有 OAuth 发现端点（discovery endpoint）与 token 端点在请求前必经 `validateOAuthEndpointUrl` 校验（https、禁 userinfo、封 localhost/私有网段、可选 allowedHosts 子域白名单），且所有 `fetch` 一律 `redirect: "manual"`**。发现逻辑也从 `oauth.ts` 抽出为独立模块 `src/auth/oauth-discovery.ts`。详见第 8、11 节。
+这套流程外面套着一层安全外壳：**所有 OAuth 发现端点（discovery endpoint）与 token 端点在请求前必经 `validateOAuthEndpointUrl` 校验（https、禁 userinfo、封 localhost/私有网段、可选 allowedHosts 子域白名单），且所有 `fetch` 一律 `redirect: "manual"`**。发现逻辑位于独立模块 `src/auth/oauth-discovery.ts`。详见第 8、11 节。
 
-> **源码是唯一真相源。** 以下所有函数名、行号、参数和分支均来自 `src/auth/oauth.ts`（635 行）、`src/auth/oauth-discovery.ts`（176 行）、`src/auth/tokens.ts`（287 行）、`src/auth/types.ts`（39 行）和 `src/auth/providers.ts`（108 行），行号对齐 e92cc11 基线。
+本区另有两条平行的认证轴，与本文没有共享代码：模型提供商的外部 CLI 认证（02 号）与 Entra ID 认证（03 号，`src/agent/entra-auth.ts`）。
+
+> **源码是唯一真相源。** 以下所有函数名、行号、参数和分支均来自 `src/auth/oauth.ts`（635 行）、`src/auth/oauth-discovery.ts`（176 行）、`src/auth/tokens.ts`（287 行）、`src/auth/types.ts`（39 行）和 `src/auth/providers.ts`（108 行），行号对齐 v0.9.0（`b7027e3`）。
 
 ---
 
@@ -74,7 +77,7 @@ export async function runOAuthAuth(
 ): Promise<OAuthRunResult>
 ```
 
-这是整个 OAuth PKCE 流程的入口函数，也是唯一对外暴露的 OAuth 执行函数。它返回 `OAuthRunResult`，包含两个字段：
+这是整个 OAuth PKCE 流程的入口函数，也是唯一对外暴露的 OAuth 执行函数（同文件另有 `formatAuthProviderList()`，只负责拼 CLI 的 provider 列表文案）。它返回 `OAuthRunResult`，包含两个字段：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -165,7 +168,7 @@ function createCodeChallenge(codeVerifier: string): string {
 | `win32` | `rundll32 url.dll,FileProtocolHandler <url>` | `oauth.ts:569-576` |
 | 其他 | `xdg-open <url>` | `oauth.ts:578-579` |
 
-**Windows 分支的演进**：旧实现是 `cmd /c start "" <url>`。`start` 会重新解析拼接后的命令行，URL 中的 `&` 被当作命令分隔符，导致授权 URL 在第一个查询参数处被截断，浏览器只收到半个 URL。现实现改用 `rundll32` 的 `FileProtocolHandler`：
+**为什么 Windows 分支不用 `cmd /c start`**：`start` 会重新解析拼接后的命令行，URL 中的 `&` 被当作命令分隔符，授权 URL 会在第一个查询参数处被截断，浏览器只收到半个 URL。因此这里走 `rundll32` 的 `FileProtocolHandler`：
 
 ```typescript
 if (platform === "win32") {
@@ -260,7 +263,7 @@ const error = requestUrl.searchParams.get("error");
 | 错误：有 error 参数 | 400 | `OpenWiki authorization failed. You can close this tab.` | reject | `oauth.ts:419-424` |
 | 异常：缺少 code 或 state | 400 | `OpenWiki authorization callback was missing required data.` | reject | `oauth.ts:426-433` |
 
-第四种（404 分支）是 2026-09-13 基线的语义澄清：任何打到本端口但路径不是 `/callback` 的请求（扫描器探测、用户误开根路径等）都得到 404，并且**不会触碰 `codePromise`** —— 认证流程继续等待真正的回调，不会因为一个无关请求被提前终结或报错。
+第四种（404 分支）值得单独说明：任何打到本端口但路径不是 `/callback` 的请求（扫描器探测、用户误开根路径等）都得到 404，并且**不会触碰 `codePromise`** —— 认证流程继续等待真正的回调，不会因为一个无关请求被提前终结或报错。
 
 所有响应都通过 `getCallbackResponseHeaders()`（`oauth.ts:469-474`）设置 `Connection: close` header，提示浏览器不要复用连接。
 
@@ -421,7 +424,7 @@ if (expiresIn && provider.tokenMapping.expiresAtEnvKey) {
 
 **源码位置**：`src/auth/oauth-discovery.ts`（全文 176 行）
 
-2026-09-13 re-baseline 把 OAuth 发现逻辑从 `oauth.ts` 抽出为独立模块 `src/auth/oauth-discovery.ts`，并给每一次网络请求加了统一的校验外壳。这一层防的是服务端请求伪造（Server-Side Request Forgery，SSRF）：恶意或被劫持的发现响应不能把 OpenWiki 的请求引向本机或内网。
+OAuth 发现逻辑位于独立模块 `src/auth/oauth-discovery.ts`，每一次网络请求都先过一层统一的校验外壳。这一层防的是服务端请求伪造（Server-Side Request Forgery，SSRF）：恶意或被劫持的发现响应不能把 OpenWiki 的请求引向本机或内网。
 
 ### 8.1 两个发现函数
 
@@ -623,7 +626,7 @@ export function validateOAuthEndpointUrl(
 
 **源码位置**：`src/auth/tokens.ts:47-123`（`refreshOAuthAccessToken`）
 
-token 刷新（token refresh）不是 OAuth PKCE 主流程的一部分，但 2026-09-13 基线把主流程的安全层完整复制到了刷新路径上——**两者面对同样的威胁模型**（token 端点是运行时网络请求目标）。本节只覆盖安全校验面；存储、过期判定与刷新编排归 03-token-management.md（计划中）。
+token 刷新（token refresh）不是 OAuth PKCE 主流程的一部分，但刷新路径完整复制了主流程的安全层——**两者面对同样的威胁模型**（token 端点是运行时网络请求目标）。本节只覆盖安全校验面；存储、过期判定与刷新编排归 04-token-management.md（计划中）。
 
 **入口与导火索**：`getOAuthAccessToken()`（`tokens.ts:32-45`）发现 access token 缺失或已过期（`isOAuthAccessTokenExpired`，`tokens.ts:125-140`，含 60 秒提前量 `REFRESH_EXPIRY_SKEW_MS`，`tokens.ts:30`）时调用 `refreshOAuthAccessToken()`。
 

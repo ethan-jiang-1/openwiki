@@ -121,14 +121,16 @@ src/:      67 files changed, 8906 insertions(+), 656 deletions(-)   ← 0 删除
 - `09/01-oauth-pkce-flow.md`：PKCE 流程本身未变，Entra 另开分支。
 
 ### 未覆盖的风险
-- `coverage-map.md` 的行号引用全部停在 `e92cc11`，本次未重扫；在做批 7 之前，矩阵的 `full` 标记**只代表「叙事仍成立」，不代表行号仍命中**。
+- ~~`coverage-map.md` 行号未重扫~~ → 批 7 已完成：矩阵按 177 个 `src/**/*.ts(x)` 全量重生成（full 175 / cite 1 / gap 1），脚本 `scripts/build-coverage.py`。
 - `upstream/main` 仍有 3 个未发版 changeset（OpenRouter base URL、GitLab 凭证、glob 模式安全），下一个 tag 会把它们带进来——本台账届时只补一节，不改基线以外的结论。
-- 本仓 `main` 仍停在 `e92cc11`（落后 `v0.9.0` 131 个提交），本次只更新文档，**未移动分支**。
+- ~~本仓 `main` 仍停在 `e92cc11`~~ → 已快进到 `v0.9.0`（`b7027e3`），`ethan` 合并 main。
 - `v0.6.0` 的 page 并行与 `v0.7.1` 的串行化是同一条问题的两面；只读 changelog 容易误判为「并行已完全安全」，升级评估时以源码为准。
 
-## Git 操作记录（本次只读）
+## Git 操作记录
 
-1. `git fetch upstream --prune` — main `e92cc11..dcb803e`，新增 tag `v0.5.2`…`v0.9.0`
+1. `git fetch upstream --prune --tags` — main `e92cc11..dcb803e`，新增 tag `v0.5.2`…`v0.9.0`
 2. 基线取 `v0.9.0`（`b7027e3`），**不取** `upstream/main`（`dcb803e`）
-3. 未执行 `git checkout main` / `merge` / `rebase`：分支移动与 27 篇文档改写分开做，避免历史再次漂移
-4. 待执行（见 `../catch-up-plan.md` §7 批 7）：`git checkout main && git merge v0.9.0`
+3. `git checkout main && git merge --ff-only v0.9.0` — main 快进，零冲突
+4. `git checkout ethan && git merge --no-edit main` — `_digested/` 不受影响，合并提交 `8e47689`
+5. 批 7：机械重锚 1,279 个 `file:line`（difflib 旧→新映射）+ 覆盖矩阵全量重生成
+6. 批 8/9：16 区并行审计，修改 65 篇、新增 7 篇

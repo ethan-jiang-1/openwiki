@@ -4,17 +4,18 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-09-13"
-updated: "2026-09-13"
-sync_event: "2026-09-13"
-audience: "需要理解 OpenWiki 如何作为模型上下文协议（MCP）客户端接入外部数据源的人"
-purpose: "解释 MCP 客户端子系统：stdio/http 双 transport 客户端、tools/list 分页收集、子进程环境白名单隔离、只读调用门控，以及工厂参数化产出的两个连接器实例（notion 与 custom-mcp）"
-owns: "src/connectors/mcp-client.ts、src/connectors/mcp-runtime.ts、src/connectors/sources/mcp.ts，以及 src/connectors/registry.ts 中由 createMcpConnector 产出的两个实例"
+updated: "2026-11-26"
+sync_event: "2026-11-26"
+audience: "需要理解 OpenWiki 如何作为模型上下文协议（MCP）客户端接入外部数据源、以及它作为 MCP server 向宿主暴露哪些工具的人"
+purpose: "解释 MCP 客户端子系统（stdio/http 双 transport 客户端、tools/list 分页收集、子进程环境白名单隔离、只读调用门控、工厂参数化产出的 notion 与 custom-mcp 两个实例），以及 OpenWiki 作为 MCP server 时的 10 工具注册面与 openwiki_begin 结果封顶"
+owns: "src/connectors/mcp-client.ts、src/connectors/mcp-runtime.ts、src/connectors/sources/mcp.ts、src/connectors/registry.ts 中由 createMcpConnector 产出的两个实例，以及 src/integrations/mcp/server.ts 与 src/integrations/core/ 的宿主工具装配面"
 update_when:
   - "mcp-client.ts / mcp-runtime.ts / sources/mcp.ts 的 transport、安全隔离或分页机制变化时"
   - "MCP_CONNECTOR_IDS 增删成员、或 McpConnectorConfig 配置模型字段变化时"
   - "custom-mcp / notion 实例的注册参数或 onboarding 引导变化时"
+  - "宿主侧 MCP 工具集合、schema 或 openwiki_begin 的封顶常量变化时"
 out_of_scope:
-  - "OpenWiki 作为 MCP server 的宿主集成（src/integrations/mcp/ 的六工具生命周期协议）——归 13-integrations"
+  - "OpenWiki 作为 MCP server 的协议语义、HostSessionManager 运行适配器与宿主安装细节——归 13-integrations（本篇 §11 只记录注册面与工具清单）"
   - "fetchWithResilience 自身的超时/退避实现与其他直连 API 连接器——归 02-connector-config-paths-and-security.md 及各连接器文档"
   - "连接器注册表整体与 agent 工具暴露全貌——归 01-connector-registry.md / 03-connector-tools.md"
 ---
@@ -23,7 +24,7 @@ out_of_scope:
 
 ## 1. 定位与组成
 
-在模型上下文协议（Model Context Protocol，MCP）里，OpenWiki 只扮演**客户端（client）**角色：把任意 MCP server 当作 personal 知识源，去发现（discover）工具、执行只读操作、把结果落成证据文件。反向角色——OpenWiki 自己作为 MCP server 被 coding agent 宿主装载——属于 `src/integrations/mcp/`，归 13-integrations（划界见 §11）。
+在模型上下文协议（Model Context Protocol，MCP）里，OpenWiki 只扮演**客户端（client）**角色：把任意 MCP server 当作 personal 知识源，去发现（discover）工具、执行只读操作、把结果落成证据文件。反向角色——OpenWiki 自己作为 MCP server 被 coding agent 宿主装载——的注册面在 `src/integrations/mcp/`，工具清单与 begin 封顶见 §11；协议语义与宿主安装归 13-integrations（划界见 §13）。
 
 客户端子系统由三个文件组成，职责分层清晰：
 
@@ -56,7 +57,7 @@ MCP 连接器的使用方式有两条，殊途同归地落进 `~/.openwiki/conne
   readOnlyOperations 非空 → executeMcpReadOnlyOperations 批量执行 → mcp-results.json
 ```
 
-两条路径的每次运行都会写 raw JSON 证据并追加 `state.json` 的 `runs` 记录（§9）。agent 在 personal 运行里主要走路径 A：MCP 连接器声明了 `supportsAgenticDiscovery: true`，onboarding 的确定性拉取分支不会替它调 `ingest`（`isDeterministicConnector = !supportsAgenticDiscovery`，`src/ingestion/ingestion.ts:268-270`，分流 `:145-151`）。
+两条路径的每次运行都会写 raw JSON 证据并追加 `state.json` 的 `runs` 记录（§9）。agent 在 personal 运行里主要走路径 A：MCP 连接器声明了 `supportsAgenticDiscovery: true`，onboarding 的确定性拉取分支不会替它调 `ingest`（`isDeterministicConnector = !supportsAgenticDiscovery`，`src/ingestion/ingestion.ts:268-270`，分流 `:147-153`）。
 
 ## 3. 工厂参数化：一份 sources/mcp.ts，两个注册表实例
 
@@ -200,7 +201,7 @@ spawn 一个第三方 MCP server 命令，等于把一个任意进程请进机�
 
 http transport 的 `headers` 与 stdio transport 的 `env` 都支持两种写法：字面量值，或 `${ENV_NAME}` 引用。解析规则分三块：
 
-**headers 链路**：`resolveHeaders`（`mcp-client.ts:840-853`）先经 `validateHeaderName`（`:953-959`，`[A-Za-z0-9-]` 至多 100 字符），再由 `resolveTemplateEnvReferences`（`:855-883`）处理值。关键防御在不含 `${` 的分支（`:860-871`）：若 header 名或值看起来像凭证（匹配 `token|secret|authorization|api-key|bearer`），直接抛错，要求改用 `${ENV_VAR}` 引用——防止把明文 secret 写进 `config.json` 落盘。含 `${` 时逐个匹配 `\$\{([A-Z_][A-Z0-9_]*)\}` 并替换（`:873-882`）。
+**headers 链路**：`resolveHeaders`（`mcp-client.ts:840-853`）先经 `validateHeaderName`（`:953-959`，`[A-Za-z0-9-]` 至多 100 字符），再由 `resolveTemplateEnvReferences`（`:855-883`）处理值。关键防御在不含 `${` 的分支（`:860-871`）：若 header 名或值看起来像凭证（匹配 `token|secret|authorization|api[-_]?key|bearer`），直接抛错，要求改用 `${ENV_VAR}` 引用——防止把明文 secret 写进 `config.json` 落盘。含 `${` 时逐个匹配 `\$\{([A-Z_][A-Z0-9_]*)\}` 并替换（`:873-882`）。
 
 **env 名 → 值的解析**：`resolveHeaderEnvReference`（`:885-894`）先查该 env 名是否对应一个 OAuth provider（经 `src/auth/tokens.ts` 的 `getOAuthProviderIdForAccessTokenEnvKey`；gmail/notion/slack/x 是已注册 provider，`tokens.ts:145`）。命中则调 `getOAuthAccessToken` 动态获取 access token——notion 托管 MCP 的 OAuth 流就是这么接上的：配置里只写 `Authorization: Bearer ${OPENWIKI_NOTION_MCP_ACCESS_TOKEN}`，运行时换成新鲜 token，落盘配置里永远没有 token 本体。未命中则回落 `resolveEnvReference`。
 
@@ -251,11 +252,46 @@ discovery 分支调 `listMcpTools` 把工具清单连同脱敏 transport 写进 
 
 此外 `custom-mcp` 出现在三个通用连接器工具的 id 枚举里：`openwiki_ingest_connector`（`:112`）、`openwiki_list_raw_items`（`:160`）、`openwiki_read_raw_item`（`:189`）——即 custom-mcp 也能走通用 ingest/raw 读取路径，与路径 B（§2）对应。
 
-**custom-mcp（`250296c`）**：定位是「内置的通用 MCP 源，不是插件加载器」（注册表描述自述，`registry.ts:30`）。使用完全走文件配置：`~/.openwiki/connectors/custom-mcp/config.json`，`"enabled": true` 加 http 或 stdio `transport`，即可接任意 MCP server——Linear、Jira、内部知识库均可（onboarding 引导文案，`src/setup/credentials/constants.ts:152-167`）。凭证约定：secret 只放 `~/.openwiki/.env`，配置文件里以 env 名写入 `transport.headers` / `transport.env`（`${ENV_NAME}` 引用，§7）；`requiredEnv` 保持空数组（`registry.ts:35`），因为不同 server 需要不同凭证。安全姿态同样写进引导文案（`constants.ts:154-155`）：优先 `allowedTools` 与 MCP `readOnlyHint`；不要把 mutating 工具加进白名单。custom-mcp 也是 onboarding personal 模式的默认候选源之一（`constants.ts:36` 的 `sourceIds`）。
+**custom-mcp（`250296c`）**：定位是「内置的通用 MCP 源，不是插件加载器」（注册表描述自述，`registry.ts:30`）。使用完全走文件配置：`~/.openwiki/connectors/custom-mcp/config.json`，`"enabled": true` 加 http 或 stdio `transport`，即可接任意 MCP server——Linear、Jira、内部知识库均可（onboarding 引导文案，`src/setup/credentials/constants.ts:152-167`）。凭证约定：secret 只放 `~/.openwiki/.env`，配置文件里以 env 名写入 `transport.headers` / `transport.env`（`${ENV_NAME}` 引用，§7）；`requiredEnv` 保持空数组（`registry.ts:35`），因为不同 server 需要不同凭证。安全姿态同样写进引导文案（`constants.ts:163-164`）：优先 `allowedTools` 与 MCP `readOnlyHint`；不要把 mutating 工具加进白名单。custom-mcp 也是 onboarding personal 模式的默认候选源之一（`constants.ts:36` 的 `sourceIds`）。
 
 **notion 实例**则走托管 OAuth（`authProvider: "notion"`，`constants.ts:128-142`）：浏览器授权后凭证自动进 env，运行时经 §7 的 OAuth 解析动态换取 access token，配置文件里无需任何 token 字面量。
 
-## 11. 实现语义备注（易误读点）
+## 11. 宿主侧注册面：10 个 MCP 工具与 begin 封顶
+
+前 10 节讲 OpenWiki 消费别人的 MCP server。反方向的注册面也在本区源码里（`src/integrations/mcp/`）：`createOpenWikiMcpServer(provider)`（`src/integrations/mcp/server.ts:76-94`）从 `HostToolProvider.tools()`（`:61-68`）拿一整套与 transport 无关的 `ProtocolTool`，逐个 `server.registerTool`（`:82-91`），结果是 text 内容 + `structuredContent`（`:103-112`）；异常被有界化——`HostIntegrationError` 只回 `<code>: <message>`，未知异常只回一句固定文案（`:113-120`）。工具本体不在 server.ts，而在 `src/integrations/core/`。
+
+### 11.1 工具清单（10 个）
+
+总数由 `ProtocolToolName` 联合类型收口（`src/integrations/core/protocol.ts:13-24`），`HostSessionManager.tools()`（`src/integrations/core/session-manager.ts:225-272`）按「4 个只读检索 + 6 个生命周期」的顺序返回：
+
+| # | 工具 | 输入要点 | 职责 | 定义处 |
+|---|------|---------|------|--------|
+| 1 | `openwiki_list_workspaces` | `root`；可选 `wiki`（已知 wiki ID） | 列出包含某个仓库 wiki 的命名工作区（workspace）；省略 `wiki` 查当前仓库 | `retrieval-tools.ts:130-145` |
+| 2 | `openwiki_list_wikis` | `root`、`workspace`（ID 或唯一名） | 列出一个工作区里的全部成员 wiki | `retrieval-tools.ts:146-160` |
+| 3 | `openwiki_search` | `root`、`query`；可选 `paths`、`limit`、`workspace` | 无模型调用的仓库 wiki 检索，返回紧凑排名结果；工作区歧义时返回 `status=workspace_required` | `retrieval-tools.ts:161-180` |
+| 4 | `openwiki_read` | `root`、`page`、`sections[]`；可选 `wiki`、`includeProvenance` | 按搜索给出的 `page#anchor` 精确读取完整小节；`includeProvenance` 附带 frontmatter sources 与 Claim 证据引用 | `retrieval-tools.ts:181-197` |
+| 5 | `openwiki_begin` | `root`、`mode` 等 `BeginInput` | 开启/恢复 run；结果是封顶后的活跃视图（§11.2） | `session-manager.ts:228-234` |
+| 6 | `openwiki_submit_plan` | `SubmitPlanInput` | 校验并持久化有序 PageJob 队列 | `session-manager.ts:235-241` |
+| 7 | `openwiki_next_page` | `NextPageInput`（= `RunInput`） | 返回下一个待写页与仍需决策的 Claim | `session-manager.ts:242-248` |
+| 8 | `openwiki_inspect_page_claims` | `InspectPageClaimsInput` | 返回该页完整 Claim 集（仅改写/删除现有内容前需要） | `session-manager.ts:249-256` |
+| 9 | `openwiki_submit_page` | `SubmitPageInput` | 提交单页稀疏 Claim 决策，完成该页任务 | `session-manager.ts:257-263` |
+| 10 | `openwiki_finish` | `RunInput` | 全部页完成后收尾：删除、校验、索引、provenance、Claims 归并、run 元数据 | `session-manager.ts:264-270` |
+
+检索工具是独立于生成生命周期的一层能力（v0.6.0 起；`includeProvenance` 于 v0.7.3 加入 `openwiki_read`）：`createRetrievalTools()`（`retrieval-tools.ts:128-198`）返回的四个工具全部走 zod `.strict()` schema（`SearchInput` `:29-59`、`ListWorkspacesInput` `:64-75`、`ListWikisInput` `:80-91`、`ReadInput` `:96-121`），未知字段与越界值在 schema 层就被拒；检索期的预期错误由 `runRetrieval`（`:209-237`）映射成 `invalid_input` / `invalid_state`。全程没有模型调用、没有 generation run。边界值集中在 `WIKI_RETRIEVAL_LIMITS`（`src/retrieval/wiki.ts:18-78`）：`query` ≤ 2000 字符（`:22`）、`paths` ≤ 20 条（`:27`）、搜索结果 ≤ 20 条且默认 5 条（`:37,42`）、`sections` 1–20 个锚点（`:52`）、单个摘录 ≤ 600 字符（`:62`）。
+
+### 11.2 `openwiki_begin` 的结果封顶（truncated 标记）
+
+v0.8.0 起宿主拿到的不再是完整视图，而是 `toHostActiveBeginView(view)`（`src/integrations/core/begin-view.ts:84-109`，调用点 `session-manager.ts:150`）裁剪过的副本：
+
+- **两个上限**：`HOST_BEGIN_PATH_LIMIT = 200`（`begin-view.ts:9`）与 `HOST_BEGIN_CLAIM_ISSUE_LIMIT = 50`（`:14`）。
+- **总数仍然精确**：`changedPathCount`（`:93`）与 `claimIssueCount`（`:102`）保留截断前的真实长度，被截断的列表配 `changedPathsTruncated`（`:94`）与 `claimIssuesTruncated`（`:103-104`）布尔标记。
+- **每个更新窗口再分片**：`pageUpdateWindows[].changedPaths` 的配额是 `floor(200 / 窗口数)`（`:87-89`），同样带 per-window 的 `changedPathCount` / `changedPathsTruncated`（`:97-99`）。
+- **`claimIssuePages`**：把所有 Claim 问题所在页去重后排序（`:105-107`），所以即使 `claimIssues` 被截断，宿主仍能看到「哪些页有问题」的完整集合。
+- **noop 路径不封顶**：`status=noop` 的视图（`NoopBeginView`，`src/generation/repository-run.ts:278-303`）结构上没有这些列表，`session-manager.ts:144-147` 原样返回。
+
+这条封顶是为了让宿主不必为一棵巨大的 diff 付上下文成本：被省略的路径由宿用自己的 Git 取回，被省略的 Claim 由 `openwiki_next_page` 逐页返回——`INSTRUCTIONS`（`server.ts:11-56`）把这套补救动作写成了显式指令（`:34-40`）。协议细节与宿主安装归 **13-integrations**；本篇只记录注册面与工具集合。
+
+## 12. 实现语义备注（易误读点）
 
 写作与排查时容易误读的几处语义，均以源码为准：
 
@@ -265,10 +301,10 @@ discovery 分支调 `listMcpTools` 把工具清单连同脱敏 transport 写进 
 - **空字符串 env 与未设置 env 语义不同**（§7）：前者是显式配置值，后者才是缺失凭证——排查「required for MCP connector ingestion」报错时先确认变量是否真的未设置。
 - **门控只约束 `tools/call` 路径**：`executeMcpReadOnlyOperations` 执行的是用户在 `readOnlyOperations` 里显式配置的操作，属于「用户已审阅」的信任级别，不走 `getToolCallPolicy`；但配置本身受 `validateMcpOperation` 校验（`mcp-client.ts:113-137`）。
 
-## 12. 划界与相邻文档
+## 13. 划界与相邻文档
 
-- **本篇 = OpenWiki 作为 MCP 客户端**：消费外部 MCP server 的工具与资源，代码全部在 `src/connectors/`。
-- **OpenWiki 作为 MCP server**（coding-agent 宿主集成：`src/integrations/mcp/server.ts` + `stdio.ts`，begin/submit_plan/next_page/inspect_page_claims/submit_page/finish 六工具生命周期协议，装入 codex/claude/opencode/cursor 四宿主）方向相反，归 **13-integrations**（`02-mcp-lifecycle-protocol-and-skills.md`）。
+- **本篇主体 = OpenWiki 作为 MCP 客户端**：消费外部 MCP server 的工具与资源，代码全部在 `src/connectors/`。
+- **OpenWiki 作为 MCP server**（coding-agent 宿主集成：`src/integrations/mcp/server.ts` + `stdio.ts`，装入 9 个 host（codex/claude/opencode/cursor/bob/kiro/omp/antigravity/copilot））方向相反：本篇 §11 只记录**注册面**——10 个工具（4 个只读检索 + 6 个生命周期）与 `openwiki_begin` 的封顶；工具协议语义、HostSessionManager 的单 run 适配、安装事务归 **13-integrations**（`02-mcp-lifecycle-protocol-and-skills.md`；该篇同样按 10 工具口径记述）。
 - **fetchWithResilience 通用层**（30s/尝试超时、仅 429/5xx 重试、Retry-After 上限 20s，`src/connectors/http.ts:144-200`）是全体 HTTP 型连接器的横切设施，细节归 **02-connector-config-paths-and-security.md**；本文只覆盖它在 MCP http transport 的接入点（§5.2）。
 - 注册表全景、`ConnectorDefinition` 字段表与工具暴露全貌归 **01-connector-registry.md / 03-connector-tools.md**。
 
@@ -276,6 +312,14 @@ discovery 分支调 `listMcpTools` 把工具清单连同脱敏 transport 写进 
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
+| `src/integrations/mcp/server.ts:76-94` | `createOpenWikiMcpServer` | 把 `provider.tools()` 全量注册为 MCP 工具；宿主引导文本 `INSTRUCTIONS` 在 `:11-56` |
+| `src/integrations/mcp/server.ts:103-120` | `executeTool` / `toolError` | text + `structuredContent`；已知错误回 `<code>: <message>`，未知异常只回固定文案 |
+| `src/integrations/core/protocol.ts:13-24` | `ProtocolToolName` | 10 个 MCP 工具名的联合类型（4 检索 + 6 生命周期） |
+| `src/integrations/core/session-manager.ts:225-272` | `HostSessionManager.tools()` | 返回顺序：`createRetrievalTools()` + 6 个生命周期工具 |
+| `src/integrations/core/retrieval-tools.ts:128-198` | `createRetrievalTools` | `openwiki_list_workspaces`/`list_wikis`/`search`/`read` 与四个 strict schema |
+| `src/integrations/core/begin-view.ts:9,14,84-109` | `HOST_BEGIN_PATH_LIMIT`、`HOST_BEGIN_CLAIM_ISSUE_LIMIT`、`toHostActiveBeginView` | begin 结果封顶 200 路径 / 50 问题 + `changedPathsTruncated`/`claimIssuesTruncated` |
+| `src/generation/repository-run.ts:278-303` | `NoopBeginView` | `status=noop` 视图无封顶列表 |
+| `src/retrieval/wiki.ts:18-78` | `WIKI_RETRIEVAL_LIMITS` | 检索边界：查询 2000 字符、结果 ≤20（默认 5）、锚点 ≤20、摘录 ≤600 |
 | `src/connectors/mcp-client.ts:8,11` | `fetchWithResilience` import / `MAX_TOOL_LIST_PAGES` | 弹性 HTTP 接入；分页页数上限 100 |
 | `src/connectors/mcp-client.ts:58-96` | `executeMcpReadOnlyOperations` / `listMcpTools` / `executeMcpTool` | 双 transport 三入口 |
 | `src/connectors/mcp-client.ts:176-179,223-226,256-259` | `spawn` 三处 | stdio 子进程启动，均 `shell:false` + `buildChildEnv` |
@@ -302,7 +346,7 @@ discovery 分支调 `listMcpTools` 把工具清单连同脱敏 transport 写进 
 | `src/connectors/tools.ts:38-40,54-102` | repository 门控 + 两个 MCP 工具 | MCP 枚举 `:62,85`；通用枚举 `:112,160,189` 含 custom-mcp |
 | `src/connectors/io.ts:11-31,59-86` | `readConnectorConfig` / `writeRawJson` / `updateStateWithRun` | 配置浅合并读取；raw 0600 落盘；state 留 20 条 run |
 | `src/config/openwiki-home.ts:57-59` | `getConnectorConfigPath` | `~/.openwiki/connectors/<id>/config.json` |
-| `src/ingestion/ingestion.ts:147-153,266-268` | `isDeterministicConnector` | agentic-discovery 连接器不走确定性拉取分支 |
+| `src/ingestion/ingestion.ts:147-153,268-270` | `isDeterministicConnector` | agentic-discovery 连接器不走确定性拉取分支 |
 | `src/setup/credentials/constants.ts:37,128-158` | personal `sourceIds` / Notion / Custom MCP 引导 | OAuth 流与 `${ENV_NAME}` 约定、不白名单 mutating 工具 |
 | `src/connectors/http.ts:144-200` | `fetchWithResilience` | MCP http transport 的底层（30s/尝试、429/5xx 退避） |
 | `test/connectors/mcp-client.test.ts:17-118` | `buildChildEnv` 测试组 | 钉住环境隔离不变量（含空字符串 env，`:93`） |

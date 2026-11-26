@@ -4,8 +4,8 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-09-13"
-sync_event: "2026-09-13"
+updated: "2026-11-26"
+sync_event: "2026-11-26"
 audience: "需要理解 OpenWiki 数据源接入体系的开发者与 Agent"
 purpose: "解释连接器注册表（connector registry）如何注册 9 个内置数据源连接器、ConnectorDefinition 的字段语义（含 mode 分流）、以及连接器工具如何暴露给 agent 并被 repository 模式门控"
 owns: "`src/connectors/` 的 registry、types、io、tools 与 sources/ 下 9 个连接器实现的注册面（definition/工厂/一览）"
@@ -27,10 +27,10 @@ out_of_scope:
 
 连接器注册表（connector registry）是 OpenWiki 数据源接入的中央发现机制：一张从连接器 ID（ConnectorId）到连接器运行时（ConnectorRuntime）的映射表。agent 工具、个人模式摄取（personal-mode ingestion）与 code 模式摄取（code-mode ingestion）都通过这张表按 ID 发现并触发连接器。
 
-2026-09-13 re-baseline 后的两条主轴：
+两条主轴：
 
-1. **连接器从 7 个增至 9 个**（新增 `custom-mcp` 与 `langsmith`，见 `src/connectors/types.ts:1-10`）。
-2. **`ConnectorDefinition` 新增必填字段 `mode: "code" | "personal"`**（`src/connectors/types.ts:20`）。mode 决定连接器属于哪条配置通路与摄取管线：`"code"` 连接器的配置以文件形式提交在仓库内、由 code 模式摄取管线驱动；`"personal"` 连接器的配置存放在用户主目录、由个人模式摄取驱动。当前只有 `langsmith` 是 `"code"`，其余 8 个都是 `"personal"`。
+1. **注册表共 9 个连接器**（`custom-mcp`、`git-repo`、`google`、`hackernews`、`langsmith`、`notion`、`slack`、`web-search`、`x`，见 `src/connectors/types.ts:1-10`）。
+2. **`ConnectorDefinition` 带必填字段 `mode: "code" | "personal"`**（`src/connectors/types.ts:20`）。mode 决定连接器属于哪条配置通路与摄取管线：`"code"` 连接器的配置以文件形式提交在仓库内、由 code 模式摄取管线驱动；`"personal"` 连接器的配置存放在用户主目录、由个人模式摄取驱动。当前只有 `langsmith` 是 `"code"`，其余 8 个都是 `"personal"`。
 
 核心文件（`src/connectors/`，行数为当前实测）：
 
@@ -42,9 +42,9 @@ out_of_scope:
 | `tools.ts` | 575 | 将连接器操作暴露为 agent 可调用的 `DynamicStructuredTool`（7 个工具） |
 | `mcp-client.ts` | 973 | MCP JSON-RPC 客户端（stdio + HTTP 两种 transport） |
 | `mcp-runtime.ts` | 275 | MCP 连接器的工具发现/调用 runtime 与只读门控 |
-| `http.ts` | 145 | 弹性 HTTP 帮助函数 `fetchWithResilience`（见 02 号文档） |
+| `http.ts` | 200 | 弹性 HTTP 帮助函数 `fetchWithResilience`（含调用方取消不重试；见 02 号文档） |
 | `config.ts` | 24 | 配置规整帮助函数 `normalizeStringArray`（见 02 号文档） |
-| `sources/*.ts` | 8 文件 | 8 个 personal 连接器实现 |
+| `sources/*.ts` | 7 文件 | 8 个 personal 连接器实现（`mcp.ts` 一个文件产出 notion 与 custom-mcp 两个实例） |
 | `sources/langsmith/` | 6 文件 1363 行 | langsmith code 连接器（多文件模块） |
 
 ---
@@ -134,7 +134,7 @@ export type ConnectorDefinition = {
 
 ### 3.2 `mode` 字段的语义：code vs personal
 
-`mode`（`types.ts:20`）是 re-baseline 引入的分流轴，它回答一个问题：**这个连接器的配置住在哪里、由哪条管线触发？**
+`mode`（`types.ts:20`）是连接器的分流轴，它回答一个问题：**这个连接器的配置住在哪里、由哪条管线触发？**
 
 | | `mode: "code"` | `mode: "personal"` |
 |---|---|---|
@@ -143,7 +143,7 @@ export type ConnectorDefinition = {
 | 仓库存什么 | workspaces/projects 等团队共享配置（密钥只存环境变量**名**） | 用户私有配置与凭证引用 |
 | 当前成员 | `langsmith` | 其余 8 个连接器 |
 
-**code 模式分流**：`runCodeModeConnectors()` 遍历注册表时用 `if (connector.mode !== "code") { continue; }`（`code-mode.ts:115`）过滤掉全部 personal 连接器，然后对每个 code 连接器调用 `connector.ingest({ repoRoot, windowHours })`（`code-mode.ts:125`）——把仓库根路径与「距上次文档更新的小时窗口」传进去。连接器抛错被 catch 后跳过（`code-mode.ts:126-129`），绝不打断它所服务的更新 run。
+**code 模式分流**：`runCodeModeConnectors()` 遍历注册表时用 `if (connector.mode !== "code") { continue; }`（`code-mode.ts:139-141`）过滤掉全部 personal 连接器，然后对每个 code 连接器调用 `connector.ingest({ repoRoot, windowHours })`（`code-mode.ts:149`）——把仓库根路径与「距上次文档更新的小时窗口」传进去。连接器抛错被 catch 后跳过（`code-mode.ts:146-154`），绝不打断它所服务的更新 run。
 
 **`ConnectorIngestOptions.repoRoot`**（`types.ts:29`）就是为这条通路新增的可选参数：只有 code 连接器消费它。langsmith 的 ingest 开头检查 `options.repoRoot === undefined` 时直接返回 `skipped`（"LangSmith runs in code mode."，`src/connectors/sources/langsmith/index.ts:143-145`）——例如被通用的 `openwiki_ingest_all_connectors` 工具（不传 repoRoot）调用时干净跳过，而不是去读一个它永远不会有 HOME 配置。
 
@@ -198,9 +198,9 @@ export type ConnectorDefinition = {
 | google | `sources/gmail.ts:65-77` | `createGmailConnector()` `:79-83` | 默认 `maxMessages: 100`、`query: "newer_than:1d"`、格式 `full` |
 | hackernews | `sources/hackernews.ts:82-91` | `createHackerNewsConnector()` `:93-97` | 6 种 feed（ask/best/job/new/show/top）默认只抓 `["top", "new"]`（`DEFAULT_FEEDS`，`hackernews.ts:66`） |
 | notion | `sources/mcp.ts:26-38`（工厂） | `createMcpConnector({...})` `registry.ts:41-47` | 工厂固定 `backend: "mcp-stdio"`、`supportsAgenticDiscovery: true` |
-| slack | `sources/slack.ts:150-159` | `createSlackConnector()` `:161-165` | 三种数据流：`recent_messages`、`my_messages_search`、`assistant_search`（`DEFAULT_STREAMS` `slack.ts:128`） |
+| slack | `sources/slack.ts:150-159` | `createSlackConnector()` `:161-165` | 三种合法流：`recent_messages`、`my_messages_search`、`assistant_search`（`VALID_SLACK_STREAMS` `slack.ts:138`），但默认只抓前两种（`DEFAULT_STREAMS` `slack.ts:128-131`） |
 | web-search | `sources/web-search.ts:41-50` | `createWebSearchConnector()` `:52-56` | Tavily：默认 `maxResults: 5`、`searchDepth: "basic"`、`includeAnswer: true` |
-| x | `sources/x.ts:55-64` | `createXConnector()` `:66-70` | 五种流（bookmarks/home_timeline/list_posts/mentions/user_posts，`DEFAULT_STREAMS` `x.ts:47`）；默认 `enabled: false` 需显式启用 |
+| x | `sources/x.ts:55-64` | `createXConnector()` `:66-70` | 五种流全在默认值里（bookmarks/home_timeline/list_posts/mentions/user_posts，`DEFAULT_STREAMS` `x.ts:47-53`）；默认 `enabled: false` 需显式启用 |
 | custom-mcp | `sources/mcp.ts:26-38`（工厂） | `createMcpConnector({...})` `registry.ts:29-36` | 与 notion 共享工厂/mcp-client/mcp-runtime；`MCP_CONNECTOR_IDS` 扩为 `{"custom-mcp", "notion"}`（`mcp-runtime.ts:39`） |
 
 注意：Gmail 的注册键与 `definition.id` 都是 `google`（不是 `gmail`）。
@@ -212,9 +212,9 @@ export type ConnectorDefinition = {
 | git-repo | `repos: [{id, path}]`——本地仓库清单（无默认，空列表 = skipped） | `GitRepoConfig`（`sources/git-repo.ts:22-27`） |
 | google | `maxMessages: 100`、`query: "newer_than:1d"`、`format: "full"`、`labelIds: []` | `gmail.ts:93-101` |
 | hackernews | `feeds: ["top", "new"]`、`maxItemsPerFeed: 30`、`maxResultsPerQuery: 20`、`queries: []` | `hackernews.ts:104-110` |
-| slack | `conversationScanLimit: 500`、三流 + `conversationTypes`（均有默认） | `slack.ts:170-183` |
+| slack | `enabled: false`、`conversationScanLimit: 500`、`maxConversations: 50`、默认两流 + `conversationTypes` | `slack.ts:170-183` |
 | web-search | `maxResults: 5`、`searchDepth: "basic"`、`includeAnswer: true`、`queries: []` | `web-search.ts:63-77` |
-| x | `enabled: false`（**需显式启用**）、五流各自的分页参数 | `x.ts:73-86` |
+| x | `enabled: false`（**需显式启用**）、`listIds: []`、`maxPagesPerStream: 2`（全局预算，不按流）、五流默认 | `x.ts:73-86`；类型 `XConfig` `x.ts:26-32` |
 | notion / custom-mcp | `McpConnectorConfig`：`enabled`（默认 false）、`transport`、`readOnlyOperations`（默认 `[]`）、`allowedTools` | `types.ts:63-76`，磁盘默认值在 `sources/mcp.ts:130-136` |
 
 ### 4.2 langsmith 连接器概览（code，唯一）
@@ -248,7 +248,7 @@ export type ConnectorDefinition = {
 
 ### 4.4 摄取引导（synthesis guidance）对 9 个连接器的覆盖
 
-个人/代码摄取在连接器成功产出后，会按连接器 ID 追加一段合成引导（`createConnectorSynthesisGuidance`，`src/ingestion/ingestion.ts`）：9 个 case 全覆盖——`custom-mcp` 在 `ingestion.ts:379`、`langsmith` 在 `ingestion.ts:403`（要求把 trace dump 聚合为调用次数/延迟/token 总量，区分 Observed/Correlated/Hypothesis 三个置信层级）。新增连接器时这里也要同步加 case。
+个人/代码摄取在连接器成功产出后，会按连接器 ID 追加一段合成引导（`createConnectorSynthesisGuidance`，`src/ingestion/ingestion.ts:366-420`）：9 个 case 全覆盖——`custom-mcp` 在 `ingestion.ts:381`、`langsmith` 在 `ingestion.ts:405`（要求把 trace dump 聚合为调用次数/延迟/token 总量，区分 Observed/Correlated/Hypothesis 三个置信层级）。新增连接器时这里也要同步加 case。
 
 ---
 
@@ -300,7 +300,7 @@ if (outputMode === "repository") {
 
 ## 6. 连接器 I/O 约定 (Connector I/O)
 
-`src/connectors/io.ts` 提供持久化层，所有 personal 连接器数据存放在 `~/.openwiki/connectors/<id>/`（display 路径常量 `openWikiConnectorsDisplayPath`，`src/config/openwiki-home.ts:48`；实际路径函数 `getConnectorDir/getConnectorConfigPath/getConnectorStatePath/getConnectorRawDir/getConnectorLogsDir`，`openwiki-home.ts:53-71`。注意：这些辅助函数在 re-baseline 后位于 `src/config/openwiki-home.ts`，旧文档写的 `src/openwiki-home.ts` 路径已失效）。
+`src/connectors/io.ts` 提供持久化层，所有 personal 连接器数据存放在 `~/.openwiki/connectors/<id>/`（display 路径常量 `openWikiConnectorsDisplayPath`，`src/config/openwiki-home.ts:48`；实际路径函数 `getConnectorDir/getConnectorConfigPath/getConnectorStatePath/getConnectorRawDir/getConnectorLogsDir`，`openwiki-home.ts:53-71`）。
 
 | 函数 | 位置 | 说明 |
 |------|------|------|
@@ -343,8 +343,8 @@ connectors/<id>/
 
 ## 8. 与其他子系统的边界
 
-- **摄取管线**：personal 连接器由 `10-ingestion-and-personal-mode/` 覆盖的摄取流水线驱动；code 连接器由 `src/ingestion/code-mode.ts` 的 `runCodeModeConnectors` 驱动（分流点 `code-mode.ts:115`）。
-- **MCP 子系统**：`mcp-client.ts`/`mcp-runtime.ts` 的协议细节、分页收集与 env 白名单见 02 号文档与计划中的 MCP 子系统篇。
+- **摄取管线**：personal 连接器由 `10-ingestion-and-personal-mode/` 覆盖的摄取流水线驱动；code 连接器由 `src/ingestion/code-mode.ts` 的 `runCodeModeConnectors` 驱动（分流点 `code-mode.ts:139-141`）。
+- **MCP 子系统**：`mcp-client.ts`/`mcp-runtime.ts` 的协议细节、分页收集与 env 白名单见 02 号文档与 `11-mcp-subsystem.md`（含 OpenWiki 作为 MCP server 时暴露的 10 个工具）。
 - **认证**：Gmail/X 的 token 刷新、MCP header 的 OAuth token 注入属 `09-authentication-and-oauth/`。
 - **调度**：LaunchAgent/定时任务如何触发 `ingest all` 属 `11-scheduling-and-ci/`。
 
@@ -375,11 +375,11 @@ connectors/<id>/
 | `src/connectors/sources/git-repo.ts:40-55` | definition + `createGitRepoConnector` | local-git、无认证、agentic discovery |
 | `src/connectors/sources/gmail.ts:65-83` | definition + `createGmailConnector` | 注册键 `google`；双 token |
 | `src/connectors/sources/hackernews.ts:66,82-97` | `DEFAULT_FEEDS` + definition | 默认 `["top", "new"]` |
-| `src/connectors/sources/slack.ts:128,150-165` | `DEFAULT_STREAMS` + definition | 三流；`OPENWIKI_SLACK_USER_TOKEN` |
+| `src/connectors/sources/slack.ts:128-131,138,150-165` | `DEFAULT_STREAMS`/`VALID_SLACK_STREAMS` + definition | 默认两流、合法三流；`OPENWIKI_SLACK_USER_TOKEN` |
 | `src/connectors/sources/web-search.ts:41-56` | definition + `createWebSearchConnector` | `TAVILY_API_KEY` |
-| `src/connectors/sources/x.ts:47,55-70` | `DEFAULT_STREAMS` + definition | 五流；`OPENWIKI_X_ACCESS_TOKEN` |
-| `src/ingestion/code-mode.ts:129-172` | `runCodeModeConnectors` | code 连接器管线；mode 分流 `:115`、`ingest({repoRoot, windowHours})` `:125`、fail-open `:126-129` |
-| `src/ingestion/ingestion.ts:381,403` | `createConnectorSynthesisGuidance` cases | `custom-mcp` / `langsmith` 的合成引导 |
+| `src/connectors/sources/x.ts:47-53,55-70` | `DEFAULT_STREAMS` + definition | 五流默认全开启；`OPENWIKI_X_ACCESS_TOKEN` |
+| `src/ingestion/code-mode.ts:129-172` | `runCodeModeConnectors` | code 连接器管线；mode 分流 `:139-141`、`ingest({repoRoot, windowHours})` `:149`、fail-open `:146-154` |
+| `src/ingestion/ingestion.ts:381,405` | `createConnectorSynthesisGuidance` cases | `custom-mcp` / `langsmith` 的合成引导 |
 | `src/connectors/tools.ts:30-40` | `createOpenWikiConnectorTools` 开头 | repository 门控：`outputMode === "repository"` 返回 `[]`（#444） |
 | `src/connectors/tools.ts:44-218` | 7 个 `DynamicStructuredTool` | 工具 schema 与枚举（MCP enum `:62,:85`；ingest enum 8 值 `:111-120`；raw enum 9 值 `:159-169,:188-198`） |
 | `src/connectors/tools.ts:288-326` | `ingestAllConnectors`、`ingestFailureResult` | `Promise.allSettled` 失败隔离 |

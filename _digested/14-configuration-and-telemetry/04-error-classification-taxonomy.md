@@ -4,8 +4,8 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-09-13"
-updated: "2026-09-13"
-sync_event: "2026-09-13"
+updated: "2026-11-26"
+sync_event: "2026-11-26"
 audience: "需要理解 OpenWiki 错误分类（error classification）闭集、origin 标签机制、归属方（owner）推导规则，以及如何据此排错的工程师或 Agent"
 purpose: "回答「一个抛错如何变成遥测里的 {errorClass,errorDetail,errorStage,errorOwner,httpStatus}，以及每种类别该由谁、沿什么路径排查」"
 owns: "src/telemetry/errors.ts、src/telemetry/taxonomy.ts、src/telemetry/with-run-telemetry.ts 及其在 src/agent/index.ts、src/agent/okf-middleware.ts、src/cli/runners.ts、src/ingestion/ingestion.ts 的接入点"
@@ -148,25 +148,25 @@ provider 原生错误码 → 类别的内部映射，仅用于消歧「长得一
 | 打点 | 位置 | 标签 |
 |------|------|------|
 | 配置解析失败 | `src/agent/index.ts:391` | `tagErrorStage(error, "config")` |
-| run context 构建 | `src/agent/index.ts:596` | `build_error/run_context` |
-| snapshot 生成 | `src/agent/index.ts:605` | `build_error/snapshot` |
-| 模型创建（createModel） | `src/agent/index.ts:608,577`（runners 内 :197 同形） | `build_error/model` |
-| checkpointer 创建 | `src/agent/index.ts:625,587` | `checkpointer_error/create` |
+| run context 构建 | `src/agent/index.ts:593-596` | `build_error/run_context` |
+| snapshot 生成 | `src/agent/index.ts:602-605` | `build_error/snapshot` |
+| 模型创建（createModel） | `src/agent/index.ts:201-206`（repository-native 路径）与 `:608-615`（通用路径） | `build_error/model` |
+| checkpointer 创建 | `src/agent/index.ts:625-630` | `checkpointer_error/create` |
 | agent 组装（createDeepAgent） | `src/agent/index.ts:636` | 纯 build 阶段括号 |
-| 首次流打开（agent.stream） | `src/agent/index.ts:679,648` | `build_error/stream_open`（见 §5 例外） |
+| 首次流打开（agent.stream） | `src/agent/index.ts:679` | `build_error/stream_open`（见 §5 例外） |
 | 流失败后 | `src/agent/index.ts:726` | `tagErrorStage(error, "run")` |
-| checkpoint chmod（流失败路径） | `src/agent/index.ts:766,728` | `checkpointer_error/chmod` |
+| checkpoint chmod（流失败路径） | `src/agent/index.ts:766` | `checkpointer_error/chmod` |
 | 元数据收尾 | `src/agent/index.ts:779` | `inStage("finalize", …)` 纯阶段括号 |
 | OKF 准备（beforeAgent） | `src/agent/okf-middleware.ts:72-75` | `okf_error/<operation>`（build 阶段） |
 | OKF 收尾（afterAgent） | `src/agent/okf-middleware.ts:115-118` | `okf_error/<operation>`（finalize 阶段） |
 
-OKF 的 `<operation>` 是确定性步骤名（`src/agent/wiki-finalizer.ts:28-38`）：准备侧 `migrate`/`provenance_snapshot`，收尾侧 `mermaid`/`index_sync`/`link_validation`/`claims_sources`/`generated_provenance`。注意其中只有 `migrate`/`index_sync`/`mermaid` 在白名单上（§4.1）；其余步骤名会被 `normalizeErrorDetail` 丢弃成 undefined——**类别仍是 `okf_error`，只是没有明细**。
+OKF 的 `<operation>` 是确定性步骤名（`src/agent/wiki-finalizer.ts:28-38`）：准备侧 `migrate`/`provenance_snapshot`，收尾侧 `mermaid`/`index_sync`/`link_validation`/`claims_sources`/`generated_provenance`。v0.6.1 起这 7 个步骤名**全部**在 `FIXED_ERROR_DETAILS.okf_error` 白名单上（§4.1），因此每个确定性操作都能带着自己的明细上报，不再出现「类别有、明细为空」的 okf 事件。
 
-## 4. taxonomy.ts：白名单、明细规范化与 owner 推导（198 行）
+## 4. taxonomy.ts：白名单、明细规范化与 owner 推导（206 行）
 
-### 4.1 FIXED_ERROR_DETAILS：逐族硬编码白名单（:18-52）
+### 4.1 FIXED_ERROR_DETAILS：逐族硬编码白名单（:18-60）
 
-`errorDetail` 的匿名主干——只有这些手写词能离开进程，族外观察值一律丢弃（:8-12）。两个族刻意缺席（`connector_error`/`tool_error`）：其明细是注册表 id 不是固定词，在打点处对着注册表校验（:14-16）。
+`errorDetail` 的匿名主干——只有这些手写词能离开进程，族外观察值一律丢弃（:7-12）。两个族刻意缺席（`connector_error`/`tool_error`）：其明细是注册表 id 不是固定词，在打点处对着注册表校验（:14-16）。
 
 | 族 | 白名单 |
 |----|--------|
@@ -175,36 +175,36 @@ OKF 的 `<operation>` 是确定性步骤名（`src/agent/wiki-finalizer.ts:28-38
 | `provider_error` | `auth`、`rate_limit`、`overloaded`、`server_error`、`timeout`、`quota_exceeded`、`content_filter` |
 | `network_error` | `dns`、`refused`、`reset`、`unreachable` |
 | `build_error` | `run_context`、`snapshot`、`model`、`agent`、`stream_open` |
-| `okf_error` | `migrate`、`index_sync`、`mermaid` |
+| `okf_error` | `migrate`、`provenance_snapshot`、`mermaid`、`index_sync`、`link_validation`、`claims_sources`、`generated_provenance` |
 | `checkpointer_error` | `create`、`persist`、`chmod` |
 | `output_error` | `json_parse`、`schema` |
 | `context_limit_error` / `aborted` | （空——无明细拆分） |
 | `agent_error` | （空——明细走标识符白名单，不是这张表） |
 
-### 4.2 明细规范化 normalizeErrorDetail（:126-147）
+### 4.2 明细规范化 normalizeErrorDetail（:134-155）
 
-四条分支（:126-147）：
+四条分支（:134-155）：
 
-1. 空值 → undefined（:130-132）。
-2. `agent_error` → 走标识符白名单 `isSafeErrorIdentifier`（:136-138）。
-3. 开放族（`OPEN_DETAIL_CLASSES`，:60-63）→ 原样信任（打点处已对注册表校验过）（:140-142）。
-4. 固定族 → 必须在族白名单上，**越界丢弃**（:144-146）。
+1. 空值 → undefined（:138-140）。
+2. `agent_error` → 走标识符白名单 `isSafeErrorIdentifier`（:144-146）。
+3. 开放族（`OPEN_DETAIL_CLASSES`，:68-71）→ 原样信任（打点处已对注册表校验过）（:148-150）。
+4. 固定族 → 必须在族白名单上，**越界丢弃**（:152-154）。
 
-标识符白名单 `SAFE_ERROR_IDENTIFIER`（:73）：ASCII 字母开头、字母数字加单层内部下划线的裸标识符（如 `TypeError`、`AI_APICallError`），上限 64 字符（:85-91）——带路径/URL/空格/用户值的 `.name` 或 `constructor.name` 全部过不了这道门。
+标识符白名单 `SAFE_ERROR_IDENTIFIER`（:81）：ASCII 字母开头、字母数字加单层内部下划线的裸标识符（如 `TypeError`、`AI_APICallError`），上限 64 字符（:93-99）——带路径/URL/空格/用户值的 `.name` 或 `constructor.name` 全部过不了这道门。
 
-### 4.3 deriveOwner：归属方推导（:167-198）
+### 4.3 deriveOwner：归属方推导（:175-206）
 
-`(class, detail, stage)` → owner 的**唯一事实源**（:150-151），编码三条跨属例外（:152-161）：
+`(class, detail, stage)` → owner 的**唯一事实源**（:157-168），编码三条跨属例外（:159-168）：
 
 | 规则 | 结果 |
 |------|------|
-| `config_error` | → `environment`（:173-174） |
-| `filesystem_error` | → `environment`；**stage 为 `finalize` 时 → `openwiki`**（我们自己的 wiki 写路径）（:175-176） |
-| `provider_error` | → `provider`；detail 为 `auth`/`quota_exceeded`（用户的钥匙或账单）→ `environment`（:97-100,:177-180） |
-| `network_error` | → `provider`（到提供商的路径）；detail 为 `dns`/`refused`（用户的机器或网络）→ `environment`（:106-109,:181-184） |
-| `context_limit_error`/`build_error`/`connector_error`/`okf_error`/`checkpointer_error`/`tool_error`/`output_error` | → `openwiki`（:185-192） |
-| `agent_error` | → `unowned`（核心以未命名方式失败）（:193-194） |
-| `aborted` | → `control`（不计入失败率）（:195-196） |
+| `config_error` | → `environment`（:181-182） |
+| `filesystem_error` | → `environment`；**stage 为 `finalize` 时 → `openwiki`**（我们自己的 wiki 写路径）（:183-184） |
+| `provider_error` | → `provider`；detail 为 `auth`/`quota_exceeded`（用户的钥匙或账单）→ `environment`（:105-108,:185-188） |
+| `network_error` | → `provider`（到提供商的路径）；detail 为 `dns`/`refused`（用户的机器或网络）→ `environment`（:114-117,:189-192） |
+| `context_limit_error`/`build_error`/`connector_error`/`okf_error`/`checkpointer_error`/`tool_error`/`output_error` | → `openwiki`（:193-200） |
+| `agent_error` | → `unowned`（核心以未命名方式失败）（:201-202） |
+| `aborted` | → `control`（不计入失败率）（:203-204） |
 
 owner 在记录时刻就推导并显式随事件发出（而非留给 PostHog 派生），正因为这些跨属例外 PostHog 表达不了（`types.ts:27-33`）。
 
@@ -246,7 +246,7 @@ owner 在记录时刻就推导并显式随事件发出（而非留给 PostHog �
 3. `readErrorOrigin`：链上只有 stage-only 标签 → 返回它（:443），无 `errorClass`。
 4. `classifyError`：链展开发现内层 SDK 错误；`extractProviderErrorCode` 未命中 → `extractStatus` 读出 429 → `provider_error/rate_limit`（:174-176）。
 5. 非 stream_open 标签 → 无改判例外；`normalizeErrorDetail("provider_error","rate_limit")` 在白名单（taxonomy.ts:34）→ 保留。
-6. `firstStatusInChain` → `429`；`deriveOwner("provider_error","rate_limit","run")` → `provider`（:177-180，rate_limit 不在 environment 集里）。
+6. `firstStatusInChain` → `429`；`deriveOwner("provider_error","rate_limit","run")` → `provider`（:185-188，rate_limit 不在 environment 集里）。
 7. 事件五字段：`{provider_error, rate_limit, run, provider, 429}` → 记录后重抛（with-run-telemetry.ts:83）。
 
 **例 B：mermaid 校验失败**（收尾管线）
@@ -254,8 +254,8 @@ owner 在记录时刻就推导并显式随事件发出（而非留给 PostHog �
 1. `validateWikiMermaid` 抛错 → `finalizeWikiArtifacts` 的 `runOperation("mermaid",…)` 包裹（wiki-finalizer.ts:263）→ `inStage("finalize", task, {errorClass:"okf_error", errorDetail:"mermaid"})`（okf-middleware.ts:115-118）。
 2. `readErrorOrigin`：链上第一链接即带自有族类 → 治理标签 = `{stage:"finalize", errorClass:"okf_error", errorDetail:"mermaid"}`。
 3. 标签优先于原始分类（:652-657）→ 类和明细都来自抛出点。
-4. `normalizeErrorDetail("okf_error","mermaid")` → 白名单命中（taxonomy.ts:43）→ 保留。
-5. `deriveOwner`：okf_error → `openwiki`（:185-192）。
+4. `normalizeErrorDetail("okf_error","mermaid")` → 白名单命中（taxonomy.ts:46）→ 保留。
+5. `deriveOwner`：okf_error → `openwiki`（:193-200）。
 6. 事件五字段：`{okf_error, mermaid, finalize, openwiki, undefined}`——`httpStatus` 为 undefined（链上无状态）。
 
 **例 C：分类器不认识的错误**（无 provider 信号、无标签）
@@ -263,7 +263,7 @@ owner 在记录时刻就推导并显式随事件发出（而非留给 PostHog �
 1. 无插桩点或只有 stage 括号的路径抛出 unknown `MyLibError`。
 2. `classifyError`：整链无信号 → `{agent_error}`（:145）。
 3. 类别为残差 → 明细改读 `innermostErrorName`（:663-666）：链上最深的有白名单名的链接 = `MyLibError`（`.name` 过 `SAFE_ERROR_IDENTIFIER`）。
-4. `deriveOwner("agent_error", …)` → `unowned`（:193-194）。
+4. `deriveOwner("agent_error", …)` → `unowned`（:201-202）。
 5. 事件五字段：`{agent_error, MyLibError, <stage 或 undefined>, unowned, undefined}`——这个桶出现在仪表盘上就是要补分类规则的信号。
 
 ## 7. 排错应用：错误类别 → 排查路径对照
@@ -286,9 +286,8 @@ owner 在记录时刻就推导并显式随事件发出（而非留给 PostHog �
 | `context_limit_error` | openwiki | 输入超出上下文窗口——缩小仓库范围（`.openwikiignore`）、减少 connector 证据；持续出现说明分块策略该改，报 issue |
 | `build_error`（run_context / snapshot / model / agent / stream_open） | openwiki | run 组装失败——报 issue，附 `error_detail` 与 `http_status`；stream_open 带状态时实为 provider 错（§5 例外已自动改判） |
 | `connector_error`（连接器 id） | openwiki | 理论盲区（fail-open 设计，§6.1）；出现在事件里说明拉取抛错逃逸——对照 `../08-connectors-and-data-sources/` 查该连接器配置 |
-| `okf_error`（migrate / index_sync） | openwiki | OKF 迁移或索引同步失败——报 issue |
+| `okf_error`（migrate / provenance_snapshot / index_sync / link_validation / claims_sources / generated_provenance） | openwiki | OKF 迁移、provenance 快照、索引同步、链接校验或 claim 证据同步失败——报 issue，带 `error_detail` 即可定位到具体操作 |
 | `okf_error`（**mermaid**） | openwiki | mermaid 图校验失败（finalize 阶段）——见 `../05-generation-lifecycle/03-finalize-pipeline.md` 的收尾管线 |
-| `okf_error`（其他步骤名，明细为空） | openwiki | `link_validation`/`claims_sources`/`generated_provenance`/`provenance_snapshot` 不在白名单（§3.4）——类别可靠、明细省略 |
 | `checkpointer_error`（create / persist / chmod） | openwiki | 检查点 SQLite 文件创建/写入/权限失败——查 `~/.openwiki` 目录权限与磁盘 |
 | `tool_error`（工具名） | openwiki | 工具抛错逃逸到失败路径（罕见，§6.1）——报 issue 并注明工具名 |
 | `output_error`（json_parse / schema） | openwiki | 模型输出无法解析/不合 schema——偶发可重试；频发报 issue（提示词或 schema 该调） |
@@ -314,14 +313,14 @@ owner 在记录时刻就推导并显式随事件发出（而非留给 PostHog �
 | `src/telemetry/errors.ts:641-680` | `describeErrorForTelemetry` | 五字段总装 |
 | `src/telemetry/errors.ts:698-714` | `streamOpenDisguisesProvider` | stream_open 伪装 provider 错的改判例外 |
 | `src/telemetry/taxonomy.ts:18-60` | `FIXED_ERROR_DETAILS` | 逐族明细白名单 |
-| `src/telemetry/taxonomy.ts:68-71,:126-147` | `OPEN_DETAIL_CLASSES` / `normalizeErrorDetail` | 开放族 + 越界丢弃 |
+| `src/telemetry/taxonomy.ts:68-71,:134-155` | `OPEN_DETAIL_CLASSES` / `normalizeErrorDetail` | 开放族 + 越界丢弃 |
 | `src/telemetry/taxonomy.ts:81-99` | `SAFE_ERROR_IDENTIFIER` / `isSafeErrorIdentifier` | 裸标识符白名单（≤64 字符） |
 | `src/telemetry/taxonomy.ts:175-206` | `deriveOwner` | owner 唯一事实源 + 三条跨属例外 |
 | `src/telemetry/with-run-telemetry.ts:17-37` | `RunTelemetryContext` | provider/outcome 的可变发布通道 |
 | `src/telemetry/with-run-telemetry.ts:59-85` | `withRunTelemetry` | 单一遥测边界（失败记录后重抛） |
 | `src/telemetry/types.ts:12-25,:40-49` | 类目/owner/stage 闭集 | 13 族 + 5 owner + 4 stage |
-| `src/agent/index.ts:391,:555-648,:685,:725-738` | stage 打点群 | config/build/run/finalize 全部 inStage/tagErrorStage 调用 |
+| `src/agent/index.ts:201-206,:391,:593-636,:679-688,:726,:766,:779` | stage 打点群 | config/build/run/finalize 全部 inStage/tagErrorStage 调用 |
 | `src/agent/okf-middleware.ts:72-75,:78-91,:115-118` | okf_error 打点 + 可达性注记 | OKF 自有族标签与三类盲区 |
-| `src/agent/wiki-finalizer.ts:28-38` | `WikiPreparationOperation` 等 | okf_error 明细的步骤名来源 |
+| `src/agent/wiki-finalizer.ts:28-38` | `WikiPreparationOperation` / `WikiFinalizerOperation` | okf_error 明细的 7 个步骤名来源 |
 | `src/cli/runners.ts:289-298` | `withRunTelemetry` 调用 | CLI 边界 |
 | `src/ingestion/ingestion.ts:192-220` | `withRunTelemetry("update",…)` | 摄取边界 + 单源失败 status:"error" |

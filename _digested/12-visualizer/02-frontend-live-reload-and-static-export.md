@@ -4,10 +4,10 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-09-13"
-updated: "2026-09-13"
-sync_event: "2026-09-13"
+updated: "2026-11-26"
+sync_event: "2026-11-26"
 audience: "需要理解可视化器浏览器端渲染管线、内容安全策略、live reload 布局保持与静态导出协议的工程师/Agent"
-purpose: "解释 SPA 模板的 CSP 与 CDN 加载策略、force-graph 自绘节点与 declutter 标签、阅读器的净化与 mermaid 浏览器渲染、SSE reload 的拓扑签名保布局机制，以及静态导出的 5 文件协议"
+purpose: "解释 SPA 模板的 CSP 与 CDN 加载策略、force-graph 自绘节点与 declutter 标签、阅读器的净化与 mermaid 浏览器渲染、内链改写（含 percent-encoded 非 ASCII 名）、SSE reload 的拓扑签名保布局机制、`#page=<id>` 深链，以及静态导出的 5 文件协议"
 owns: "src/visualize/page.ts、src/visualize/client.ts、src/visualize/client-lib.ts、src/visualize/static-export.ts 的浏览器端语义（styles.css 仅述结构性约定）"
 update_when:
   - "CSP 指令、CDN 库版本或 SRI 哈希变化时"
@@ -22,7 +22,7 @@ out_of_scope:
 
 # 02 — 前端、live reload 与静态导出 (Frontend, Live Reload and Static Export)
 
-可视化器的浏览器端是一个无构建步骤的单页应用（SPA）：`page.ts` 在服务端渲染出 HTML 模板，四个第三方库从 jsDelivr CDN 以固定版本 + 子资源完整性（Subresource Integrity，SRI）哈希加载，业务代码是编译产物 `/client.js` + `/client-lib.js`。这一篇讲四件事：页面模板的内容安全策略（Content-Security-Policy，CSP）与加载面、force-graph 自绘渲染与标签降噪、SSE live reload 如何在不重置布局的前提下刷新图，以及 `--export` 产出的静态导出（static export）如何脱离 OpenWiki 独立托管。命令面与服务端半边见 [01 号文档](01-visualize-command-and-wikigraph.md)。
+可视化器的浏览器端是一个无构建步骤的单页应用（SPA）：`page.ts` 在服务端渲染出 HTML 模板，四个第三方库从 jsDelivr CDN 以固定版本 + 子资源完整性（Subresource Integrity，SRI）哈希加载，业务代码是编译产物 `/client.js` + `/client-lib.js`。这一篇讲五件事：页面模板的内容安全策略（Content-Security-Policy，CSP）与加载面、force-graph 自绘渲染与标签降噪、SSE live reload 如何在不重置布局的前提下刷新图、`#page=<id>` 片段如何直达指定页，以及 `--export` 产出的静态导出（static export）如何脱离 OpenWiki 独立托管。命令面与服务端半边见 [01 号文档](01-visualize-command-and-wikigraph.md)。
 
 ## 1. SPA 骨架：严格 CSP 与固定版本 CDN（`src/visualize/page.ts`）
 
@@ -37,7 +37,7 @@ out_of_scope:
 | `<html>` 标记 | 无 | `data-static-export="true"`（`:32`）——客户端静态模式的唯一开关 |
 | live 徽标 | `Live`（蓝色 pill） | `Static` + `stale` 灰色样式（`:23-24`、`70`） |
 
-页面本体是四栏布局：顶栏（品牌 + live 徽标 + 图开关 + 主题开关）、侧栏索引 `#sidebar`、图面板 `#graph`（内含 hint/legend overlay）、可拖拽 `#splitter`、阅读器 `#detail`，以及一个 toast（`src/visualize/page.ts:63-94`）。模块脚本 `<script type="module" src="...">` 收尾（`:95`）。
+页面本体是「顶栏 + 一列主行」的结构：顶栏（品牌 + live 徽标 + 图开关 + 主题开关）、主行内的侧栏索引 `#sidebar`、图面板 `#graph`（内含 hint/legend overlay）、可拖拽 `#splitter`、阅读器 `#detail`，以及主行之外的 toast（`src/visualize/page.ts:63-94`）。模块脚本 `<script type="module" src="...">` 收尾（`:95`）。
 
 模板里每个带 `id` 的元素都是 `client.ts` 按 id 抓取的挂钩点，一一对应、无事件委托：
 
@@ -87,7 +87,7 @@ CSP 是第二道防线而非唯一防线：wiki 正文走 marked → DOMPurify �
 | dompurify | 3.4.12 | HTML 净化 | `src/visualize/page.ts:50-54` |
 | mermaid | 11.16.0 | 浏览器端图渲染 | `src/visualize/page.ts:55-59` |
 
-客户端代码不打包这些库：`client.ts` 用 `declare const ForceGraph/marked/mermaid/DOMPurify` 声明全局（`src/visualize/client.ts:248`、`253`、`261`、`271`），四个全局在运行时由 CDN `<script>` 标签提供。构建走独立的 `tsconfig.client.json`（只收 `client.ts`、补 DOM lib，主 tsconfig 则把 `client.ts` 排除在 Node 产物之外）：产出的 `client.js`/`client-lib.js` 是 ES module——页面以 `<script type="module" src="...">` 加载，`client.ts` 对 `client-lib.js` 的相对导入在浏览器里原样成立。
+客户端代码不打包这些库：`client.ts` 用 `declare const ForceGraph/marked/mermaid/DOMPurify` 声明全局（`src/visualize/client.ts:248`、`253`、`261`、`271`），四个全局在运行时由 CDN `<script>` 标签提供。构建走独立的 `tsconfig.client.json`（只收 `client.ts`、补 DOM lib，主 tsconfig 则把 `client.ts` 排除在 Node 产物之外）：产出的 `client.js`/`client-lib.js` 是 ES module——页面以 `<script type="module" src="...">` 加载，`client.ts` 对 `client-lib.js` 的相对导入在浏览器里原样成立。浏览器侧只从纯类型模块 `graph-types.ts` 取图类型（`src/visualize/client.ts:1`、`src/visualize/client-lib.ts:1`），不 import 承载 Node 文件系统加载的 `graph.ts`，因此客户端类型检查不会把 `node:fs`/`node:path` 拖进编译单元（`graph.ts:6` 再 `export type` 转发同一批类型，Node 侧导入面不变）。
 
 ## 2. 图渲染：force-graph 自绘节点（`src/visualize/client.ts`）
 
@@ -148,31 +148,31 @@ const html = DOMPurify.sanitize(marked.parse(stripFrontmatter(n.body)));
 
 ### 3.2 wiki 内链改应用内导航
 
-`rewriteLinks`（`src/visualize/client.ts:726-751`）在正文渲染后扫描 `.md a`：只处理 `href` 以 `.md` 结尾或含 `.md#` 的链接；以**当前页面所在目录**为基准，用 `normalize` 折叠 `.`/`..` 段解析出目标 id（`src/visualize/client-lib.ts:182-191`），去掉 `.md` 后缀与锚点。目标确实存在于图中才改写：加 `wikilink` 类、`preventDefault` 并 `selectNode` 应用内跳转；解析不到目标的链接保持原样不动。于是「wiki 内的相对链接」变成单页应用内的节点切换，坏链则维持浏览器默认行为。
+`rewriteLinks`（`src/visualize/client.ts:726-751`）在正文渲染后扫描 `.md a`：只处理 `href` 以 `.md` 结尾或含 `.md#` 的链接；`href` 先经 `decodeURIComponent` 解码一次（解码失败保留原文，`src/visualize/client.ts:735-741`）——marked 会把非 ASCII 目标 percent-encode，而节点 id 用原始文件名，不先解码就永远匹配不上（点下去会落到浏览器原生导航，服务端只回 404）；随后以**当前页面所在目录**为基准，用 `normalize` 折叠 `.`/`..` 段解析出目标 id（`src/visualize/client-lib.ts:182-191`），去掉 `.md` 后缀与锚点。目标确实存在于图中才改写：加 `wikilink` 类、`preventDefault` 并 `selectNode` 应用内跳转；解析不到目标的链接保持原样不动。于是「wiki 内的相对链接」变成单页应用内的节点切换，坏链则维持浏览器默认行为。解码规则与图构建侧 `linkNodes` 一致（[01 号文档 §3.5](01-visualize-command-and-wikigraph.md)），所以「图里有这条边」与「阅读器里能点」不会分叉。
 
 ### 3.3 mermaid：浏览器端渲染，主题切换重 initialize
 
 `renderMermaid`（`src/visualize/client.ts:756-773`）把阅读器里 marked 产出的 `code.language-mermaid` 代码块换包成 `pre.mermaid`（`textContent` 赋值天然转义），存在至少一个块时调 `mermaid.run` 就地渲染成 SVG；渲染失败被 try/catch 吞掉、保留源码块——图挂了不影响读文。
 
-mermaid 的初始化有两处：bootstrap 时 `initialize({ startOnLoad: false, theme: "dark" })`（`src/visualize/client.ts:986`）；主题切换时 `toggleTheme`（`src/visualize/client.ts:780-790`）把 `data-theme` 在 dark/light 间翻转后**重新 `initialize`**（`theme: "dark" | "neutral"`，`:778-781`），再同步画布背景色并重渲染当前打开的页——已渲染的 mermaid SVG 不会自动换肤，重渲染是换肤生效的途径。节点/标签颜色则不用重来：painter 每帧实时读 CSS 变量（`cssVar`，`src/visualize/client.ts:371-387`），换主题即刻生效。
+mermaid 的初始化有两处：bootstrap 时 `initialize({ startOnLoad: false, theme: "dark" })`（`src/visualize/client.ts:986`）；主题切换时 `toggleTheme`（`src/visualize/client.ts:780-790`）把 `data-theme` 在 dark/light 间翻转后**重新 `initialize`**（`theme: "dark" | "neutral"`，`:784-787`），再同步画布背景色并重渲染当前打开的页——已渲染的 mermaid SVG 不会自动换肤，重渲染是换肤生效的途径。节点/标签颜色则不用重来：painter 每帧实时读 CSS 变量（`cssVar`，`src/visualize/client.ts:371-387`），换主题即刻生效。
 
 **划界**：这里只是「浏览器拿到合法 mermaid 围栏后怎么画」。围栏在服务端的校验、失败降级与修复注释协议属于 finalize 管线，见 `05-generation-lifecycle/03-finalize-pipeline.md`；agent 被如何约束着写出这些围栏，见 `04-agent-and-prompting/02-prompting-strategy.md`。
 
-## 4. live reload 客户端：拓扑签名保布局
+## 4. 页面装载与 live reload 客户端：拓扑签名保布局、`#page` 深链
 
 ### 4.1 SSE 订阅
 
-`connectSSE`（`src/visualize/client.ts:899-912`）开一条 `EventSource("/events")`：收到 `reload` 事件就 `load(false)` 拉新图并弹 toast「Wiki updated」（1.8 秒自动消退，`:870-875`）；`onerror` 把顶栏徽标置灰显示 `Reconnecting`，`onopen` 恢复 `Live`——与服务端 `retry: 2000` 的自动重连配合（[01 号文档 §4](01-visualize-command-and-wikigraph.md)）。**只有 live 模式订阅**：bootstrap 末尾 `load(true).then(() => { if (!isStaticExport) connectSSE(); })`（`src/visualize/client.ts:988-990`）。
+`connectSSE`（`src/visualize/client.ts:899-912`）开一条 `EventSource("/events")`：收到 `reload` 事件就 `load(false)` 拉新图并弹 toast「Wiki updated」（1.8 秒自动消退，`toast` 在 `src/visualize/client.ts:889-894`）；`onerror` 把顶栏徽标置灰显示 `Reconnecting`，`onopen` 恢复 `Live`——与服务端 `retry: 2000` 的自动重连配合（[01 号文档 §4](01-visualize-command-and-wikigraph.md)）。**只有 live 模式订阅**：bootstrap 末尾 `load(true).then(() => { if (!isStaticExport) connectSSE(); })`（`src/visualize/client.ts:988-990`）。
 
 ### 4.2 拓扑签名：不变则完全不动
 
-`load`（`src/visualize/client.ts:798-843`）每次都重建侧栏与图例，但对**力导向布局**极其克制。核心是拓扑签名 `signature`（`src/visualize/client-lib.ts:155-165`）：把全部节点 id 排序 `|` 连接、全部有向边 `source>target` 排序 `|` 连接，再 `::` 拼接——一个纯拓扑指纹，**正文修改不改签名**。三分支：
+`load`（`src/visualize/client.ts:798-832`）每次都重建侧栏与图例，但对**力导向布局**极其克制。核心是拓扑签名 `signature`（`src/visualize/client-lib.ts:155-165`）：把全部节点 id 排序 `|` 连接、全部有向边 `source>target` 排序 `|` 连接，再 `::` 拼接——一个纯拓扑指纹，**正文修改不改签名**。三分支：
 
 1. **首次加载**：`initGraph` 建实例、喂数据、自设初始缩放 `(4/∛n)×1.35`（比 force-graph 按节点数的默认值略近，且自设后其自动缩放不再生效，`src/visualize/client.ts:811-820`）；
 2. **签名变化**（新增/删除页面或链接）：向 force-graph 重新喂数据（`src/visualize/client.ts:821-826`）；
 3. **签名未变**（只是改了某页内容）：**连 graphData 都不重喂**，布局与视口原封不动（`src/visualize/client.ts:827`）。
 
-无论哪个分支，只要当前打开的页还存在就重渲染阅读器（内容可能变了，`src/visualize/client.ts:822-823`）。
+无论哪个分支，只要当前打开的页还存在就重渲染阅读器（内容可能变了，`src/visualize/client.ts:830`）；首次加载另有优先级：URL 片段点名了某页时它压过「已打开页」与默认入口页（`src/visualize/client.ts:828-831`，见 §4.4）。
 
 哪些源 wiki 编辑会落进哪条分支，可以归纳成一张小表：
 
@@ -186,13 +186,25 @@ mermaid 的初始化有两处：bootstrap 时 `initialize({ startOnLoad: false, 
 
 ### 4.3 节点对象跨 reload 复用保坐标
 
-签名变化分支之所以「重喂数据却不跳」，靠的是 `buildGraphData`（`src/visualize/client.ts:849-884`）的对象复用：模块级 `nodeById: Map<string, GraphNode>` 持久持有渲染节点对象，reload 时已消失的 id 被删掉，幸存的 id **复用同一个对象**只就地更新 title/type/size/color 等展示字段——force-graph 的模拟坐标 `x/y` 挂在对象上，对象不换、坐标就留住，新节点才从头模拟。链接以字符串端点形式喂入，force-graph 在摄取时就地解析成节点对象引用（`src/visualize/client.ts:77-92`、`859-863`）。这是 `GraphNode` 接口注释里写明的设计意图：「its identity survives reloads so positions and camera stay put」（`src/visualize/client.ts:16-19`）。
+签名变化分支之所以「重喂数据却不跳」，靠的是 `buildGraphData`（`src/visualize/client.ts:849-884`）的对象复用：模块级 `nodeById: Map<string, GraphNode>` 持久持有渲染节点对象，reload 时已消失的 id 被删掉，幸存的 id **复用同一个对象**只就地更新 title/type/size/color 等展示字段——force-graph 的模拟坐标 `x/y` 挂在对象上，对象不换、坐标就留住，新节点才从头模拟。链接以字符串端点形式喂入，force-graph 在摄取时就地解析成节点对象引用（`src/visualize/client.ts:77-92`、`878-882`）。这是 `GraphNode` 接口注释里写明的设计意图：「its identity survives reloads so positions and camera stay put」（`src/visualize/client.ts:16-19`）。
+
+### 4.4 深链（deep link）：`#page=<id>` 直达指定页
+
+URL 片段（fragment）`#page=<id>`（例如 `http://127.0.0.1:4321/#page=architecture/overview`）让分享出去的链接直接落在某一页上，而不是默认入口页。解析在 `requestedPageId`（`src/visualize/client.ts:834-843`）：
+
+- 去掉开头的 `#` 后交给 `URLSearchParams` 取 `page` 参数（顺带完成 percent-decode），只有 `byId(raw)` 命中当前图里的节点才返回该 id，否则返回 `null`；
+- 只在**首次加载**生效：`load` 在 `firstTime` 为真时读片段，命中则 `selectNode(requested)`——高亮邻域、渲染阅读器、侧栏 `active` 高亮，相机不动；未命中则退回原路径「已打开页 → 默认入口页」（`src/visualize/client.ts:828-831`）；
+- 默认入口页的 anchor 选择规则不变（`/quickstart/i` → `index|overview|home` → 首个节点，见 §2.2），未知 id 与完全不带片段的行为一致；
+- 片段从不发给服务器（浏览器只把它留在本地地址栏），所以固定 7 路由、CSP 与 `req.url` 派生规则都不受影响（[01 号文档 §2.3](01-visualize-command-and-wikigraph.md)）；静态导出同样支持，因为整条链路只读 `location.hash` 与已加载的图；
+- SSE reload 不重新读片段（`firstTime` 为假），后台刷新不会把读者从当前页拽回片段指向的页。
+
+回归测试在 `test/visualize/client-interaction.test.ts:260-284`：无片段打开默认入口页、`#page=<id>` 选中并高亮该页、未知 id 回退默认入口页。
 
 ## 5. 图面板：可拖拽 splitter、一键折叠与 overlay 限位
 
 ### 5.1 拖拽调宽与 localStorage 持久化
 
-`initGraphPanelControls`（`src/visualize/client.ts:922-979`）在 bootstrap 阶段即接好图面板的两种交互。拖拽 splitter 时实时计算新宽度，带双重限位：最小 80px，最大「主行宽 − 侧栏宽 − 260px」——永远给阅读器留 260px（`src/visualize/client.ts:961-962`）。宽度以**百分比**存进 `localStorage`（键 `openwiki-graph-width`，默认 `"50%"`），且分母刻意取含侧栏的整行宽度——与 CSS flex 对 `%` 的解析基准一致，否则侧栏占比变化时图会悄悄挤进阅读器（`src/visualize/client.ts:928-931`、`944-951` 的注释推导）；松开鼠标才落盘（`src/visualize/client.ts:972-978`）。
+`initGraphPanelControls`（`src/visualize/client.ts:922-979`）在 bootstrap 阶段即接好图面板的两种交互。拖拽 splitter 时实时计算新宽度，带双重限位：最小 80px，最大「主行宽 − 侧栏宽 − 260px」——永远给阅读器留 260px（`src/visualize/client.ts:961-962`）。宽度以**百分比**存进 `localStorage`（键 `openwiki-graph-width`，默认 `"50%"`），且分母刻意取含侧栏的整行宽度——与 CSS flex 对 `%` 的解析基准一致，否则侧栏占比变化时图会悄悄挤进阅读器（`src/visualize/client.ts:928-931`、`965-969` 的注释推导）；松开鼠标才落盘（`src/visualize/client.ts:972-978`）。
 
 ### 5.2 一键折叠
 
@@ -278,11 +290,15 @@ openwiki visualize openwiki --export dist/visualizer-site
 | `src/visualize/client.ts:660-671` | `selectNode` | 高亮 + 阅读器，不动相机 |
 | `src/visualize/client.ts:676-721` | `renderReader` | 眉标/标题/正文/反链组装 |
 | `src/visualize/client.ts:697-700` | 净化管线 | DOMPurify.sanitize(marked.parse(stripFrontmatter)) |
-| `src/visualize/client.ts:726-751` | `rewriteLinks` | wiki 内链改应用内导航 |
+| `src/visualize/client.ts:726-751` | `rewriteLinks` | wiki 内链（含 percent-encoded 非 ASCII 名）改应用内导航 |
+| `src/visualize/client.ts:735-741` | 内链解码 | `decodeURIComponent` 一次，失败保留原文 |
 | `src/visualize/client.ts:756-773` | `renderMermaid` | language-mermaid → pre.mermaid → mermaid.run，失败非致命 |
 | `src/visualize/client.ts:780-790` | `toggleTheme` | 重 initialize mermaid 主题 + 背景色同步 |
-| `src/visualize/client.ts:798-843` | `load` | 拉图、anchor 选择、签名三分支 |
+| `src/visualize/client.ts:798-832` | `load` | 拉图、anchor 选择、签名三分支、打开优先级 |
+| `src/visualize/client.ts:828-831` | 打开优先级 | `#page` 片段 → 已打开页 → 首次加载的默认入口页 |
+| `src/visualize/client.ts:834-843` | `requestedPageId` | 解析 `#page=<id>`，命中图内节点才返回 |
 | `src/visualize/client.ts:849-884` | `buildGraphData` | 节点对象复用保坐标 |
+| `src/visualize/client.ts:889-894` | `toast` | 状态提示，1.8 秒自动消退 |
 | `src/visualize/client.ts:899-912` | `connectSSE` | EventSource + Live/Reconnecting 徽标 |
 | `src/visualize/client.ts:922-979` | `initGraphPanelControls` | splitter 拖拽限位、% 基准、折叠、localStorage 两键 |
 | `src/visualize/client.ts:983-990` | bootstrap | mermaid/marked 初始化、静态模式不连 SSE |
@@ -292,6 +308,7 @@ openwiki visualize openwiki --export dist/visualizer-site
 | `src/visualize/client-lib.ts:125-133` | `shouldShowNodeLabel` | declutter：仅 hover/选中邻域 |
 | `src/visualize/client-lib.ts:155-165` | `signature` | 拓扑签名（节点 id + 有向边） |
 | `src/visualize/client-lib.ts:171-191` | `stripFrontmatter`/`normalize` | 正文剥离、相对路径折叠解析 |
+| `src/visualize/graph-types.ts:99-127` | `WikiGraph` | 纯类型模块：浏览器与 Node 共用的图结构，不依赖 Node 加载器 |
 | `src/visualize/static-export.ts:33-40` | `loadVisualizerAssets` | 按 import.meta.url 读同目录编译产物 |
 | `src/visualize/static-export.ts:46-80` | `exportStaticVisualizer` | 一次性快照 + 5 文件并发写 |
 | `src/visualize/server.ts:172` | CSP 响应头 | live 模式 CSP 交付点 |

@@ -4,8 +4,8 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-09-13"
-updated: "2026-09-13"
-sync_event: "2026-09-13"
+updated: "2026-11-26"
+sync_event: "2026-11-26"
 audience: "需要理解 OpenWiki 引导状态如何持久化、读取、归一化和判定完成的人，以及需要区分 onboarding 数据层与凭据向导 UX 层职责的开发者"
 purpose: "解释 setup/onboarding.ts 如何读写 onboarding.json 与 INSTRUCTIONS.md、如何归一化历史格式、以及「引导完成」的三种判定路径"
 owns: "`src/setup/onboarding.ts`（482 行）的完整逻辑，包括 onboarding.json 的 schema 与归一化规则、INSTRUCTIONS.md（全局与仓库级）的读写、完成判定函数族，以及它被摄取/调度/agent/向导各方的消费关系。"
@@ -26,10 +26,7 @@ out_of_scope:
 
 `src/setup/onboarding.ts` 是 OpenWiki 引导状态（onboarding state）的**数据层**：它拥有 `~/.openwiki/onboarding.json` 的 schema、读写与归一化（normalize），`~/.openwiki/INSTRUCTIONS.md`（个人模式 wiki 目标）与 `<repo>/openwiki/INSTRUCTIONS.md`（代码模式 wiki 目标）两个指令文件的读写，以及「引导是否完成」的三种判定函数。它本身没有任何交互逻辑——终端向导（credential wizard）属于 UI 层，见第 10 节的分工。
 
-2026-09-13 re-baseline 后，本文件从 `src/onboarding.ts`（478 行）迁移至 `src/setup/onboarding.ts`（482 行），**角色基本不变**。实质差异只有两处：
-
-1. **import 重指向**：`OPEN_WIKI_DIR` 改自 `../config/constants.js`，`ensureOpenWikiHome`/`openWikiHomeDir` 改自 `../config/openwiki-home.js`，`ConnectorId` 改自 `../connectors/types.js`（`src/setup/onboarding.ts:4-9`）。
-2. **isKnownConnectorId 接受 custom-mcp**：白名单从 7 个连接器扩到 8 个，新增 `custom-mcp`（:461）；仍不含 `langsmith`（见第 9 节的边界说明）。
+文件共 482 行，依赖面很小：`OPEN_WIKI_DIR` 来自 `../config/constants.js`，`ensureOpenWikiHome`/`openWikiHomeDir` 来自 `../config/openwiki-home.js`，`ConnectorId` 类型来自 `../connectors/types.js`（`src/setup/onboarding.ts:1-9`）。白名单函数接受 8 个连接器（含 `custom-mcp`，:461），**不含** `langsmith`（见第 9 节的边界说明）。
 
 ---
 
@@ -182,7 +179,7 @@ if (wikiGoal?.trim()) {
 
 **⑤ sourceInstances 解析**（:306-334）：要求 `connectorId` 是字符串且在白名单内；`id` 缺失或空时用 `createSourceInstanceId` 生成 `<connectorId>-<序号>`（:424-429，如 `notion-1`）。
 
-**⑥ 旧格式升级：sources → sourceInstances**（:336-348）：若 `sourceInstances` 数组为空而 `sources` 对象有内容（re-baseline 前的单连接器格式），把每个 source 提升为实例，`id` 直接取连接器 ID。
+**⑥ 旧格式升级：sources → sourceInstances**（:336-348）：若 `sourceInstances` 数组为空而 `sources` 对象有内容（旧的单连接器格式），把每个 source 提升为实例，`id` 直接取连接器 ID。
 
 **⑦ 调度归并与剥离**（:350-360）：全局 `ingestionSchedule` 缺失时，取第一个带 `schedule` 的实例的调度（:350-354）；随后把所有实例上的 `schedule` 字段删除（:356-360）——调度只保留全局一份，实例级调度是旧格式残留。
 
@@ -218,7 +215,7 @@ export function isOnboardingComplete(config: OpenWikiOnboardingConfig): boolean 
 
 两个 sync 变体都遵循同一防御姿态：onboarding.json 不存在、JSON 解析失败、或归一化抛错时**一律返回 false**（:183-185、:202-204、:220-222）——「无法确认完成」等价于「未完成」，让启动流程安全地回落到向导。
 
-最典型的消费方是向导的启动门（`src/setup/credentials/steps.ts:96-97`）：
+最典型的消费方是向导的启动门（`src/setup/credentials/steps.ts:95-97`）：
 
 ```typescript
 return mode === "code"
@@ -241,14 +238,14 @@ return mode === "code"
 消费方地图：
 
 - `src/agent/utils.ts:97`：agent 运行的 `readRunWikiGoal` 在 `outputMode === "repository"` 时读仓库级文件，否则读全局 onboarding 配置的 wikiGoal——同一套 agent 消息装配在两种模式下拿到正确的用户目标。
-- `src/setup/credentials/use-init-setup.ts:2689`：向导在代码模式保存时，把 wikiGoal 写进仓库，同时在 onboarding.json 里将 `wikiGoal` 置 `undefined`（:2555-2558）——与第 5 节的拆分持久化互补，代码模式的「真相源」彻底落到仓库里。
-- `src/connectors/sources/langsmith/repo-config.ts:211-214`：LangSmith 仓库配置的写入注释明确说明它**模仿** `saveRepositoryWikiInstructions` 的「固定路径直写」模式，使路径包含（containment）成立。
+- `src/setup/credentials/use-init-setup.ts:2689`：向导在代码模式保存时，把 wikiGoal 写进仓库，同时在 onboarding.json 里将 `wikiGoal` 置 `undefined`（`use-init-setup.ts:2691-2694`）——与第 5 节的拆分持久化互补，代码模式的「真相源」彻底落到仓库里。
+- `src/connectors/sources/langsmith/repo-config.ts:212-215`：LangSmith 仓库配置的写入注释明确说明它**模仿** `saveRepositoryWikiInstructions` 的「固定路径直写」模式，使路径包含（containment）成立。
 
 ---
 
 ## 9. 连接器白名单与 custom-mcp (Connector Whitelist and custom-mcp)
 
-`isKnownConnectorId`（:459-470）是归一化链条的守门人，决定哪些 `sources` 键与 `sourceInstances` 条目能存活。re-baseline 后白名单为 **8 个**：
+`isKnownConnectorId`（:459-470）是归一化链条的守门人，决定哪些 `sources` 键与 `sourceInstances` 条目能存活。白名单为 **8 个**：
 
 ```typescript
 value === "custom-mcp" || value === "git-repo" || value === "google" ||
@@ -256,29 +253,29 @@ value === "hackernews" || value === "notion" || value === "slack" ||
 value === "web-search" || value === "x"
 ```
 
-custom-mcp 是本次新增（:461）。它是通用只读 MCP（Model Context Protocol）知识源——用户把任意 MCP 服务器指向 `~/.openwiki/connectors/custom-mcp/config.json` 即可接入，因此引导配置层必须接受它作为合法的源实例，否则 custom-mcp 的 onboarding 条目会在 normalize 时被静默丢弃。
+custom-mcp 占白名单首行（:461）。它是通用只读 MCP（Model Context Protocol）知识源——用户把任意 MCP 服务器指向 `~/.openwiki/connectors/custom-mcp/config.json` 即可接入，因此引导配置层必须接受它作为合法的源实例，否则 custom-mcp 的 onboarding 条目会在 normalize 时被静默丢弃。
 
-**边界：`langsmith` 不在白名单里。** 这是刻意的：LangSmith 连接器是 `mode: "code"` 的代码模式连接器（`src/connectors/sources/langsmith/index.ts:92`），它的配置不进 onboarding.json，而是放仓库内的 `openwiki/langsmith.json`（repo-config，见上方第 8 节的 containment 注释），API key 走环境变量。换言之：
+**边界：`langsmith` 不在白名单里。** 这是刻意的：LangSmith 连接器是 `mode: "code"` 的代码模式连接器（`src/connectors/sources/langsmith/index.ts:92`），它的配置不进 onboarding.json，而是放仓库内的 `openwiki/.langsmith.json`（路径拼装在 `src/connectors/sources/langsmith/repo-config.ts:67`；写入注释见上方第 8 节的 containment 说明），API key 走环境变量。换言之：
 
 | 配置通路 | 白名单/所在文件 | 归属 |
 |---------|----------------|------|
-| 个人模式源实例 | onboarding.json 的 `sourceInstances`（本文件 :459-470 把关） | 本文件 |
-| 代码模式连接器 | 仓库内 `openwiki/*.json` + 环境变量 | `src/connectors/sources/langsmith/repo-config.ts` 等 |
+| 个人模式源实例 | onboarding.json 的 `sourceInstances`（`src/setup/onboarding.ts:459-470` 把关） | 本文件 |
+| 代码模式连接器 | 仓库内 `openwiki/.langsmith.json` + 环境变量 | `src/connectors/sources/langsmith/repo-config.ts` |
 
-注意它与 `src/connectors/registry.ts:12-22` 的 `CONNECTOR_IDS`（9 个，含 langsmith）**不是同一个清单**：registry 描述「运行时存在哪些连接器」，`isKnownConnectorId` 描述「onboarding.json 里允许出现哪些源」。两者 2026-09-13 起有意分叉。
+注意它与 `src/connectors/registry.ts:12-22` 的 `CONNECTOR_IDS`（9 个，含 langsmith）**不是同一个清单**：registry 描述「运行时存在哪些连接器」，`isKnownConnectorId` 描述「onboarding.json 里允许出现哪些源」。两者有意分叉。
 
 ---
 
 ## 10. 与凭据向导的分工 (Division of Labor with the Credential Wizard)
 
-交互式引导（credential wizard）的实现是 `src/setup/credentials/` 目录（组合根 `src/setup/credentials.tsx`，状态机 `use-init-setup.ts` 2642 行，步骤定义 `steps.ts`），UI 层细节见 14-configuration-and-telemetry/01-credential-onboarding.md。**onboarding.ts 与它之间是纯数据层与 UI 层的关系**：
+交互式引导（credential wizard）的实现是 `src/setup/credentials/` 目录（组合根 `src/setup/credentials.tsx`，状态机 `use-init-setup.ts` 2781 行，步骤定义 `steps.ts` 1238 行），UI 层细节见 14-configuration-and-telemetry/01-credential-onboarding.md。**onboarding.ts 与它之间是纯数据层与 UI 层的关系**：
 
 | 职责 | 归属 | 说明 |
 |------|------|------|
 | 收集用户输入（provider、key、模型、模式、源连接） | 向导（UI 层） | 14 区 01 号的主题 |
-| 决定「要不要进向导」 | 向导调用本文件的完成判定 | `steps.ts:90-91`，见第 7 节 |
-| onboarding.json 的 schema、归一化、落盘 | 本文件 | 向导只构造 `OpenWikiOnboardingConfig` 对象，`saveOpenWikiOnboardingConfig`（`use-init-setup.ts:311`、:2535）负责持久化 |
-| wikiGoal 的持久化位置裁决 | 本文件定义约定，向导执行 | 个人模式 → `~/.openwiki/INSTRUCTIONS.md`；代码模式 → `<repo>/openwiki/INSTRUCTIONS.md`（`use-init-setup.ts:2553-2558`） |
+| 决定「要不要进向导」 | 向导调用本文件的完成判定 | `steps.ts:95-97`，见第 7 节 |
+| onboarding.json 的 schema、归一化、落盘 | 本文件 | 向导只构造 `OpenWikiOnboardingConfig` 对象，`saveOpenWikiOnboardingConfig`（`src/setup/credentials/use-init-setup.ts:2671` 的 `saveConfig`，以及 `:331-334` 的挂载初始化）负责持久化 |
+| wikiGoal 的持久化位置裁决 | 本文件定义约定，向导执行 | 个人模式 → `~/.openwiki/INSTRUCTIONS.md`；代码模式 → `<repo>/openwiki/INSTRUCTIONS.md`（`use-init-setup.ts:2680-2694` 的 `saveConfigForCurrentMode`） |
 | 「已引导」的语义 | 本文件 | `completedAt + wikiGoal + (code 或 schedule)` 三条件，向导不自行判断 |
 
 一条实用的阅读规则：**向导代码里出现的每个 `saveOpenWikiOnboardingConfig` / `isOnboardingComplete*` 调用点，语义都要回到本文件的第 4-7 节来找**；反过来，本文件从不 import 向导的任何模块，依赖方向严格单向（UI → 数据层）。
@@ -291,7 +288,7 @@ custom-mcp 是本次新增（:461）。它是通用只读 MCP（Model Context Pr
 
 | 源文件 | 关键符号 | 说明 |
 |--------|---------|------|
-| `src/setup/onboarding.ts:4-9` | import 块 | re-baseline 后指向 ../config/*、../connectors/* |
+| `src/setup/onboarding.ts:1-9` | import 块 | 指向 ../config/*、../connectors/* |
 | `src/setup/onboarding.ts:11-14` | `openWikiOnboardingPath` | onboarding.json 绝对路径 |
 | `src/setup/onboarding.ts:15-18` | `openWikiInstructionsPath` | 全局 INSTRUCTIONS.md 绝对路径 |
 | `src/setup/onboarding.ts:19` | `REPOSITORY_INSTRUCTIONS_FILE` | 仓库级指令文件名常量 |
@@ -327,8 +324,9 @@ custom-mcp 是本次新增（:461）。它是通用只读 MCP（Model Context Pr
 | `src/connectors/sources/langsmith/index.ts:92` | `mode: "code"` | LangSmith 为代码模式连接器（不进 onboarding 白名单） |
 | `src/setup/credentials/steps.ts:96-97` | 启动门 | 向导进入条件调用两个完成判定 |
 | `src/setup/credentials/use-init-setup.ts:2689` | `saveRepositoryWikiInstructions` 调用 | 代码模式 wikiGoal 落仓库 |
+| `src/setup/credentials/use-init-setup.ts:2680-2694` | `saveConfigForCurrentMode()` | 代码模式先写仓库级指令，再把 JSON 内 wikiGoal 置空 |
 | `src/setup/credentials/use-init-setup.ts:2691-2694` | `saveOpenWikiOnboardingConfig` 调用 | 代码模式下 JSON 内 wikiGoal 置空 |
-| `src/agent/utils.ts:97` | `readRunWikiGoal` 分支 | repository 模式读仓库级指令 |
+| `src/agent/utils.ts:92-100` | `readRunWikiGoal` 分支 | repository 模式读仓库级指令（:97），否则读 onboarding 的 wikiGoal（:100） |
 | `src/ingestion/ingestion.ts:74` | `readOpenWikiOnboardingConfig()` 调用 | 摄取主入口读配置 |
 | `src/cli/runners.ts:115` | `saveOpenWikiOnboardingConfig()` 调用 | CLI 非交互路径保存配置 |
 | `src/scheduling/schedules.ts:15` | 类型导入 | 调度侧消费 onboarding 类型 |

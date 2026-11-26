@@ -17,6 +17,31 @@ out_of_scope:
 
 # _digested 结构演进日志
 
+## 2026-11-26 — 全量对齐 v0.9.0（16 区逐篇审计）
+
+**事件**：`main` 快进到 `v0.9.0`（`b7027e3`）后，对 16 个主题区做逐篇源码核对——不是只改 changelog 提到的点，而是每一条源码断言（文件路径、符号、行号、数字、机制）都回到当前源码验证。结果：既有 68 篇中 **65 篇**被修改，新增 **7 篇**，`_digested` 内容文档达到 75 篇。
+
+**方法（可复现）**：
+1. **机械重锚**：用 difflib 对 `e92cc11` 与 `b7027e3` 的每个被引用文件做行级映射，1,279 个 `file:line` 引用一次性改写；落在改动 hunk 内的 38 个留给人工判断。
+2. **分区审计**：每区一个 agent，带「本区源目录 + 已知变更清单 + 行号必须 `sed -n` 验证」的协议并行执行；禁止跨区、禁止改 `_meta`。
+3. **跨区收敛**：审计后统一三条会跨区漂移的数字——provider 15、MCP 工具 10（4 检索 + 6 生命周期）、`CliCommand` 12 个 `kind`（11 用户命令 + error）。
+4. **矩阵重建**：`coverage-map.md` 不再手工维护，改为 `scripts/build-coverage.py` 从全仓引用实测生成（177 个 `src/**/*.ts(x)`：full 175 / cite 1 / gap 1），`--check` 可判定是否过期。
+
+**新增文档**（7 篇）：
+| 文档 | 承接的 v0.9.0 新面 |
+|------|-------------------|
+| `01-quickstart/03-model-setup.md` | 15 providers 的选择与配置、fixedModel（Bob）、Entra 选项 |
+| `03-cli-and-tui/04-link-and-workspaces.md` | `openwiki link` / `workspace` 两个新命令 |
+| `09-authentication-and-oauth/03-entra-id-auth.md` | Entra ID token provider（第三种认证轴） |
+| `13-integrations/03-retrieval-tools-and-workspaces.md` | 4 个只读检索工具、workspace 三级解析 |
+| `13-integrations/04-pi-native-package.md` | pi 原生包与自 spawn 的 MCP 桥 |
+| `15-agent-consumption/03-search-and-read-protocol.md` | search/read 协议、provenance、workspace_required |
+| `16-production-paths/05-parallel-pages-and-focused-updates.md` | page 并行与 focused 更新的生产语义 |
+
+**结构判断**：**不回退、不重排**。16 区骨架（原 14 区 + 15/16）仍然成立，新增的两个 domain（`src/retrieval/`、`src/linking/`）由 15 区 + 13 区 03 号承接；`src/agent/bob.ts` 与 `entra-auth.ts` 分别归 06 区与 09 区，04 区只登记指针，避免同一实现两处维护。
+
+**遗留（见 catch-up-plan §7 的 openQuestions 汇总）**：02 区三张未被引用的旧 SVG 未重画；`deferUnplannedClaimIssues` 在 native agent 与 host 协议间不对称；worker 提交上限 5 是「每个 worker 实例」而非「每页」——均已记录，未擅自改代码或扩写语义。
+
 ## 2026-11-26 — 基线前移至 v0.9.0 ＋ 确立「只跟正式发布」口径
 
 **事件**：upstream 自 `e92cc11` 起跨了 **9 个正式发布**（`v0.5.2` 2026-09-14 → `v0.9.0` 2026-11-05），131 个提交。

@@ -295,6 +295,5 @@ out_of_scope:
 
 | 批 | 状态 | 完成记录 |
 |----|------|---------|
-| 批 7 | ⏳ 待开始 | — |
-| 批 8 | ⏳ 待开始 | — |
-| 批 9 | ⏳ 待开始 | — |
+| 批 7 | ✅ | 2026-11-26：`main` 快进到 `v0.9.0`（`b7027e3`），`ethan` merge main（132 commits）；机械重锚 1,279 个行号引用（difflib 旧→新映射）；coverage-map 按 177 个 `src/**/*.ts(x)` 全量重生成（full 175 / cite 1 / gap 1），生成脚本入库 `scripts/build-coverage.py` |
+| 批 8+9 | ✅ | 2026-11-26：16 个区并行审计（16 个 agent），既有 68 篇中修改 65 篇（含各区 README），新增 7 篇（01/03 model-setup、03/04 link-and-workspaces、09/03 entra-id-auth、13/03 retrieval-tools-and-workspaces、13/04 pi-native-package、15/03 search-and-read-protocol、16/05 parallel-pages-and-focused-updates），合计 75 篇；关键语义更新：providers 15、MCP 工具 10、CliCommand 12 kind、page 并行、Entra、focused claims、docs-only 边界、Anthropic 流式；跨区数字口径统一（见下） |

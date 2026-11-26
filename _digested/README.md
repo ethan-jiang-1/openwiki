@@ -4,7 +4,7 @@ doc_type: "index"
 status: "current"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-09-13"
+updated: "2026-11-26"
 audience: "刚接手仓库的人，以及需要快速建立 OpenWiki 心智模型的 Agent/工程师"
 purpose: "作为 `_digested` 的总导航，说明目录分工、阅读顺序、文档维护契约和写作规范"
 owns: "`_digested` 的导航方式、目录边界、维护原则和阅读入口"
@@ -23,7 +23,7 @@ out_of_scope:
 
 > **源码是唯一真相源。** 每一条论断（函数名、文件路径、架构关系、数字）都必须能在源码或项目原文档中找到对应。禁止臆造、推测或"应该是这样"。专有术语首次出现必须写成「中文（English）」以保留英文原词，便于 grep 回溯源码。
 >
-> **基线**：`e92cc11`（2026-09-13 upstream re-baseline，253 commits，src/ 52→168 文件 domain 重组）。追平期间锁定。
+> **基线**：`v0.9.0`（`b7027e3`，2026-11-05）。自 `e92cc11` 起跨 9 个正式发布、131 个提交，`src/` 168→178 文件。同步口径：只跟 stable tag，不跟 `main` HEAD。
 
 ## 先建立一个大概轮廓
 
@@ -46,17 +46,17 @@ out_of_scope:
 |----|------|--------|
 | `01-quickstart/` | 快速上手 | 安装、首跑、模型选择、排错 |
 | `02-architecture/` | 架构全景 | domain 地图、双模式、关键设计决策 |
-| `03-cli-and-tui/` | CLI 与 TUI | 命令面（9 variant）、Ink TUI 分层、启动路由 |
+| `03-cli-and-tui/` | CLI 与 TUI | 命令面（12 个 `kind` 变体）、Ink TUI 分层、启动路由 |
 | `04-agent-and-prompting/` | Agent 与提示词 | 运行编排、提示词体系、DeepAgents 后端边界、`.openwikiignore` |
 | `05-generation-lifecycle/` | 生成生命周期 | page-job 状态机、恢复/事务/fast-forward、finalize 管线 |
-| `06-model-providers/` | 模型提供商 | 13 providers、reasoning、model availability |
+| `06-model-providers/` | 模型提供商 | 15 providers、reasoning、model availability |
 | `07-claims-and-okf/` | 证据命题与 OKF | grounded claims、证据版本、OKF v0.2 投影 |
 | `08-connectors-and-data-sources/` | 连接器与数据源 | 9 连接器、双配置通路、弹性 HTTP、MCP |
-| `09-authentication-and-oauth/` | 认证与 OAuth | PKCE、oauth-discovery 校验、external-cli 认证 |
+| `09-authentication-and-oauth/` | 认证与 OAuth | PKCE、oauth-discovery 校验、external-cli 认证、Entra token provider |
 | `10-ingestion-and-personal-mode/` | 摄取与个人模式 | 摄取流水线、个人 brain wiki、code-mode 增量拉取 |
 | `11-scheduling-and-ci/` | 调度与 CI | LaunchAgent、定时更新、CI 工作流生成 |
 | `12-visualizer/` | 可视化器 | `openwiki visualize`、WikiGraph、静态导出 |
-| `13-integrations/` | 宿主集成 | Codex/Claude/OpenCode/Cursor 集成、MCP 生命周期协议 |
+| `13-integrations/` | 宿主集成 | 9 个 host 目标（Codex/Claude/OpenCode/Cursor/Bob/Kiro/omp/Antigravity/Copilot）、MCP 生命周期协议 |
 | `14-configuration-and-telemetry/` | 配置与遥测 | config/platform 分层、凭据向导架构、遥测错误分类学 |
 | `15-agent-consumption/` | Agent 消费视角 | wiki 如何被 Agent 发现、路由、检索与信任：引导块、任务路由、渐进披露漏斗、证据回溯 |
 | `16-production-paths/` | Wiki 生产路径 | 两条生产路径（host 驱动 / 原生 CLI）+ 自动化层的选型决策地图 |
@@ -124,7 +124,7 @@ out_of_scope:
 ---
 ```
 
-re-baseline 后写出的内容文档加 `sync_event: "2026-09-13"`。
+内容文档加 `sync_event: "<最近一次基线日期>"`；当前基线为 `"2026-11-26"`。
 
 ### doc_type 分类
 
@@ -171,13 +171,13 @@ upstream/main (langchain-ai/openwiki)
             └── ethan (本地工作分支) ← _digested/ 文档所在地
 ```
 
-- `main` = 源码基线（当前 `e92cc11`），不含 `_digested/`。
+- `main` = 源码基线（当前 `v0.9.0` / `b7027e3`），不含 `_digested/`。
 - `ethan` = 工作分支 = `main` + `_digested/` + `_faq_on_digested/` + `_tmp_tracking/`。
-- upstream 新变更：先合并到 `main`，rebase 到 `ethan`，再按 coverage map 定位受影响文档（流程见 `_meta/git-tracking/upstream-sync/README.md`）。
+- upstream 新发布：`main` 快进到新 tag，再 `git merge main` 到 `ethan`，按 coverage map 定位受影响文档（流程见 `_meta/git-tracking/upstream-sync/README.md`）。
 
 权威追踪文档：
 
 - `_meta/git-tracking/catch-up-plan.md` — re-baseline 追平计划（结构决策 + 分批路线）
 - `_meta/git-tracking/git-branch-and-upstream-tracking.md` — 分支拓扑和 sync 历史
 - `_meta/git-tracking/coverage-map.md` — 源码→文档覆盖矩阵
-- `_meta/git-tracking/upstream-sync/` — sync 事件日志与深查报告存档
+- `_meta/git-tracking/upstream-sync/` — sync 事件日志、发布台账（`release-log.md`）与深查报告存档

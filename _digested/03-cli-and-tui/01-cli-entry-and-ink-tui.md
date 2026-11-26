@@ -4,8 +4,8 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-09-13"
-sync_event: "2026-09-13"
+updated: "2026-11-26"
+sync_event: "2026-11-26"
 audience: "需要理解 OpenWiki 的命令行入口链路、Ink TUI 编排、组件树与运行日志归约的人"
 purpose: "解释 `src/cli/` 域目录的分层：入口 `cli.tsx` 的启动管线、`app/` 的运行编排、`components/` 的 UI 组件、`input/` 的输入与菜单、`run-log/` 的事件归约，以及顶层工具模块"
 owns: "`src/cli/cli.tsx`、`src/cli/app/`、`src/cli/components/`、`src/cli/input/`、`src/cli/run-log/`、`src/cli/` 顶层的 process-interrupt/guards/debug/format/schedule-format"
@@ -21,19 +21,20 @@ out_of_scope:
 
 # 01 — CLI 入口与 Ink TUI (CLI Entry and Ink TUI)
 
-OpenWiki 的命令行界面（CLI，Command Line Interface）入口不再是单文件巨石，而是一个按职责分层的域目录 `src/cli/`：111 行的入口 `cli.tsx` 只做「安装崩溃守卫 → 解析命令 → 条件加载环境 → 启动路由 → 分发」；真正的终端用户界面（TUI，Terminal User Interface）由 Ink（基于 React 的终端渲染库）承载，根组件 `App` 在 `app/` 子目录，可复用 UI 拆进 `components/`，按键与菜单逻辑拆进 `input/`，流式事件到有界日志的归约拆进 `run-log/`。本篇讲这条分层链路；命令面与解析规则见 02 号，启动预检细节见 03 号。
+OpenWiki 的命令行界面（CLI，Command Line Interface）入口不再是单文件巨石，而是一个按职责分层的域目录 `src/cli/`：116 行的入口 `cli.tsx` 只做「安装崩溃守卫 → 解析命令 → 条件加载环境 → 启动路由 → 分发」；真正的终端用户界面（TUI，Terminal User Interface）由 Ink（基于 React 的终端渲染库，当前为 Ink 8 + React 19）承载，根组件 `App` 在 `app/` 子目录，可复用 UI 拆进 `components/`，按键与菜单逻辑拆进 `input/`，流式事件到有界日志的归约拆进 `run-log/`。本篇讲这条分层链路；命令面与解析规则见 02 号，启动预检细节见 03 号，`openwiki link` / `openwiki workspace` 这两个工作区命令见 04 号。
 
-> **源码是唯一真相源。** 本文行号对应 `ethan` 分支基线 `e92cc11`，引用前请重读源码核对。
+> **源码是唯一真相源。** 本文行号对应 `ethan` 分支基线 `v0.9.0`（`b7027e3`），引用前请重读源码核对。
 
 ## 1. 目录地图 (Directory Map)
 
 ```
 src/cli/
-├── cli.tsx                  111 行  入口：崩溃守卫 → 解析 → 环境加载 → 分发
-├── commands.ts             1339 行  CliCommand 9 变体 + parseCommand（详见 02 号）
+├── cli.tsx                  116 行  入口：崩溃守卫 → 解析 → 环境加载 → 分发
+├── commands.ts             1447 行  CliCommand 11 变体 + parseCommand（详见 02 号）
 ├── startup.ts               147 行  resolveStartupCommand 启动路由（详见 03 号）
 ├── runners.ts               378 行  auth/ngrok/cron/ingest/visualize/print 执行函数
 ├── integrations.ts           96 行  runIntegrationsCommand / runMcpCommand
+├── link.tsx                 152 行  runLinkCommand / runWorkspaceCommand（详见 04 号）
 ├── run-mode.ts               69 行  run 模式 → cwd/输出模式/auto-exit 判定
 ├── process-interrupt.ts      29 行  Ctrl+C 中断交付
 ├── guards.ts                 24 行  isRecord / isDiagnosticValue 类型守卫
@@ -43,47 +44,48 @@ src/cli/
 ├── app/
 │   ├── app.tsx              997 行  App 根组件：run 编排、ingestion 副作用、auto-exit
 │   └── run-state.ts          73 行  RunState 辨别联合（8 变体）
-├── components/               8 文件  chat / run-view / header / markdown / panels /
-│                                    primitives / first-run-notice / types
+├── components/               9 文件  chat / run-view / header / markdown / panels /
+│                                    primitives / first-run-notice / types /
+│                                    wiki-workspace-manager
 ├── input/                    4 文件  menu / cursor / secret / types
 ├── run-log/                  6 文件  reducer / types / activity / summary / tool-input / progress
 └── diagnostics/              3 文件  error-diagnostics / auth-fix / sanitize（详见 03 号）
 ```
 
-分层的依赖方向是单向的：`cli.tsx` → `app/` → `components/` → `input/` + `run-log/`；顶层工具模块被上面各层引用，但不反向依赖任何 UI 层。`app.tsx` 是唯一同时接触 agent 运行（`runOpenWikiAgent`）、摄取（ingestion，连接器数据拉取）与凭据设置（`InitSetup`）编排点的地方。
+分层的依赖方向是单向的：`cli.tsx` → `app/`、`link.tsx` → `components/` → `input/` + `run-log/`；顶层工具模块被上面各层引用，但不反向依赖任何 UI 层。`app.tsx` 是唯一同时接触 agent 运行（`runOpenWikiAgent`）、摄取（ingestion，连接器数据拉取）与凭据设置（`InitSetup`）的编排点；`link.tsx` 是本层唯一调用工作区持久化函数（`src/linking/wiki-workspaces.ts`）的地方（管理器只从该模块导入类型）。
 
 ## 2. 入口：`cli.tsx` 的启动管线 (Entry Pipeline)
 
-`src/cli/cli.tsx` 全文 111 行，没有组件、没有解析逻辑，只有一条线性管线：
+`src/cli/cli.tsx` 全文 116 行，没有组件、没有解析逻辑，只有一条线性管线：
 
 ```
-installCrashGuard()                        // cli.tsx:42，最后手段的崩溃记录器
+installCrashGuard()                        // cli.tsx:43，最后手段的崩溃记录器
     ↓
-parseCommand(argv)                         // cli.tsx:44-45 → src/cli/commands.ts:232
+parseCommand(argv)                         // cli.tsx:45-46 → src/cli/commands.ts:232
     ↓
-kind === "integrations" | "mcp"？          // cli.tsx:47-53，短路分发
-    ↓ 否（runStandardCommand，cli.tsx:60）
-commandLoadsEnvironment(command)？         // cli.tsx:63 → commands.ts:1078
-    ├── 是 → await loadOpenWikiEnv()       // cli.tsx:64
+kind === "integrations" | "mcp"？          // cli.tsx:48-54，短路分发
+    ↓ 否（runStandardCommand，cli.tsx:61）
+commandLoadsEnvironment(command)？         // cli.tsx:64 → commands.ts:1173
+    ├── 是 → await loadOpenWikiEnv()       // cli.tsx:65
     ↓
-resolveStartupCommand(command, {cwd, isStdinTTY})   // cli.tsx:67-70 → startup.ts:24
+resolveStartupCommand(command, {cwd, isStdinTTY})   // cli.tsx:68-71 → startup.ts:24
     ↓
-commandEmitsTelemetry(command)？           // cli.tsx:76-78，决定是否展示首跑声明
+commandEmitsTelemetry(command)？           // cli.tsx:77-79，决定是否展示首跑声明
     ↓
-分发（cli.tsx:80-110）
+分发（cli.tsx:81-115）
 ```
 
 各段的要点：
 
-1. **崩溃守卫（crash guard）先于一切**（`cli.tsx:39-42`）：`installCrashGuard()`（来自 `src/agent/crash-guard.ts`）在模块加载期就注册，保证任何逃逸到顶层的 Promise 拒绝（例如子代理在微任务队列上报错）会被记录并打标，而不是无声杀掉进程。
-2. **host 集成命令短路**（`cli.tsx:47-53`）：`integrations` 与 `mcp` 两个命令在进入标准管线**之前**就被分给 `runIntegrationsCommand` / `runMcpCommand`（`src/cli/integrations.ts:20`、`:88`）。类型层面用 `StandardCliCommand = Exclude<CliCommand, {kind:"integrations"} | {kind:"mcp"}>`（`cli.tsx:34-37`）收窄后续管线。这两类命令刻意**不加载 OpenWiki 私有环境**——它们复用宿主（如 Codex CLI）自己的认证会话。
-3. **条件环境加载**（`cli.tsx:63-65`）：只有 `commandLoadsEnvironment`（`src/cli/commands.ts:1173-1181`）为真的命令才调用 `loadOpenWikiEnv()`（来自 `src/config/env.ts`）：run（非 `--dry-run`）、auth、cron、ingest、ngrok。help/error/visualize/dry-run 不碰私有凭据。
-4. **启动路由（startup routing）**（`cli.tsx:67-70`）：`resolveStartupCommand`（`src/cli/startup.ts:24-93`）做三项检查——交互 chat 无 TTY 直接报错（`:30-42`）、非交互运行缺凭据时给出带提示的错误（`:44-77`）、空用户消息拒绝（`:79-90`）；通过则原样返回命令。凭据四元组等细节见 03 号。
-5. **首跑遥测声明**（`cli.tsx:72-78`）：`commandEmitsTelemetry`（`commands.ts:1062-1068`，仅 init/update 且非 dry-run）为真时查询 `firstRunNoticePending()`（来自 `src/telemetry/`），决定本次会话是否渲染首次运行声明（first-run notice）。
-6. **五路命令分发**（`cli.tsx:80-89`）：auth、ngrok、cron、ingest、visualize 依次交给 `src/cli/runners.ts` 的执行函数（`runAuthCommand:186`、`runNgrokCommand:48`、`runCronCommand:93`、`runIngestCommand:151`、`runVisualizeCommand:66`），全部是纯文本输出、不经 Ink。
-7. **启动错误打印**（`cli.tsx:90-92`）：`shouldPrintStartupError`（`src/cli/run-mode.ts:18-29`）为真时把错误消息写 stderr 并设置退出码。为真的条件：请求了 `-p/--print`、stdin 非 TTY、或 run 命令明确要求启动——这些场景没有交互 UI 可承载错误。
-8. **非交互 print 路径**（`cli.tsx:93-99`）：`shouldRunNonInteractively`（`commands.ts:1040-1049`）为真（print 模式，或非 TTY 且有消息）时先按需输出纯文本版首跑声明（`renderFirstRunNoticeText`，`components/first-run-notice.tsx:40`），再交给 `runPrintCommand`（`runners.ts:261`）。
-9. **交互 TUI**（`cli.tsx:100-110`）：兜底分支调用 Ink 的 `render()`，把可选的 `<FirstRunNotice />` 与 `<App command={command} />` 一起渲染，并以 `{ exitOnCtrlC: false }` 关闭 Ink 默认的 Ctrl+C 退出——中断改由 App 内部接管（见 §3.2）。
+1. **崩溃守卫（crash guard）先于一切**（`cli.tsx:40-43`）：`installCrashGuard()`（来自 `src/agent/crash-guard.ts`）在模块加载期就注册，保证任何逃逸到顶层的 Promise 拒绝（例如子代理在微任务队列上报错）会被记录并打标，而不是无声杀掉进程。
+2. **host 集成命令短路**（`cli.tsx:48-54`）：`integrations` 与 `mcp` 两个命令在进入标准管线**之前**就被分给 `runIntegrationsCommand` / `runMcpCommand`（`src/cli/integrations.ts:20`、`:88`）。类型层面用 `StandardCliCommand = Exclude<CliCommand, {kind:"integrations"} | {kind:"mcp"}>`（`cli.tsx:35-38`）收窄后续管线。这两类命令刻意**不加载 OpenWiki 私有环境**——它们复用宿主（如 Codex CLI）自己的认证会话。注意 `link`/`workspace` **不在**排除之列：它们走 `runStandardCommand`，但因 `commandLoadsEnvironment` 为假同样跳过环境加载。
+3. **条件环境加载**（`cli.tsx:64-66`）：只有 `commandLoadsEnvironment`（`src/cli/commands.ts:1173-1181`）为真的命令才调用 `loadOpenWikiEnv()`（来自 `src/config/env.ts`）：run（非 `--dry-run`）、auth、cron、ingest、ngrok。help/error/visualize/dry-run/link/workspace 不碰私有凭据。
+4. **启动路由（startup routing）**（`cli.tsx:68-71`）：`resolveStartupCommand`（`src/cli/startup.ts:24-93`）做三项检查——交互 chat 无 TTY 直接报错（`:30-42`）、非交互运行缺凭据时给出带提示的错误（`:44-77`）、空用户消息拒绝（`:79-90`）；通过则原样返回命令。凭据四元组等细节见 03 号。
+5. **首跑遥测声明**（`cli.tsx:73-79`）：`commandEmitsTelemetry`（`commands.ts:1157-1163`，仅 init/update 且非 dry-run）为真时查询 `firstRunNoticePending()`（来自 `src/telemetry/`），决定本次会话是否渲染首次运行声明（first-run notice）。
+6. **七路命令分发**（`cli.tsx:81-94`）：link、workspace、auth、ngrok、cron、ingest、visualize 依次交给 `src/cli/link.tsx`（`runLinkCommand:27`、`runWorkspaceCommand:68`）与 `src/cli/runners.ts` 的执行函数（`runAuthCommand:186`、`runNgrokCommand:48`、`runCronCommand:93`、`runIngestCommand:151`、`runVisualizeCommand:66`）。前两者自带渲染与退出码处理，其余五个是纯文本输出、不经 Ink。
+7. **启动错误打印**（`cli.tsx:95-97`）：`shouldPrintStartupError(argv, parsedCommand, command)`（`src/cli/run-mode.ts:18-29`）为真时把错误消息写 stderr 并设置退出码。为真的条件：命令确实是 `error` 且（请求了 `-p/--print`、stdin 非 TTY、或**启动前的原始解析**是「明确要求启动的 run」）——这三个信号都从启动前拿，因为被改写成 error 的命令已经丢掉了 run 字段。
+8. **非交互 print 路径**（`cli.tsx:98-104`）：`shouldRunNonInteractively`（`commands.ts:1135-1144`）为真（print 模式，或非 TTY 且有消息）时先按需输出纯文本版首跑声明（`renderFirstRunNoticeText`，`components/first-run-notice.tsx:40`），再交给 `runPrintCommand`（`runners.ts:261`）。
+9. **交互 TUI**（`cli.tsx:105-115`）：兜底分支调用 Ink 的 `render()`，把可选的 `<FirstRunNotice />` 与 `<App command={command} />` 一起渲染，并以 `{ exitOnCtrlC: false }` 关闭 Ink 默认的 Ctrl+C 退出——中断改由 App 内部接管（见 §3.2）。
 
 ## 3. `app/app.tsx`：根组件编排 (Root Orchestration)
 
@@ -169,25 +171,27 @@ commandEmitsTelemetry(command)？           // cli.tsx:76-78，决定是否展�
 
 ## 5. `components/`：展示层 (Presentation Layer)
 
-8 个文件，全部是无状态或局部状态的展示组件，不直接发起运行：
+9 个文件，除 `wiki-workspace-manager.tsx`（`openwiki link` 的交互式管理器，自带状态机）外都是无状态或局部状态的展示组件，不直接发起 agent 运行。渲染底座是 **Ink 8 + React 19**（`package.json:89` 的 `"ink": "~8.0.0"`、`:95` 的 `"react": "^19.3.0"`）：v0.7.3 把 React 从 18 升到 19 时同时换成与 React 19 兼容的 Ink 6 渲染器，v0.9.0 再升到 Ink 8。`run-view.tsx` 的 `useTerminalRows` 把 `useStdout()` 拿到的 `stdout` 显式断言成 `NodeJS.WriteStream`，之后才读 `rows` 并订阅 `resize`（`:478`）——这是本区唯一的类型断言，也是升级后终端尺寸逻辑仍能工作的前提。
 
 | 文件 | 行数 | 导出 | 职责 |
 |------|------|------|------|
 | `chat.tsx` | 923 | `ChatHistory:63`、`ChatInput:131`、`SlashMenu:807` | 聊天历史与交互输入 |
-| `run-view.tsx` | 592 | `IngestionSummary:51`、`RunView:120`、`CompletedRunDetails:244` | 运行中/完成视图 |
+| `run-view.tsx` | 593 | `IngestionSummary:51`、`RunView:120`、`CompletedRunDetails:244` | 运行中/完成视图 |
 | `header.tsx` | 198 | `Header:60`、`OPENWIKI_LOGO_LINES:16` | 会话标头（版本/模型/目录/追踪状态） |
 | `markdown.tsx` | 218 | `MarkdownText:13`、`MarkdownBlock:36` | Markdown → Ink 组件适配 |
 | `panels.tsx` | 199 | `HelpView:20`、`DryRunView:73`、`CredentialDiagnosticsPanel:126`、`AuthFixPanel:160`、`ErrorDiagnosticsPanel:181` | 帮助与诊断面板 |
 | `primitives.tsx` | 139 | `Panel:16`、`Rows:40`、`StatusLine:69`、`MenuRow:103`、`InputCursor:116`、`PromptBlock:130` | 最小布局原语 |
 | `first-run-notice.tsx` | 86 | `FirstRunNotice:66`、`renderFirstRunNoticeText:40`、`wrapText:13` | 首跑遥测声明的 TUI 与纯文本双形态 |
 | `types.ts` | 55 | `CompletedRun:9` | 聊天历史中一次已完成运行的数据形状 |
+| `wiki-workspace-manager.tsx` | 1232 | `WikiWorkspaceManager:185` | `openwiki link` 的命名工作区管理器（5 屏状态机，详见 04 号） |
 
 要点：
 
 - **`ChatInput`**（`chat.tsx:131`）是输入侧最重的组件：持有 `ChatInputState`、`ChatInputMenuState` 与 `SecretInputMode`（`:142-153`），在 `useInput`（`:179`）里集中处理按键，向下委托 `input/` 模块（见 §6）完成光标移动、菜单同步与密钥掩码；菜单本体由 `SlashMenu`（`:807`）按 `menuState` 渲染。密钥输入从不回显，只显示掩码长度摘要，保存走 `saveOpenWikiEnv`。
-- **`RunView`**（`run-view.tsx:120-204`）把一条运行日志渲染成固定布局：标头（compact）→ 用户消息 → 状态行（repository 进度优先 `formatRepositoryProgress`，否则按活动推断 `getRunStage:570`）→ 汇总计数 → 活动区（`RunActivitySections:308`，含资源管理器树 `ExplorationMap:379` 与终端行数自适应 `useTerminalRows:478`）→ 调试行 → 完成后的 `CompletedRunDetails`。旋转字符（spinner）是低频心跳（4 帧/600ms，`:30-31`、`:209-223`），避免布局抖动。
+- **`RunView`**（`run-view.tsx:120-204`）把一条运行日志渲染成固定布局：标头（compact）→ 用户消息 → 状态行（repository 进度优先 `formatRepositoryProgress`，否则按活动推断 `getRunStage:571`）→ 汇总计数 → 活动区（`RunActivitySections:308`，含资源管理器树 `ExplorationMap:379` 与终端行数自适应 `useTerminalRows:478`）→ 调试行 → 完成后的 `CompletedRunDetails`。旋转字符（spinner）是低频心跳（4 帧/600ms，`:30-31`、`:209-223`），避免布局抖动。
 - **`Header`**（`header.tsx:60`）按终端宽度决定渲染 ASCII 字标还是单行紧凑形；所有插值都过 `sanitizeHeaderValue` 清洗控制字符。
 - **`MarkdownText`**（`markdown.tsx:13`）把最终助手回复的 Markdown 块级/行内语法映射为 Ink 元素；表格退化为纯文本（`renderPlainTable:195`）、HTML token 走 `renderHtmlToken:208`。
+- **`WikiWorkspaceManager`**（`wiki-workspace-manager.tsx:185`）只在 `openwiki link` 里被渲染：五屏状态机（列表 → 动作 → 编辑/删除/命名）、Ctrl-C 取消、仓库发现流按输入路径增量扫描。它是唯一由 `render()` + `waitUntilExit()` 驱动、结果通过回调交回的组件（见 04 号）。
 
 ## 6. `input/`：输入与菜单 (Input and Menus)
 
@@ -212,27 +216,27 @@ commandEmitsTelemetry(command)？           // cli.tsx:76-78，决定是否展�
 
 6 个文件，把无限的 agent 事件流折叠成**有界**的进度模型——这是 TUI 能长时间运行而不撑爆布局的关键。
 
-### 7.1 `types.ts`（230 行）— RunLogItem 五变体
+### 7.1 `types.ts`（244 行）— RunLogItem 五变体
 
-`RunLogItem`（`:225-230`）是运行日志的元素类型，五个变体各有语义：
+`RunLogItem`（`:239-244`）是运行日志的元素类型，五个变体各有语义：
 
 | 变体 | 行号 | 内容 |
 |------|------|------|
-| `repository_progress` | `:29-67` | repository 生成生命周期（stage/resumed/page/pageIndex/pageCount），全日志至多一条、原地替换 |
-| `activity` | `:72-104` | 单个确切文件系统路径的活动（操作 read/search/write、域 openwiki/repository、状态 active/error/recent、活跃工具 ID） |
-| `debug` | `:109-119` | `--debug` 诊断行，封顶保留 |
-| `text` | `:124-134` | 主代理最终回复的累积缓冲 |
-| `tool` | `:139-220` | 全程聚合工具摘要：动作/读/搜/任务/写/错误计数 + `exploredPaths`（`:178`）与 `writtenPaths`（`:214`） |
+| `repository_progress` | `:29-81` | repository 生成生命周期（stage/resumed/page/pageIndex/pageCount/completedCount/inFlightPages），全日志至多一条、原地替换 |
+| `activity` | `:86-118` | 单个确切文件系统路径的活动（操作 read/search/write、域 openwiki/repository、状态 active/error/recent、活跃工具 ID） |
+| `debug` | `:123-133` | `--debug` 诊断行，封顶保留 |
+| `text` | `:138-148` | 主代理最终回复的累积缓冲 |
+| `tool` | `:153-234` | 全程聚合工具摘要：动作/读/搜/任务/写/错误计数 + `exploredPaths`（`:192`）与 `writtenPaths`（`:228`） |
 
-### 7.2 `reducer.ts`（362 行）— appendRunLogEvent 与工具分组
+### 7.2 `reducer.ts`（368 行）— appendRunLogEvent 与工具分组
 
-`appendRunLogEvent`（`:16-70`）是唯一入口，按事件类型分派：
+`appendRunLogEvent`（`:16-76`）是唯一入口，按事件类型分派：
 
-- **`repository_progress`**（`:21-38`）：找到已有条目就原地替换（保持 id 与位置），否则插到日志最前。
-- **`text`**（`:40-46`）：`subgraph` 来源与空文本直接丢弃；主代理文本经 `appendAssistantText`（`:72-88`）拼进**单一可替换缓冲**——后到的工具调用会证明先前散文只是叙述（见下）。
-- **`tool_start`**（`appendToolStartLogItem:95-155`）：先丢弃全部 `text` 条目（`:100`，叙述让位于行动），再在唯一的 `tool` 摘要上累加分类计数（read=`read_file`、search=`glob/grep/ls`、write=`edit_file/write_file`、task 按 `countToolTargets` 数子代理目标，`:105-118`），并把该工具 ID 记入摘要的活跃集合；随后对事件携带的每个路径调 `activatePath`（`:309-341`，同路径同操作合并条目、追加活跃工具 ID），最后 `boundActivityLog`（`:343-355`）保证非活动条目 + 活动条目 + 最近 8 条（`MAX_RECENT_ACTIVITIES`，`:9`）的有界结构。
-- **`tool_end`**（`completeToolLogItem:162-238`）：完成摘要与该工具触碰过的每条 activity；从 activity 收集本轮成功写过的 OpenWiki 页（`writtenPaths`）与读过的 repository 文件（`exploredPaths`，搜索匹配不算探索，`:172-193`）；activity 的活跃 ID 清空后按事件状态降级为 recent/error（`:216-229`）；未知完成（无匹配 start）被忽略——有些 provider 不发对称事件（`:157-160`）。
-- **其余（debug 消息）**（`:56-69`）：`debug` 条目封顶 `MAX_DEBUG_ITEMS = 20`（`:8`），超出挤掉最旧。
+- **`repository_progress`**（`:21-44`）：找到已有条目就原地替换（保持 id 与位置），否则插到日志最前；`completedCount`/`inFlightPages` 只在事件携带时透传（`:31-36`），供并行 worker 的进度行使用。
+- **`text`**（`:46-52`）：`subgraph` 来源与空文本直接丢弃；主代理文本经 `appendAssistantText`（`:78-94`）拼进**单一可替换缓冲**——后到的工具调用会证明先前散文只是叙述（见下）。
+- **`tool_start`**（`appendToolStartLogItem:101-161`）：先丢弃全部 `text` 条目（`:106`，叙述让位于行动），再在唯一的 `tool` 摘要上累加分类计数（read=`read_file`、search=`glob/grep/ls`、write=`edit_file/write_file`、task 按 `countToolTargets` 数子代理目标，`:111-124`），并把该工具 ID 记入摘要的活跃集合；随后对事件携带的每个路径调 `activatePath`（`:315-347`，同路径同操作合并条目、追加活跃工具 ID），最后 `boundActivityLog`（`:349-361`）保证非活动条目 + 活动条目 + 最近 8 条（`MAX_RECENT_ACTIVITIES`，`:9`）的有界结构。
+- **`tool_end`**（`completeToolLogItem:168-244`）：完成摘要与该工具触碰过的每条 activity；从 activity 收集本轮成功写过的 OpenWiki 页（`writtenPaths`）与读过的 repository 文件（`exploredPaths`，搜索匹配不算探索，`:178-199`）；activity 的活跃 ID 清空后按事件状态降级为 recent/error（`:226-235`）；未知完成（无匹配 start）被忽略——有些 provider 不发对称事件（`:163-166`）。
+- **其余（debug 消息）**（`:62-75`）：`debug` 条目封顶 `MAX_DEBUG_ITEMS = 20`（`:8`），超出挤掉最旧。
 
 ### 7.3 辅助模块
 
@@ -241,13 +245,13 @@ commandEmitsTelemetry(command)？           // cli.tsx:76-78，决定是否展�
 | `activity.ts` | 309 | `getToolPathActivities:111`、`buildActivityTreeLines:158`、`buildExplorationTreeLines:186`、`isOpenWikiPagePath:207` | 从工具输入提取确切路径：`read_file`→read、`edit_file/write_file`→write、`glob/grep/ls`→search（`:118-142`）；shell 命令刻意排除（其文本不可作为路径凭据，`:107-109`）；路径规范化后按前缀判定 openwiki/repository 域 |
 | `summary.ts` | 170 | `findRunSummary:45`、`formatRunCounts:52`、`formatCompletedRunCounts:94`、`formatRunCompletionTitle:126` | 摘要条目的查找与「N actions · a reads · b searches…」格式化 |
 | `tool-input.ts` | 45 | `parseToolInput:6`、`countToolTargets:21` | 工具输入的安全解析（经 `isRecord` 守卫）与任务目标计数 |
-| `progress.ts` | 79 | `findRepositoryProgress:13`、`formatRepositoryProgress:29`、`formatRepositoryPrintProgress:58` | repository 生命周期条目的查找与「stage (page i/n)」格式化，print 路径另有单行版 |
+| `progress.ts` | 89 | `findRepositoryProgress:13`、`formatRepositoryProgress:29`、`formatRepositoryPrintProgress:58` | repository 生命周期条目的查找与「stage (page i/n)」格式化，print 路径另有单行版；并行 worker 下改报「Documenting N of M · K in flight」（`formatPageProgress:75-89`） |
 
 ## 8. 顶层工具模块 (Top-Level Utilities)
 
 - **`process-interrupt.ts`**（29 行）：`requestProcessInterrupt:18-29`，见 §3.2。依赖注入的 `InterruptTarget`（`:5-11`）让退出行为可测试。
 - **`guards.ts`**（24 行）：`isRecord:6`（进入任意错误/工具载荷前的入口守卫，拒绝 null 与原始值）与 `isDiagnosticValue:16`（标量才可直接渲染成诊断串）。`run-log/tool-input.ts` 与 `diagnostics/` 都建立在它们之上。
-- **`debug.ts`**（16 行）：`isDebugMode:6`（`OPENWIKI_DEBUG=1`）与 `shouldShowCredentialDiagnostics:14`（debug 或更窄的 `OPENWIKI_DEBUG_CREDENTIALS=1`）。注意 `--debug` 标志在解析期直接设置 `process.env.OPENWIKI_DEBUG`（`commands.ts:776-781`），使后续所有模块共享同一开关。
+- **`debug.ts`**（16 行）：`isDebugMode:6`（`OPENWIKI_DEBUG=1`）与 `shouldShowCredentialDiagnostics:14`（debug 或更窄的 `OPENWIKI_DEBUG_CREDENTIALS=1`）。注意 `--debug` 标志在解析期直接设置 `process.env.OPENWIKI_DEBUG`（`commands.ts:871-876`），使后续所有模块共享同一开关。
 - **`format.ts`**（52 行）：`isExitMessage:11`（`/exit` 判定）、`formatCount:20`（单复数）、`formatCwd:32`（HOME 缩写为 `~`）、`getDisplayModelId:46`（显式 ID → 模型 env 覆盖 → provider 默认的三级回退）。
 - **`schedule-format.ts`**（159 行）：cron 命令的纯文本格式化——`formatScheduleMutationResult:12`（delete/pause/resume 的边框摘要：变更/跳过的连接器、Mac 唤醒窗口、警告）与 `formatScheduleHeader:51`（列表横幅）。只被 `runners.ts` 的 `runCronCommand` 消费。
 
@@ -256,12 +260,12 @@ commandEmitsTelemetry(command)？           // cli.tsx:76-78，决定是否展�
 把各层串起来，一次交互式 `openwiki --update "…"` 的数据流是：
 
 ```
-cli.tsx:42   installCrashGuard
-cli.tsx:45   parseCommand → { kind:"run", command:"update", … }        （02 号）
-cli.tsx:63   commandLoadsEnvironment → loadOpenWikiEnv
-cli.tsx:67   resolveStartupCommand：凭据预检通过                         （03 号）
-cli.tsx:76   commandEmitsTelemetry → 显示/不显示首跑声明
-cli.tsx:103  render(<App command={…} />)
+cli.tsx:43   installCrashGuard
+cli.tsx:46   parseCommand → { kind:"run", command:"update", … }        （02 号）
+cli.tsx:64   commandLoadsEnvironment → loadOpenWikiEnv
+cli.tsx:68   resolveStartupCommand：凭据预检通过                         （03 号）
+cli.tsx:77   commandEmitsTelemetry → 显示/不显示首跑声明
+cli.tsx:108  render(<App command={…} />)
 app.tsx:426  主 effect：门控通过 → runId++ → RunState.running
 app.tsx:574  withRunTelemetry → ensureCodeModeRepoSetup → runOpenWikiAgent
   每个 OpenWikiRunEvent:
@@ -283,7 +287,11 @@ app.tsx:574  withRunTelemetry → ensureCodeModeRepoSetup → runOpenWikiAgent
 |--------|---------|------|
 | `src/cli/cli.tsx:43` | `installCrashGuard()` 调用 | 崩溃守卫先于一切注册 |
 | `src/cli/cli.tsx:45-54` | `parseCommand`、integrations/mcp 短路 | 解析与 host 集成命令分流 |
-| `src/cli/cli.tsx:61-115` | `runStandardCommand` | 环境加载 → 启动路由 → 五路分发 → TUI 兜底 |
+| `src/cli/cli.tsx:61-115` | `runStandardCommand` | 环境加载 → 启动路由 → 七路分发 → TUI 兜底 |
+| `src/cli/cli.tsx:81-84` | `runLinkCommand`/`runWorkspaceCommand` 分发 | 两个工作区命令的执行入口 |
+| `src/cli/link.tsx:26-60` | `runLinkCommand` | TTY 门控 → 发现根 → 管理器 → 保存 |
+| `src/cli/link.tsx:67-90` | `runWorkspaceCommand` | `use`/`clear`/`current` 三分支与退出码 |
+| `src/cli/components/wiki-workspace-manager.tsx:185` | `WikiWorkspaceManager` | 命名工作区五屏状态机 |
 | `src/cli/app/app.tsx:86` | `RUN_LOG_RENDER_DELAY_MS` | 运行日志 250ms 渲染节流 |
 | `src/cli/app/app.tsx:110-177` | `App` 状态铺开 | 会话偏好、运行标识、日志缓冲 |
 | `src/cli/app/app.tsx:188-197` | Ctrl+C `useInput` | 中断转交 `requestProcessInterrupt` |
@@ -302,6 +310,7 @@ app.tsx:574  withRunTelemetry → ensureCodeModeRepoSetup → runOpenWikiAgent
 | `src/cli/components/primitives.tsx:16-130` | `Panel`/`StatusLine`/`PromptBlock` 等 | 布局原语 |
 | `src/cli/components/first-run-notice.tsx:40,66` | `renderFirstRunNoticeText`/`FirstRunNotice` | 首跑声明双形态 |
 | `src/cli/components/types.ts:9` | `CompletedRun` | 聊天历史条目 |
+| `src/cli/components/wiki-workspace-manager.tsx:185-540` | `WikiWorkspaceManager` | 工作区管理器组件主体与按键处理 |
 | `src/cli/input/menu.ts:18,77,231,268,308` | 菜单清单与推导/解析函数 | slash/model/provider/effort 菜单 |
 | `src/cli/input/types.ts:9-122` | `ChatInputState`/`SecretInputMode`/`ChatInputMenuState` 等 | 输入状态类型族 |
 | `src/cli/input/cursor.ts:7-156` | 光标编辑函数集 | 纯函数光标/删除/原始输入 |
@@ -315,6 +324,7 @@ app.tsx:574  withRunTelemetry → ensureCodeModeRepoSetup → runOpenWikiAgent
 | `src/cli/run-log/summary.ts:45-126` | `findRunSummary`/`formatRunCounts` 等 | 摘要查找与格式化 |
 | `src/cli/run-log/tool-input.ts:6,21` | `parseToolInput`/`countToolTargets` | 输入守卫解析与任务计数 |
 | `src/cli/run-log/progress.ts:13-58` | `findRepositoryProgress`/`formatRepositoryProgress` | repository 进度格式化 |
+| `src/cli/run-log/progress.ts:75-89` | `formatPageProgress` | 单 worker 报页码、多 worker 报完成数/在飞页 |
 | `src/cli/process-interrupt.ts:18-29` | `requestProcessInterrupt` | 先恢复终端再交付 SIGINT |
 | `src/cli/guards.ts:6,16` | `isRecord`/`isDiagnosticValue` | 不可信载荷入口守卫 |
 | `src/cli/debug.ts:6,14` | `isDebugMode`/`shouldShowCredentialDiagnostics` | 两个调试开关 |

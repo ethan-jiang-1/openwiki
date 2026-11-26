@@ -4,8 +4,8 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-09-13"
-sync_event: "2026-09-13"
+updated: "2026-11-26"
+sync_event: "2026-11-26"
 audience: "需要理解 OpenWiki 如何在 macOS 上通过 LaunchAgent 实现定时 wiki 更新的人"
 purpose: "详细解释 scheduling/schedules.ts 中 LaunchAgent 的完整生命周期管理、cron 表达式解析、plist 生成、launchctl 集成和电源调度"
 owns: "src/scheduling/schedules.ts（955 行）— 所有 LaunchAgent CRUD、cron 解析（cron-parser / cronstrue）、plist 模板（含 EnvironmentVariables 注入）、launchctl 引导、pmset 电源调度"
@@ -26,13 +26,13 @@ out_of_scope:
 
 `src/scheduling/schedules.ts`（955 行）是 OpenWiki 调度子系统的核心文件。它管理 macOS LaunchAgent 的完整生命周期 — 创建、列出、暂停、恢复和删除定时任务 — 并负责将 cron 表达式转换为 macOS 原生的 `launchd` plist 格式。此外，它还通过 `pmset` 管理 macOS 的定时唤醒/睡眠电源调度，确保 Mac 在需要执行定时 wiki 更新时处于唤醒状态。
 
-> **源码是唯一真相源。** 以下所有函数名、行号、参数和分支均来自 `src/scheduling/schedules.ts`（2026-09-13 re-baseline 后全文重锚；旧基线路径 `src/schedules.ts`、918 行的对照见各节行号迁移说明）。
+> **源码是唯一真相源。** 以下所有函数名、行号、参数和分支均来自 `src/scheduling/schedules.ts`（v0.9.0 全文重核）。该文件自 v0.5.1 起没有过一次改动，因此本篇本轮的实际改动集中在跨文件引用与测试落点（见 §12）。
 
 ---
 
 ## 1. 概览（Overview）
 
-`schedules.ts` 是 OpenWiki 中唯一的调度实现文件（re-baseline 后位于 `src/scheduling/` 域目录）。它的职责边界非常清晰：
+`schedules.ts` 是 OpenWiki 中唯一的调度实现文件（位于 `src/scheduling/` 域目录）。它的职责边界非常清晰：
 
 ```
 用户通过 TUI 设置 cron 表达式
@@ -58,9 +58,9 @@ macOS launchd 按 StartCalendarInterval 触发
 - **cronstrue**（`toString`）：将 cron 表达式转为人类可读的英文描述
 - **launchctl**（`execFile` 调用）：与 macOS `launchd` 守护进程交互
 - **pmset**（`osascript` + administrator privileges 调用）：管理 macOS 电源调度
-- **openwiki-home**（`ensureOpenWikiHome`, `openWikiHomeDir`）：家目录管理；re-baseline 后同时导入 `OPENWIKI_CONFIG_DIR_ENV_KEY` 与 `resolveOpenWikiHomeDir`，用于 plist 的 `EnvironmentVariables` 注入（见 6.6）
+- **openwiki-home**（`ensureOpenWikiHome`, `openWikiHomeDir`）：家目录管理；同时导入 `OPENWIKI_CONFIG_DIR_ENV_KEY` 与 `resolveOpenWikiHomeDir`，用于 plist 的 `EnvironmentVariables` 注入（见 6.6）
 
-文件导出 11 个公开函数和 7 个类型定义，内部包含 29 个私有辅助函数。与旧基线（918 行、10 个公开函数）相比的增量：`parseLaunchdCalendarInterval` 改为导出（`:585`，供测试直接调用，见 5.4）。
+文件导出 11 个公开函数和 7 个类型定义，内部包含 29 个私有辅助函数。其中 `parseLaunchdCalendarInterval` 为测试直接调用而导出（`:585`，见 5.4）。
 
 > **与 02/03 号文档的边界**：LaunchAgent 只是定时更新的「触发器」之一。CI（GitHub Actions）路线的工作流模板生成见 `02-ci-workflow-generation.md`；被触发的一轮 `update` 如何记账（`.last-update.json`）与何时可跳过（no-op）见 `03-scheduled-openwiki-updates.md`。
 
@@ -376,7 +376,7 @@ cronstrue.toString(expression, {
 
 ### 5.4 转换为 launchd CalendarInterval（parseLaunchdCalendarInterval）
 
-**函数签名**：`schedules.ts:585-645`（re-baseline 变化：**改为 `export`**，JSDoc 注明 "Exported for testing"，测试见 `test/scheduling/launchd-calendar-interval.test.ts`）
+**函数签名**：`schedules.ts:585-645`（**已 `export`**，JSDoc（`:580-584`）注明 "Exported for testing"，测试见 `test/scheduling/launchd-calendar-interval.test.ts`）
 
 这是 cron → plist 转换的核心。launchd 的 `StartCalendarInterval` 只接受单一数值，不支持 cron 的通配、列表、范围或步进语法。因此只有最简形式的 cron 表达式才能转换。
 
@@ -394,12 +394,12 @@ cron: minute hour day month weekday
 1. **解析字段**（`:588-591`）：调用 `parseSimpleCronFields()` 拆分为 5 个字段
 2. **分钟**（`:595-598`）：`Minute` 字段必须为具体数值（`getSingleCronNumber`），失败则返回 `null`
 3. **小时**（`:604-609`）：具体数值 → `Hour`；`*` → 省略该 key；其他 → 返回 `null`
-4. **日 + 星期几组合守卫**（`:617-621`，re-baseline 新增，见下）
+4. **日 + 星期几组合守卫**（`:617-621`，见下）
 5. **日期**（`:623-628`）：具体数值 → `Day`；`*` → 省略；其他（受限但非单一数值）→ `null`
 6. **月份**（`:630-635`）：具体数值 → `Month`；`*` → 省略；其他 → `null`
 7. **星期几**（`:637-642`）：具体数值 → `Weekday`（`7` 映射为 `0`，`:639`，因为 cron 的 7=周日 而 macOS 用 0）；`*` → 省略；其他 → `null`
 
-**day+weekday 同受限拒绝（`:611-621`）**：这是 re-baseline 新增的语义守卫（upstream `906787d`）。cron 标准规定：当「日」与「星期几」**同时受限**时，两者是 **OR** 关系（“每月 1 号 **或** 任意周一”都会触发）；而 launchd 的 `StartCalendarInterval` 对所有给出的字段取 **AND**（“1 号 **且** 周一”才触发，通常几乎永不触发）。若照译成同时带 `Day` 和 `Weekday` 的 plist，定时器会远比 cron 语义稀疏——静默的近乎死定时器。因此该组合直接返回 `null`，让调用方走「过于复杂」的 warning 回退路径（`:156-164`），而不是装上一个错误触发的 agent。守卫位于 Day/Weekday 数值解析**之前**（先判 `day !== "*"`/`weekday !== "*"`，再在 `:623-628`/`:637-642` 解析具体数值）。
+**day+weekday 同受限拒绝（`:611-621`）**：这条语义守卫（upstream `906787d`）不是可折叠的细节。cron 标准规定：当「日」与「星期几」**同时受限**时，两者是 **OR** 关系（“每月 1 号 **或** 任意周一”都会触发）；而 launchd 的 `StartCalendarInterval` 对所有给出的字段取 **AND**（“1 号 **且** 周一”才触发，通常几乎永不触发）。若照译成同时带 `Day` 和 `Weekday` 的 plist，定时器会远比 cron 语义稀疏——静默的近乎死定时器。因此该组合直接返回 `null`，让调用方走「过于复杂」的 warning 回退路径（`:156-164`），而不是装上一个错误触发的 agent。守卫位于 Day/Weekday 数值解析**之前**（先判 `day !== "*"`/`weekday !== "*"`，再在 `:623-628`/`:637-642` 解析具体数值）。
 
 **不支持的 cron 模式**：
 - 步进值：`*/5 * * * *`（每 5 分钟）
@@ -509,7 +509,7 @@ const programArguments = [
 
 `process.argv[1]` 是当前 Node.js 进程的入口脚本路径。`path.resolve()` 将其转为绝对路径。如果 `argv[1]` 为空（例如 REPL 模式），`cliPath` 为空字符串。
 
-`--scheduled` 不只是标记：`ingest` 命令解析后一路传到 `ingestion.ts` 的 `resolveIngestionSourceInstances`（`src/ingestion/ingestion.ts:229-239`）——`scheduledOnly` 为真时，若配置中无 `ingestionSchedule` 或其 `pausedAt` 非空（已暂停），所有源实例都被过滤掉，即**暂停 LaunchAgent 的同时，手动误跑同款命令也不会执行摄取**。
+`--scheduled` 不只是标记：`ingest` 命令解析后一路传到 `ingestion.ts` 的 `resolveIngestionSourceInstances`（`src/ingestion/ingestion.ts:224-239`，其中调度门在 `ingestion.ts:234-239`）——`scheduledOnly` 为真时，若配置中无 `ingestionSchedule` 或其 `pausedAt` 非空（已暂停），所有源实例都被过滤掉，即**暂停 LaunchAgent 的同时，手动误跑同款命令也不会执行摄取**。
 
 ### 6.4 StartCalendarInterval（`:860-868`）
 
@@ -539,7 +539,7 @@ function escapePlist(value: string): string {
 
 对 5 个 XML 特殊字符进行实体转义。所有插入 plist XML 的用户/系统数据（Label、ProgramArguments、WorkingDirectory、日志路径、以及 6.6 的配置目录值）都通过此函数处理。
 
-### 6.6 EnvironmentVariables 注入（re-baseline 新增，`:834-841`）
+### 6.6 EnvironmentVariables 注入（`:834-841`）
 
 当安装进程环境中设置了 `OPENWIKI_CONFIG_DIR` 时，`createLaunchAgentPlist` 会输出一个 `EnvironmentVariables` 字典（`:834-841`），把该变量带进 launchd 任务环境：
 
@@ -720,7 +720,7 @@ stdout 和 stderr 都输出到同一个日志文件（`:856-859`）。
 
 ### 11.4 持久化配置类型
 
-调度配置持久化在 onboarding 配置的 `ingestionSchedule` 字段，类型 `OnboardingSourceScheduleConfig`（`src/setup/onboarding.ts:21-29`）：`description`/`expression`/`launchAgentPath?`/`pausedAt?`/`updatedAt`/`warning?`。
+调度配置持久化在 onboarding 的 `ingestionSchedule` 字段（`OpenWikiOnboardingConfig.ingestionSchedule?`，`src/setup/onboarding.ts:56`），类型 `OnboardingSourceScheduleConfig`（`src/setup/onboarding.ts:21-28`）：`description`/`expression`/`launchAgentPath?`/`pausedAt?`/`updatedAt`/`warning?`。同一类型也被 per-source 的 `schedule?`（`:34`）复用，但本文件只读写顶层那一份。
 
 ---
 
@@ -762,7 +762,7 @@ stdout 和 stderr 都输出到同一个日志文件（`:856-859`）。
 | `src/scheduling/schedules.ts:530-556` | `cloneOnboardingConfig` | 浅拷贝（单层）onboarding 配置 |
 | `src/scheduling/schedules.ts:558-574` | `deriveLegacySources` | 从 sourceInstances 重建 legacy sources 映射 |
 | `src/scheduling/schedules.ts:576-578` | `normalizeCronExpression` | 规范化 cron 表达式空白 |
-| `src/scheduling/schedules.ts:585-645` | `parseLaunchdCalendarInterval` | cron → launchd CalendarInterval 转换（re-baseline 起 export） |
+| `src/scheduling/schedules.ts:585-645` | `parseLaunchdCalendarInterval` | cron → launchd CalendarInterval 转换（export 供测试） |
 | `src/scheduling/schedules.ts:611-621` | day+weekday 组合守卫 | cron OR vs launchd AND，同受限返 `null` |
 | `src/scheduling/schedules.ts:647-667` | `parseSimpleCronFields` | 将 cron 字符串拆分为 5 个字段 |
 | `src/scheduling/schedules.ts:669-705` | `getPowerWindowForConfiguredSchedules` | 计算 pmset 唤醒/睡眠窗口 |
@@ -788,5 +788,5 @@ stdout 和 stderr 都输出到同一个日志文件（`:856-859`）。
 | `src/scheduling/schedules.ts:940-946` | `isFileNotFoundError` | ENOENT 错误判断 |
 | `src/scheduling/schedules.ts:948-955` | `escapePlist` | XML 5 字符实体转义 |
 | `src/config/openwiki-home.ts:6` | `OPENWIKI_CONFIG_DIR_ENV_KEY` | plist EnvironmentVariables 注入的键名 |
-| `src/setup/onboarding.ts:21-29` | `OnboardingSourceScheduleConfig` | 持久化到配置文件的调度数据类型 |
-| `src/ingestion/ingestion.ts:229-239` | `resolveIngestionSourceInstances` | `--scheduled` 的调度门（暂停时过滤源实例） |
+| `src/setup/onboarding.ts:21-28` | `OnboardingSourceScheduleConfig` | 持久化到配置文件的调度数据类型 |
+| `src/ingestion/ingestion.ts:224-239` | `resolveIngestionSourceInstances` | `--scheduled` 的调度门（`ingestion.ts:234-239` 暂停时过滤源实例） |

@@ -4,8 +4,8 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-09-13"
-updated: "2026-09-13"
-sync_event: "2026-09-13"
+updated: "2026-11-26"
+sync_event: "2026-11-26"
 audience: "需要理解连接器配置放哪里、以及连接器子系统安全不变量的开发者与 Agent"
 purpose: "解释 personal/code 双配置通路、弹性 HTTP 重试层、配置规整容错、git-repo 增量与失败隔离、MCP 子进程隔离与 langsmith 的防 SSRF/防 secret 外泄安全模型"
 owns: "`src/connectors/http.ts`、`src/connectors/config.ts`、`src/connectors/sources/langsmith/repo-config.ts` 的安全横切层，以及散布在 `config/openwiki-home.ts`、`sources/git-repo.ts`、`mcp-client.ts`、`mcp-runtime.ts` 中的配置路径与安全机制"
@@ -17,7 +17,7 @@ update_when:
 out_of_scope:
   - "注册表结构、类型定义与 9 连接器一览（见 `01-connector-registry.md`）"
   - "OAuth 授权流程本身（见 `09-authentication-and-oauth/`）"
-  - "MCP JSON-RPC 协议与 stdio 帧细节（计划中的 MCP 子系统篇）"
+  - "MCP JSON-RPC 协议与 stdio 帧细节（见 `11-mcp-subsystem.md`）"
   - "摄取产物如何被 agent 合成进 wiki（见 `10-ingestion-and-personal-mode/`）"
 ---
 
@@ -28,11 +28,11 @@ out_of_scope:
 连接器子系统的配置与安全可以压缩成四句话：
 
 1. **配置分两条通路**（双配置通路，dual configuration path）：personal 连接器的配置住用户主目录 `~/.openwiki/connectors/<id>/config.json`，code 连接器（当前只有 langsmith）的配置随仓库提交到 `<repoRoot>/openwiki/.langsmith.json`。
-2. **所有 HTTP 型抓取共享一层弹性重试**（resilient retry）：`fetchWithResilience`（`src/connectors/http.ts:144-200`）统一 30 秒超时、仅对 429/5xx 重试、尊重 `Retry-After`、退避上限 20 秒。
+2. **所有 HTTP 型抓取共享一层弹性重试**（resilient retry）：`fetchWithResilience`（`src/connectors/http.ts:144-200`）统一 30 秒超时、仅对 429/5xx 重试、尊重 `Retry-After`、退避上限 20 秒，并在调用方取消时停止重试。
 3. **手编 JSON 一律先规整**（normalization）：数组字段逐层 `Array.isArray` + 白名单 + 默认值回落，坏配置降级而不是炸掉摄取。
 4. **安全边界显式白名单化**：MCP 子进程环境变量走 `CHILD_ENV_ALLOWLIST`；langsmith 的 API 主机与密钥环境变量名走双白名单；所有「把密钥写给第三方」的路径都要求凭证以环境变量**名**引用、按名解析。
 
-> 本文行号对应工作分支 `ethan`（src/ 与基线 `e92cc11` 一致）。存档报告 R5a/R5b（`_meta/git-tracking/upstream-sync/2026-09-13-rebaseline-reports.md`）是写作底稿，个别行号/数字与源码有偏差处已按源码修正（如 langsmith 模块行数实测 1363 行，非存档所写 1727 行）。
+> 本文行号对应工作分支 `ethan` 的 v0.9.0 源码（`b7027e3`）。引用前请重读源码核对：连接器子系统的行号集中在 `http.ts` 与 `mcp-client.ts`，两者在 v0.5.2→v0.9.0 之间有过改动（`http.ts` 现为 200 行）。
 
 ---
 
@@ -72,7 +72,7 @@ langsmith 是当前唯一的 `mode: "code"` 连接器，其配置**随仓库提�
 }
 ```
 
-**通路如何接通**：code 模式管线的 `runCodeModeConnectors(repoRoot, …)`（`src/ingestion/code-mode.ts:129-172`）计算增量窗口后，对每个 `mode === "code"` 的连接器调用 `connector.ingest({ repoRoot, windowHours })`（`code-mode.ts:125`）。langsmith 的 ingest 若发现 `options.repoRoot === undefined` 就干净跳过（`langsmith/index.ts:143-145`）——这是 `ConnectorIngestOptions.repoRoot`（`src/connectors/types.ts:29`）存在的意义：仓库根路径只经这条参数流入 code 连接器，personal 连接器永远不会收到它。
+**通路如何接通**：code 模式管线的 `runCodeModeConnectors(repoRoot, …)`（`src/ingestion/code-mode.ts:129-172`）计算增量窗口后，对每个 `mode === "code"` 的连接器调用 `connector.ingest({ repoRoot, windowHours })`（`code-mode.ts:149`）。langsmith 的 ingest 若发现 `options.repoRoot === undefined` 就干净跳过（`langsmith/index.ts:143-145`）——这是 `ConnectorIngestOptions.repoRoot`（`src/connectors/types.ts:29`）存在的意义：仓库根路径只经这条参数流入 code 连接器，personal 连接器永远不会收到它。
 
 ### 2.3 两条通路对照
 
@@ -97,16 +97,19 @@ langsmith 是当前唯一的 `mode: "code"` 连接器，其配置**随仓库提�
 
 `src/connectors/http.ts:144-200`，签名 `fetchWithResilience(input, init?, options?)`，逐尝试（per-attempt）语义：
 
-- **30 秒墙钟超时**：每次尝试用 `AbortSignal.timeout(30_000)`（默认值 `DEFAULT_TIMEOUT_MS`，`http.ts:19`；信号构造在 `:111-114`）。调用方自带 `init.signal` 时用 `AbortSignal.any` 组合，谁先中止听谁的。
-- **只重试 429 与 5xx**：`isRetryableStatus`（`http.ts:50-52`）= `status === 429 || 500..599`。**401/403 与其余 4xx 原样透传**（`:14-16` 注释、`:119` 条件）——它们不是瞬时故障，且 Gmail 需要看到 401 才触发 token 刷新，重试只会浪费次数甚至锁账号。
-- **尊重 `Retry-After`**：`parseRetryAfterMs`（`http.ts:59-78`）支持 delta-seconds（纯数字，`:68-70`）与 HTTP-date（`Date.parse`，`:72-77`，负值钳到 0）；缺失或不可解析返回 `null`。
-- **退避上限统一 20 秒**：`Math.min(MAX_BACKOFF_DELAY_MS, retryAfterMs ?? backoffDelayMs(...))`（`:22` 常量、`:124-127`）。无 `Retry-After` 时用指数退避 + full jitter（`backoffDelayMs`，`:80-88`：`ceiling = min(20s, 500ms * 2^attempt)`，取 `random() * ceiling`，让并发客户端的重试去相关）。
-- **网络错误也重试**：connection reset/DNS/超时走同一退避（`:135-141`），重试耗尽后抛最后一个错误（`:144`）。
-- **重试前丢弃响应体**（`response.body?.cancel()`，`:129`）让连接可复用。
+- **30 秒墙钟超时**：每次尝试用 `AbortSignal.timeout(30_000)`（默认值 `DEFAULT_TIMEOUT_MS`，`http.ts:24`；信号构造在 `:160`）。调用方自带 `init.signal` 时用 `AbortSignal.any` 组合（`:161-163`），谁先中止听谁的。
+- **调用方取消不重试（v0.7.3）**：`init.signal` 一旦 abort，退避等待立即失败、循环立即结束——判断条件 `init.signal?.aborted === true || attempt >= maxRetries` 即 break（`http.ts:186-190`），既不消耗剩余重试，也不再 sleep。判据是「谁 abort 了」：超时同样抛 `AbortError`，但超时是瞬时的、仍按可重试处理；只有调用方信号代表调用方放弃。等待层 `waitForRetry`（`:113-137`）在无信号时退化为 `sleep(delay)`，有信号时用 `Promise.race([sleep(delay, signal), aborted])` 让取消赢过计时器。
+- **只重试 429 与 5xx**：`isRetryableStatus`（`http.ts:72-75`）= `status === 429 || 500..599`。**401/403 与其余 4xx 原样透传**（`:19-21` 注释、`:168` 条件）——它们不是瞬时故障，且 Gmail 需要看到 401 才触发 token 刷新，重试只会浪费次数甚至锁账号。
+- **尊重 `Retry-After`**：`parseRetryAfterMs`（`http.ts:82-101`）支持 delta-seconds（纯数字，`:91-93`）与 HTTP-date（`Date.parse`，`:95-100`，负值钳到 0）；缺失或不可解析返回 `null`。
+- **退避上限统一 20 秒**：`Math.min(MAX_BACKOFF_DELAY_MS, retryAfterMs ?? backoffDelayMs(...))`（`:27` 常量、`:173-176`）。无 `Retry-After` 时用指数退避 + full jitter（`backoffDelayMs`，`:103-111`：`ceiling = min(20s, 500ms * 2^attempt)`，取 `random() * ceiling`，让并发客户端的重试去相关）。
+- **网络错误也重试**：connection reset/DNS/超时走同一退避（`:184-196`），重试耗尽后把最后一个错误包成 `Error` 抛出（`:199`）。
+- **重试前丢弃响应体**（`response.body?.cancel()`，`:178`）让连接可复用。
 
-可注入参数（`http.ts:24-42`）方便测试钉死行为：`timeoutMs`、`maxRetries`（默认 3，`:20`）、`baseDelayMs`（默认 500，`:21`）、`sleep`、`random`。
+可注入参数（`http.ts:33-52`）方便测试钉死行为：`timeoutMs`、`maxRetries`（默认 3，`:25`）、`baseDelayMs`（默认 500，`:26`）、`sleep`（签名已扩为 `(ms, signal?)`，默认实现 `realSleep` 在 `:54-70`：signal 已 abort 时直接 reject，等待中被 abort 则清掉定时器并 reject）、`random`。
 
-**一次限流的时间线**（把上述契约串起来）：请求发出 → 30s 超时信号武装 → 服务器回 `429` + `Retry-After: 5` → `isRetryableStatus` 判可重试 → `parseRetryAfterMs` 得 5000ms → 与 20s 上限取小，等 5 秒 → 重试成功返回；若服务器回 `Retry-After: Fri, ... GMT`（HTTP-date），按 `Date.now()` 差值换算；若四次重试后仍 429/5xx，返回最后一个响应本身（非网络错误不抛）；若是连接被重置，走指数+full jitter 退避重试，耗尽后抛最后一个错误。
+**调用方取消的边界**：仓库内**没有**连接器传 `init.signal`——gmail/slack/x/hackernews 与 MCP http 客户端都只传 headers/body（`mcp-client.ts:697-713`）。所以这条语义目前是对「可取消调用方」的库级契约，由 `test/connectors/fetch-with-resilience.test.ts:339-450` 的四组用例钉住（已 abort、进行中 abort、429 退避中 abort、网络错误退避中 abort），而不是现有 ingest 的可观测行为。
+
+**一次限流的时间线**（把上述契约串起来）：请求发出 → 30s 超时信号武装 → 服务器回 `429` + `Retry-After: 5` → `isRetryableStatus` 判可重试 → `parseRetryAfterMs` 得 5000ms → 与 20s 上限取小，等 5 秒 → 重试成功返回；若服务器回 `Retry-After: Fri, ... GMT`（HTTP-date），按 `Date.now()` 差值换算；若 3 次重试（共 4 次尝试）后仍 429/5xx，返回最后一个响应本身（非网络错误不抛）；若是连接被重置，走指数+full jitter 退避重试，耗尽后抛最后一个错误；若这期间调用方 abort 了自己的信号，退避等待立即以该 signal 的 reason 失败，函数不再发起下一次尝试。
 
 ### 3.3 接入方
 
@@ -118,6 +121,8 @@ langsmith 是当前唯一的 `mode: "code"` 连接器，其配置**随仓库提�
 | hackernews | `sources/hackernews.ts:9` | `hackernews.ts:265,300` | Firebase feeds + Algolia 搜索两处 |
 | mcp-client（HTTP transport） | `mcp-client.ts:8` | `mcp-client.ts:697-713` | 覆写 `timeoutMs: 60_000`（`:712`），与 stdio 客户端每请求 60s 超时对齐 |
 | langsmith | **不接入** | — | 走官方 SDK，自带独立退避（见 3.4） |
+
+五个实际接入方都**不传 `init.signal`**（`grep -n signal src/connectors/sources/*.ts` 与 `mcp-client.ts` 只在 stdio 子进程 `exit` 事件的参数里命中），因此当前行为等价于「只有 30 秒超时信号」；调用方取消语义留给将来的可取消调用方。
 
 ### 3.4 langsmith 的独立退避与 SDK retry 禁用
 
@@ -170,12 +175,12 @@ git-repo 连接器用 `state.latestIds`（`ConnectorState` 的水位字段）记
 - **有效路径**：`git log --name-status --oneline <prev>..HEAD`（`git-repo.ts:156-163`）+ `git diff --name-status <prev> HEAD`（`:174-181`），manifest 记 `previousHead`（`:193`）。
 - **回退路径**：`git log --max-count=20 --name-status --oneline`（`:164-169`）+ 工作树 diff `git diff --name-status HEAD`（`:182`），让 manifest 仍反映本地未提交工作。
 
-所有 git 调用走 `execFile`（无 shell）+ 1MB 缓冲上限（`runGit`，`git-repo.ts:221-228`）；仓库 id 另有字符白名单（`isSafeRepoId`，`:231-233`）。
+所有 git 调用走 `execFile`（无 shell）+ 1MB 缓冲上限（`runGit`，`git-repo.ts:221-228`）；仓库 id 另有字符白名单（`isSafeRepoId`，`:230-232`）。
 
 ### 5.2 失败隔离的三个层级
 
 1. **聚合层**：`ingestAllConnectors` 用 `Promise.allSettled` 并发跑全部连接器（`tools.ts:296-298`），rejection 转成 `status: "error"` 结果（`tools.ts:311-326`）——一个连接器抛错不丢其他连接器的成功结果。
-2. **管线层**：code 模式的 `runCodeModeConnectors` 对每个连接器 try/catch（`code-mode.ts:126-129`），连接器失败只是跳过并提示，绝不打断它所服务的更新 run。
+2. **管线层**：code 模式的 `runCodeModeConnectors` 对每个连接器 try/catch（`code-mode.ts:146-154`），连接器失败只是跳过并提示，绝不打断它所服务的更新 run。
 3. **连接器内部**：git-repo 对每个仓库 try/catch 转 warning（`git-repo.ts:99-101`）；langsmith 的多级 fail-open 见第 7.5 节。
 
 ---
@@ -196,7 +201,7 @@ MCP 客户端（`src/connectors/mcp-client.ts`，973 行）承载两类 transpor
 
 ### 6.2 HTTP header 的凭证引用纪律
 
-`resolveTemplateEnvReferences`（`mcp-client.ts:855-883`）：header 值含 `${VAR}` 时按引用解析（变量名限 `[A-Z_][A-Z0-9_]*`；指向 OAuth token env 键的引用会走 `getOAuthAccessToken` 动态取新鲜 token，`:885-894`）；**不含** `${` 的 header 若键名或值长得像凭证（`token|secret|authorization|api-key|bearer`）则直接抛错——禁止把字面量密钥写进配置文件（`:859-871`）。
+`resolveTemplateEnvReferences`（`mcp-client.ts:855-883`）：header 值含 `${VAR}` 时按引用解析（变量名限 `[A-Z_][A-Z0-9_]*`；指向 OAuth token env 键的引用会走 `getOAuthAccessToken` 动态取新鲜 token，`:885-894`）；**不含** `${` 的 header 若键名或值长得像凭证（正则 `token|secret|authorization|api[-_]?key|bearer`，大小写不敏感）则直接抛错——禁止把字面量密钥写进配置文件（`:859-871`）。
 
 ### 6.3 `tools/list` 分页收集
 
@@ -244,7 +249,7 @@ langsmith 对故障的策略是**失效开放（fail-open）**——一切失败
 | workspace 缺密钥 | `index.ts:193-200` | warning（指向 `~/.openwiki/.env`），跳过该 workspace |
 | workspace/project 失败（坏项目名、fetch 错误） | `index.ts:216-222` | warning，其余 project/workspace 继续 |
 | 单条 trace 拉取失败 | `index.ts:303-309` | warning，其余 traces 继续；样本统计仍可返回（来自已取回的 root runs） |
-| 整个连接器抛错 | `code-mode.ts:126-129` | 管线层 catch，"ingestion skipped"，run 继续 |
+| 整个连接器抛错 | `code-mode.ts:146-154` | 管线层 catch，"ingestion skipped"，run 继续 |
 
 ### 7.6 区域模型（US/EU/APAC）
 
@@ -274,7 +279,7 @@ langsmith 对故障的策略是**失效开放（fail-open）**——一切失败
 | 提交配置只能点名 OpenWiki LangSmith 命名空间的 env | `API_KEY_ENV_PATTERN`（`repo-config.ts:61`） |
 | trace payload 最小化 | select 排除 inputs/outputs（`api.ts:13-24`）+ 字段/条数双截断 |
 | raw 路径防穿越/防符号链接 | `resolveConnectorRawPath`、逐级 lstat、`O_NOFOLLOW`（见 01 号文档 §5.4） |
-| 连接器失败不传染 | `Promise.allSettled`（`tools.ts:296-298`）+ 管线 catch（`code-mode.ts:126-129`）+ 各连接器内部降级 |
+| 连接器失败不传染 | `Promise.allSettled`（`tools.ts:296-298`）+ 管线 catch（`code-mode.ts:146-154`）+ 各连接器内部降级 |
 
 ---
 
@@ -309,7 +314,7 @@ langsmith 对故障的策略是**失效开放（fail-open）**——一切失败
 | `src/config/constants.ts:1` | `OPEN_WIKI_DIR` | 仓库内 `openwiki/` 目录名 |
 | `src/connectors/io.ts:11-31` | `readConnectorConfig` | personal 配置读取（ENOENT→默认，浅合并） |
 | `src/connectors/types.ts:29` | `ConnectorIngestOptions.repoRoot` | code 通路参数 |
-| `src/ingestion/code-mode.ts:129-172` | `runCodeModeConnectors` | mode 分流 `:115`、`ingest({repoRoot, windowHours})` `:125`、管线级 fail-open `:126-129` |
+| `src/ingestion/code-mode.ts:129-172` | `runCodeModeConnectors` | mode 分流 `:139-141`、`ingest({repoRoot, windowHours})` `:149`、管线级 fail-open `:146-154` |
 | `src/connectors/sources/langsmith/repo-config.ts:13-42` | `LangSmithWorkspaceConfig`、`LangSmithRepoConfig` | 提交配置 schema（密钥只存 env 名） |
 | `src/connectors/sources/langsmith/repo-config.ts:49-53` | `ALLOWED_API_HOSTS` | US/EU/APAC 三主机白名单 |
 | `src/connectors/sources/langsmith/repo-config.ts:61` | `API_KEY_ENV_PATTERN` | `^OPENWIKI_LANGSMITH_API_KEY(_[A-Z0-9]+)?$` |
@@ -329,10 +334,12 @@ langsmith 对故障的策略是**失效开放（fail-open）**——一切失败
 | `src/connectors/sources/langsmith/setup.ts:11-22` | `LangSmithRegion`、EU/APAC 常量 | 区域模型（含 APAC） |
 | `src/connectors/sources/langsmith/setup.ts:55-126` | `loadLangSmithSetup`/`saveLangSmithSetup`/`nextLangSmithApiKeyEnv` | region↔apiBaseUrl 互转、key env 分配 |
 | `src/connectors/http.ts:24-27` | 超时/重试/基数/上限常量 | 30s / 3 次 / 500ms / 20s |
-| `src/connectors/http.ts:73-75` | `isRetryableStatus` | 仅 429 与 5xx |
+| `src/connectors/http.ts:72-75` | `isRetryableStatus` | 仅 429 与 5xx |
 | `src/connectors/http.ts:82-101` | `parseRetryAfterMs` | delta-seconds / HTTP-date |
 | `src/connectors/http.ts:103-111` | `backoffDelayMs` | 指数 + full jitter，ceiling 20s |
-| `src/connectors/http.ts:144-200` | `fetchWithResilience` | 主循环：组合信号 `:111-114`、重试 `:119-131`、网络错误 `:135-141` |
+| `src/connectors/http.ts:144-200` | `fetchWithResilience` | 主循环：组合信号 `:157-163`、重试 `:168-181`、网络错误 `:184-196`、调用方取消短路 `:186-190` |
+| `src/connectors/http.ts:113-137` | `waitForRetry` | 退避等待可被调用方 abort 打断（`Promise.race`），无信号时退化为 `sleep(delay)` |
+| `src/connectors/http.ts:54-70` | `realSleep` | 默认 sleep 实现：已 abort 立即 reject，等待中 abort 清定时器并 reject（测试注入点见 `:45`） |
 | `src/connectors/sources/gmail.ts:9,312` | `fetchWithResilience` 接入 | 401 透传供 token 刷新 |
 | `src/connectors/sources/slack.ts:13,550` | 接入 | |
 | `src/connectors/sources/x.ts:21,267` | 接入 | |

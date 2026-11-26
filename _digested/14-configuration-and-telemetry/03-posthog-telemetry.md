@@ -4,8 +4,8 @@ doc_type: "owner"
 status: "current"
 branch: "ethan"
 created: "2026-09-13"
-updated: "2026-09-13"
-sync_event: "2026-09-13"
+updated: "2026-11-26"
+sync_event: "2026-11-26"
 audience: "需要理解 OpenWiki 遥测（telemetry）事件管线、送达语义、身份与开关门、tee 文件协议及隐私边界的工程师或 Agent"
 purpose: "回答「一次运行发出什么事件、发到哪、何时被关掉、如何确认发了什么」"
 owns: "src/telemetry/ 中除分类学之外的机制：client.ts、gates.ts、senders.ts、install-id.ts、record-run-safe.ts、config.ts、types.ts、index.ts；错误分类学（errors.ts/taxonomy.ts/with-run-telemetry.ts）见 04-error-classification-taxonomy.md"
@@ -21,7 +21,7 @@ out_of_scope:
 
 # 14.3 — PostHog 遥测：每 run 单事件与 tee 文件
 
-OpenWiki 的遥测是一条**每 run 恰好一个事件**的最小管线：init/update 各自在结束时发出一个匿名 `openwiki_run` 事件（`src/telemetry/config.ts:30`），chat 被刻意排除（交互式会话每轮都会发事件）。整个子系统在 `src/telemetry/`，共 11 个文件、实测 1874 行，其中错误分类学三件套（errors.ts/taxonomy.ts/with-run-telemetry.ts）另见 04 篇；本篇覆盖其余八个文件的机制。
+OpenWiki 的遥测是一条**每 run 恰好一个事件**的最小管线：init/update 各自在结束时发出一个匿名 `openwiki_run` 事件（`src/telemetry/config.ts:30`），chat 被刻意排除（交互式会话每轮都会发事件）。整个子系统在 `src/telemetry/`，共 11 个文件、实测 1882 行，其中错误分类学三件套（errors.ts/taxonomy.ts/with-run-telemetry.ts）另见 04 篇；本篇覆盖其余八个文件的机制。
 
 > **提纲勘误**：本篇旧提纲写的是「批量发送」——作废。现行实现是 `captureImmediate` 单 HTTP 请求直发（`src/telemetry/client.ts:14-20` 注释明确否决了排队 `capture()` + `shutdown()` flush 的批量路径），外加 `--telemetry-file` 的 tee 旁路文件核对机制。
 
@@ -36,7 +36,7 @@ OpenWiki 的遥测是一条**每 run 恰好一个事件**的最小管线：init/
 | `record-run-safe.ts` | 76 | run 生命周期 → 遥测事件的桥（chat 过滤、init-only 字段） |
 | `with-run-telemetry.ts` | 85 | 单一遥测边界（分类学侧，见 04 篇） |
 | `errors.ts` | 714 | 错误分类器（见 04 篇） |
-| `taxonomy.ts` | 198 | detail 白名单与 owner 推导（见 04 篇） |
+| `taxonomy.ts` | 206 | detail 白名单与 owner 推导（见 04 篇；v0.6.1 起 `okf_error` 白名单覆盖全部 7 个操作） |
 | `types.ts` | 177 | 闭集枚举 + `RunTelemetry`/`TelemetryEvent` 事件形状 |
 | `config.ts` | 41 | key/host/路径/超时/事件名/通知文案常量 |
 | `index.ts` | 32 | 桶导出（公共 API 面） |
@@ -243,7 +243,7 @@ tee 记录的两种形状（JSON、两空格缩进、尾随换行）：
 | chat（经 run 生命周期） | `record-run-safe.ts:51-53` | 直接 return，不产生事件 |
 | auth/cron/visualize 等 | 不进入 run 生命周期 | 与遥测无接触 |
 
-run 事实在 agent 侧的发布通道（`RunTelemetryContext`，详见 04 篇 §6）：provider 在解析成功的瞬间发布（`src/agent/index.ts:198` repository-native 路径、:249 通用路径），`noop` 短路在 `:216` 发布；成功/失败结果由 `withRunTelemetry` 兜底判定。这样即便失败发生在 provider 解析之后的其他环节，事件仍归因到正确 provider。
+run 事实在 agent 侧的发布通道（`RunTelemetryContext`，详见 04 篇 §6）：provider 在解析成功的瞬间发布（`src/agent/index.ts:198` repository-native 路径、`:264` 通用路径），`noop` 短路在 `:231` 发布；成功/失败结果由 `withRunTelemetry` 兜底判定。这样即便失败发生在 provider 解析之后的其他环节，事件仍归因到正确 provider。
 
 ## 9. 隐私边界：采什么、绝不采什么
 

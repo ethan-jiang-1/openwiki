@@ -21,8 +21,8 @@ out_of_scope:
 | 文件 | 用途 |
 |------|------|
 | `git-branch-and-upstream-tracking.md` | 同步口径、分支/remote 快照、sync 历史（**基线以 tag 为准**） |
-| `coverage-map.md` | 源码→文档覆盖矩阵（行号锚仍停在 `e92cc11`，待按 `v0.9.0` 重扫） |
-| `catch-up-plan.md` | 追平计划：e92cc11 的 14 区结构（批 0–6 已完成）+ §7 v0.9.0 增量批次（批 7–9，active） |
+| `coverage-map.md` | 源码→文档覆盖矩阵（v0.9.0 全量重生成：177 文件 full 175 / cite 1 / gap 1） |
+| `catch-up-plan.md` | 追平计划：e92cc11 的 14 区结构（批 0–6 ✅）+ §7 v0.9.0 增量（批 7–9 ✅） |
 | `quality-review.md` | 文档质量审查 checklist |
 | `upstream-sync/` | sync 事件日志 + **发布台账**（`release-log.md`：逐版本升了什么/对我们好不好） |
-| `scripts/track.sh` | 辅助脚本（status/releases/triage/new-sync/validate） |
+| `scripts/` | `track.sh`（status/releases/triage…）+ `build-coverage.py`（重生成覆盖矩阵） |

@@ -4,7 +4,7 @@ doc_type: "context"
 status: "draft"
 branch: "ethan"
 created: "2026-07-17"
-updated: "2026-09-13"
+updated: "2026-11-26"
 audience: "刚接手仓库的人，需要 5 分钟内建立 OpenWiki 心智模型"
 purpose: "快速了解 OpenWiki 是什么、domain 架构全景、规模、两种运行模式和关键设计决策"
 owns: "OpenWiki 项目的快速心智模型概览"
@@ -18,7 +18,7 @@ out_of_scope:
 
 # 01 — 快速上下文
 
-> **状态**：🟡 草稿（2026-09-13 re-baseline 重写，基线 `e92cc11`）
+> **状态**：🟡 草稿（2026-11-26 基线前移，当前基线 `v0.9.0` / `b7027e3`）
 
 ## 一句话画像
 
@@ -26,7 +26,7 @@ OpenWiki 是一个装在终端里的 CLI 工具，只做一件事：**让一个 
 
 整个系统可以理解成**三个角色、一条流水线**：
 
-1. **CLI 入口**——你敲命令的地方（`src/cli/`），9 个命令 variant 的 Ink 终端 UI。
+1. **CLI 入口**——你敲命令的地方（`src/cli/`），12 个 `kind` 变体的 Ink 终端 UI。
 2. **生成生命周期（引擎）**——`src/generation/` 的可恢复页任务（page job）状态机：planner 规划 → 逐页受限 worker 产出 → 崩溃可恢复 → finalize 收尾。任何一步失败都不毁掉整轮进度。
 3. **文档 Agent + 可信度层**——agent 被提示词和后端边界有意约束（`src/agent/`）；写出的每页带证据命题（claims）与 OKF front matter（`src/claims/` + `src/okf/`），源码变了证据能被发现和重定位。
 
@@ -45,38 +45,41 @@ LangChain AI 开发的 TypeScript CLI 工具（npm 包 `openwiki`，v0.5.x，MIT
 
 ## Domain 架构全景
 
-`src/` 已重组为 domain 目录（168 文件；基线 d4e94ab 时代是 52 文件扁平结构，旧「15 层」清单作废）：
+`src/` 已重组为 domain 目录（178 文件；基线 d4e94ab 时代是 52 文件扁平结构，旧「15 层」清单作废）：
 
 ```
 入口与界面
-  src/cli/              入口 cli.tsx(111) + app/components/input/run-log/diagnostics + commands/runners/startup/run-mode
+  src/cli/              入口 cli.tsx(116) + app/components/input/run-log/diagnostics + commands/runners/startup/run-mode
 生成核心
   src/generation/       page-job 状态机（.run.json / .page-manifest.json 双层持久化）
-  src/agent/            agent 编排(2373) + prompts/ 提示词 + DeepAgents 后端 + .openwikiignore + 源指纹
+  src/agent/            agent 编排(2843) + prompts/ 提示词 + DeepAgents 后端 + .openwikiignore + 源指纹 + bob/entra-auth
   src/okf/              OKF v0.2 front matter 校验/修复/投影
   src/claims/           grounded claims 证据链（repo:// 证据、版本 token、稀疏对账）
 模型与数据
-  src/config/           constants(13 providers)/env/openwiki-home/reasoning
+  src/config/           constants(15 providers)/env/openwiki-home/reasoning
   src/model-availability.ts  openai 模型可用性校验
   src/connectors/       9 个连接器 + 弹性 HTTP + MCP 子系统 + langsmith/
-  src/auth/             OAuth PKCE + oauth-discovery 校验 + external-cli(gh) + tokens
+  src/auth/             OAuth PKCE + oauth-discovery 校验 + external-cli(gh) + Entra token + tokens
   src/ingestion/        摄取编排 + code-mode（增量拉取 + CI 工作流生成）
 运维与消费
   src/scheduling/       LaunchAgent 管理
   src/visualize/        原生 wiki 可视化器（本地服务 + force-graph + 静态导出）
   src/mermaid/          生成页面的 mermaid 围栏校验/降级
-  src/integrations/     Codex/Claude/OpenCode/Cursor 宿主集成 + stdio MCP server
+  src/integrations/     9 个宿主集成（Codex/Claude/OpenCode/Cursor/Bob/Kiro/omp/Antigravity/Copilot）+ stdio MCP server + pi
   src/setup/            凭据向导（组合根 + 8 文件）+ onboarding
   src/platform/         fs-errors/utils/diagnostics/language/windows-acl
   src/telemetry/        错误分类学（errors.ts 714 行）+ PostHog 发送
+消费与检索
+  src/retrieval/        wiki 检索/读取（openwiki_search / openwiki_read）
+  src/linking/          多 wiki 工作区互读（wiki-workspaces）
 ```
 
 ## 规模
 
 | 指标 | 数值 |
 |------|------|
-| 源文件 | 168 个 .ts/.tsx |
-| 最长的几个文件 | `credentials/use-init-setup.ts`（2642）、`agent/index.ts`（2373）、`generation/repository-run.ts`（1668）、`cli/commands.ts`（1339）、`config/constants.ts`（1233） |
+| 源文件 | 178 个 .ts/.tsx |
+| 最长的几个文件 | `credentials/use-init-setup.ts`（2781）、`agent/index.ts`（2843）、`generation/repository-run.ts`（1896）、`cli/commands.ts`（1447）、`config/constants.ts`（1457） |
 | 运行时 | Node.js，ESM + NodeNext；pnpm workspace |
 | Agent 框架 | DeepAgents + LangChain（LangGraph stream） |
 | 终端 UI | Ink（React for terminal） |
@@ -87,10 +90,10 @@ LangChain AI 开发的 TypeScript CLI 工具（npm 包 `openwiki`，v0.5.x，MIT
 - **可恢复的 wiki 生成**：init 从零重建（replacement 备份），update 按 `.page-manifest.json` 逐页 fast-forward/增量；失败页跳过不中断整轮，崩溃后重新 begin 即恢复
 - **可自校正（grounded claims）**：每页维护证据命题，`repo://path#Lx-Ly` 证据带确定性版本 token，源码漂移时 preflight 检测、hash 锚点重定位、agent 稀疏对账显式裁决
 - **OKF v0.2 front matter**：type/title/tags + `generated`/`verified`/`sources` 信任族，代码级校验与确定性修复
-- **13 个模型提供商**：Anthropic（直连+Vertex）、OpenAI（API key+ChatGPT OAuth）、GitHub Copilot（gh CLI 认证）、OpenRouter、Gemini、Bedrock、NVIDIA、Fireworks、Baseten、Nebius、openai-compatible 等；reasoning effort 三种 transport
+- **15 个模型提供商**：Anthropic（直连+Vertex，流式）、OpenAI（API key+ChatGPT OAuth）、GitHub Copilot（gh CLI 认证）、IBM Bob、Mistral、OpenRouter、Gemini、Bedrock、NVIDIA、Fireworks、Baseten、Nebius、openai-compatible 等；reasoning effort 三种 transport
 - **9 个数据源连接器**：git-repo、Gmail、Hacker News、Notion（MCP）、Slack、web-search、X、langsmith、custom-mcp；统一弹性 HTTP（超时+退避）
 - **原生可视化器**：`openwiki visualize` 力导向图 + live reload + 静态导出
-- **宿主集成**：一键装入 Codex/Claude Code/OpenCode/Cursor（skill 包 + stdio MCP server，事务安装）
+- **宿主集成**：一键装入 9 个 host（Codex/Claude Code/OpenCode/Cursor/Bob/Kiro/omp/Antigravity/Copilot），skill 包 + stdio MCP server，事务安装
 - **`.openwikiignore`**：gitignore 兼容的路径排除，贯穿后端/提示词/运行上下文
 - **多语言输出**：`OPENWIKI_LANGUAGE`、翻译中间件、本地化索引标签
 
@@ -111,10 +114,11 @@ LangChain AI 开发的 TypeScript CLI 工具（npm 包 `openwiki`，v0.5.x，MIT
 | 一轮生成怎么推进/恢复 | `src/generation/repository-run.ts` → `src/agent/repository-runner.ts` |
 | Agent 怎么被约束 | `src/agent/docs-only-backend.ts` → `src/agent/openwiki-ignore.ts` |
 | wiki 为什么可信 | `src/claims/brains/code/runtime.ts` → `src/okf/frontmatter.ts` |
-| 支持哪些模型、怎么加新的 | `src/config/constants.ts` → `src/agent/index.ts:1123-1465` |
+| 支持哪些模型、怎么加新的 | `src/config/constants.ts` → `src/agent/index.ts:1123-1357` |
 | 连接器怎么工作 | `src/connectors/registry.ts` → `src/connectors/sources/` |
 | OAuth 怎么认证 | `src/auth/oauth.ts` → `src/auth/oauth-discovery.ts` |
 | 怎么定时运行 | `src/scheduling/schedules.ts` |
+| Agent 怎么检索已生成的 wiki | `src/retrieval/wiki.ts` → `src/linking/wiki-workspaces.ts` |
 | 凭据怎么配置 | `src/setup/credentials.tsx` → `src/setup/credentials/` |
 | 遥测/错误怎么分类 | `src/telemetry/errors.ts` → `src/telemetry/taxonomy.ts` |
 

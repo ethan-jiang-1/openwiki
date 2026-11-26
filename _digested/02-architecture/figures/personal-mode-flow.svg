@@ -10,7 +10,7 @@
   <rect width="800" height="540" fill="#f8f9fa" rx="8"/>
 
   <text x="400" y="28" text-anchor="middle" font-size="16" font-weight="700" fill="#1a1a2e">Personal Mode：构建个人知识 Brain</text>
-  <text x="400" y="46" text-anchor="middle" font-size="11" fill="#888">openwiki（默认模式）· 从外部数据源摄取 → Agent 处理 → 写入个人 Wiki</text>
+  <text x="400" y="46" text-anchor="middle" font-size="11" fill="#888">openwiki personal（非默认模式）· 从外部数据源摄取 → Agent 处理 → 写入个人 Wiki</text>
 
   <!-- Data Sources -->
   <text x="400" y="78" text-anchor="middle" font-size="12" font-weight="700" fill="#555">数据源</text>
@@ -49,7 +49,7 @@
   <!-- Ingestion -->
   <rect x="150" y="195" width="500" height="55" rx="10" fill="#7b2d8b" filter="url(#shadow)"/>
   <text x="400" y="218" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">摄取流水线 (ingestion.ts)</text>
-  <text x="400" y="236" text-anchor="middle" font-size="10" fill="#d0a0d0">parseIngestionTarget() → 遍历连接器 → 每个连接器 init→validate→ingest</text>
+  <text x="400" y="236" text-anchor="middle" font-size="10" fill="#d0a0d0">parseIngestionTarget() → 解析已连接 source instance → 每个源：确定性拉取 + Agent 更新</text>
   <text x="400" y="250" text-anchor="middle" font-size="10" fill="#d0a0d0">scheduledOnly 过滤 · 确定性拉取 vs Agentic 发现 · 单连接器失败不影响其他</text>
 
   <!-- arrow from auth to ingestion -->
