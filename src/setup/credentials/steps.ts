@@ -17,6 +17,7 @@ import {
   isValidModelId,
   providerRequiresApiKey,
   providerRequiresBaseUrl,
+  providerHasFixedModel,
   providerRequiresRegion,
   providerRequiresSecretKey,
   providerUsesAwsSdkCredentials,
@@ -25,10 +26,15 @@ import {
   resolveConfiguredProvider,
   resolveProviderRegion,
   normalizeProvider,
+  OPENAI_COMPATIBLE_API_KEY_ENV_KEY,
+  OPENAI_COMPATIBLE_AUTH_ENV_KEY,
+  OPENAI_COMPATIBLE_ENTRA_SCOPE_ENV_KEY,
   OPENWIKI_MODEL_ID_ENV_KEY,
   OPENWIKI_PROVIDER_ENV_KEY,
   OPENWIKI_REASONING_EFFORT_ENV_KEY,
   SELECTABLE_OPENWIKI_PROVIDERS,
+  resolveOpenAICompatibleAuthMode,
+  type OpenAICompatibleAuthMode,
   type OpenWikiProvider,
 } from "../../config/constants.js";
 import { getReasoningCapability } from "../../config/reasoning.js";
@@ -104,9 +110,19 @@ export function needsAwsCredentialRepair(provider: OpenWikiProvider): boolean {
  * providers it is a pasted key; for keyless providers (gemini-enterprise) it is
  * the required GCP project id.
  */
-export function needsCredentialStep(provider: OpenWikiProvider): boolean {
+export function needsCredentialStep(
+  provider: OpenWikiProvider,
+  authMode?: OpenAICompatibleAuthMode,
+): boolean {
   if (providerUsesOAuth(provider)) {
     return !hasValidStoredToken();
+  }
+
+  if (provider === "openai-compatible") {
+    return (
+      (authMode ?? resolveOpenAICompatibleAuthMode()) === "api-key" &&
+      !isCredentialConfigured(provider, "api-key")
+    );
   }
 
   return (
@@ -116,7 +132,16 @@ export function needsCredentialStep(provider: OpenWikiProvider): boolean {
 }
 
 /** The step that collects the provider's primary credential. */
-export function credentialStep(provider: OpenWikiProvider): PromptStep | null {
+export function credentialStep(
+  provider: OpenWikiProvider,
+  authMode?: OpenAICompatibleAuthMode,
+): PromptStep | null {
+  if (provider === "openai-compatible") {
+    return (authMode ?? resolveOpenAICompatibleAuthMode()) === "entra-id"
+      ? null
+      : "api-key";
+  }
+
   if (providerUsesOAuth(provider)) {
     return "oauth-login";
   }
@@ -146,6 +171,9 @@ export function credentialStep(provider: OpenWikiProvider): PromptStep | null {
 export function getWizardManagedEnvKeys(provider: OpenWikiProvider): string[] {
   return [
     OPENWIKI_PROVIDER_ENV_KEY,
+    ...(provider === "openai-compatible"
+      ? [OPENAI_COMPATIBLE_AUTH_ENV_KEY, OPENAI_COMPATIBLE_ENTRA_SCOPE_ENV_KEY]
+      : []),
     getProviderApiKeyEnvKey(provider),
     getProviderSecretKeyEnvKey(provider),
     getProviderProjectEnvKey(provider),
@@ -202,6 +230,7 @@ export function orderedSetupSteps(
   provider: OpenWikiProvider,
   mode: OpenWikiRunMode,
   allowModeSelection: boolean,
+  authMode?: OpenAICompatibleAuthMode,
 ): PromptStep[] {
   const steps: PromptStep[] = [];
 
@@ -211,7 +240,11 @@ export function orderedSetupSteps(
 
   steps.push("provider");
 
-  const primary = credentialStep(provider);
+  if (provider === "openai-compatible") {
+    steps.push("auth-mode");
+  }
+
+  const primary = credentialStep(provider, authMode);
   if (primary) {
     steps.push(primary);
   }
@@ -231,11 +264,19 @@ export function orderedSetupSteps(
   if (providerRequiresBaseUrl(provider)) {
     steps.push("base-url");
   }
+  if (
+    provider === "openai-compatible" &&
+    (authMode ?? resolveOpenAICompatibleAuthMode()) === "entra-id"
+  ) {
+    steps.push("entra-scope");
+  }
   if (providerRequiresRegion(provider)) {
     steps.push("region");
   }
 
-  steps.push("model");
+  if (!providerHasFixedModel(provider)) {
+    steps.push("model");
+  }
   steps.push("langsmith");
 
   // Personal mode's template is fixed by the run mode, so it skips the
@@ -259,11 +300,12 @@ export function nextSetupStep(
   provider: OpenWikiProvider,
   mode: OpenWikiRunMode,
   allowModeSelection: boolean,
+  authMode?: OpenAICompatibleAuthMode,
 ): PromptStep | null {
   if (step === null) {
     return null;
   }
-  const spine = orderedSetupSteps(provider, mode, allowModeSelection);
+  const spine = orderedSetupSteps(provider, mode, allowModeSelection, authMode);
   const index = spine.indexOf(step);
   return index >= 0 && index + 1 < spine.length ? spine[index + 1] : null;
 }
@@ -339,7 +381,16 @@ export function isRegionConfigured(provider: OpenWikiProvider): boolean {
   return resolveProviderRegion(provider) !== undefined;
 }
 
-export function isCredentialConfigured(provider: OpenWikiProvider): boolean {
+export function isCredentialConfigured(
+  provider: OpenWikiProvider,
+  authMode?: OpenAICompatibleAuthMode,
+): boolean {
+  if (provider === "openai-compatible") {
+    return (authMode ?? resolveOpenAICompatibleAuthMode()) === "entra-id"
+      ? true
+      : Boolean(process.env[OPENAI_COMPATIBLE_API_KEY_ENV_KEY]?.trim());
+  }
+
   return providerUsesOAuth(provider)
     ? hasValidStoredToken()
     : getMissingProviderEnvKey(provider) === null;
@@ -906,6 +957,7 @@ export function getProviderArticle(provider: OpenWikiProvider): "a" | "an" {
     provider === "fireworks" ||
     provider === "gemini" ||
     provider === "gemini-enterprise" ||
+    provider === "mistral" ||
     provider === "nebius"
     ? "a"
     : "an";

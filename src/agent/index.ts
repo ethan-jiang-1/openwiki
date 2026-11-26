@@ -11,7 +11,11 @@ import { ChatOpenAI } from "@langchain/openai";
 import { ChatOpenRouter } from "@langchain/openrouter";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { Event as ProtocolEvent } from "@langchain/protocol";
-import { createDeepAgent } from "deepagents";
+import {
+  createDeepAgent,
+  createFilesystemMiddleware,
+  type DeepAgent,
+} from "deepagents";
 import { createOpenWikiConnectorTools } from "../connectors/tools.js";
 import {
   DEBUG_ENV_KEYS,
@@ -49,6 +53,8 @@ import {
   readCodexTokensFromEnv,
   refreshChatGptTokens,
 } from "./openai-chatgpt-oauth.js";
+import { createBobFetch } from "./bob.js";
+import { createEntraTokenProvider } from "./entra-auth.js";
 import { createSystemPrompt, createUserPrompt } from "./prompt.js";
 import { syncBundledSkills } from "./skills.js";
 import {
@@ -89,9 +95,11 @@ import {
   getProviderCredentialHint,
   getProviderLabel,
   getProviderBaseUrlWarnings,
+  getProviderFixedModel,
   getProviderModelOptions,
   FIREWORKS_BASE_URL_ENV_KEY,
   getProviderRegionEnvKeys,
+  MISTRAL_BASE_URL_ENV_KEY,
   getProviderSecretKeyEnvKey,
   getProvidersForKnownModelId,
   isModelIdForOtherProvider,
@@ -101,7 +109,9 @@ import {
   normalizeModelId,
   NVIDIA_BASE_URL_ENV_KEY,
   OPENAI_BASE_URL_ENV_KEY,
+  OPENAI_COMPATIBLE_AUTH_ENV_KEY,
   OPENAI_COMPATIBLE_BASE_URL_ENV_KEY,
+  OPENAI_COMPATIBLE_ENTRA_SCOPE_ENV_KEY,
   OPENAI_COMPATIBLE_STREAMING_ENV_KEY,
   OPENROUTER_API_KEY_ENV_KEY,
   OPENROUTER_BASE_URL,
@@ -115,17 +125,20 @@ import {
   providerRequiresRegion,
   providerRequiresSecretKey,
   providerUsesAwsSdkCredentials,
+  providerUsesEntraId,
   providerUsesExternalCliAuth,
   providerUsesResponsesApi,
   providerUsesStreaming,
   resolveConfiguredMaxOutputTokens,
   resolveConfiguredProvider,
   resolveOpenAiCompatibleStreamMessages,
+  resolveOpenAICompatibleEntraScope,
   resolveOpenRouterMaxTokens,
   resolveOpenRouterProviderOnly,
   resolveProviderBaseUrl,
   resolveProviderLocation,
   resolveProviderRegion,
+  resolvePageConcurrency,
   resolveProviderRetryAttempts,
   resolveStreamIdleTimeoutForProvider,
   type OpenWikiProvider,
@@ -184,6 +197,7 @@ export async function runOpenWikiAgent(
       const config = await resolveRunConfig(options, (resolved) => {
         telemetryContext.provider = resolved;
       });
+      debugFetchCapture.setRetryAttempts(config.providerRetryAttempts);
       const model = inStageSync(
         "build",
         () =>
@@ -207,6 +221,7 @@ export async function runOpenWikiAgent(
             planningContext: options.userMessage,
             modelId: config.modelId,
             model,
+            pageConcurrency: config.pageConcurrency,
             onEvent: options.onEvent,
           }),
         { errorClass: "agent_error" },
@@ -248,6 +263,7 @@ export async function runOpenWikiAgent(
     const config = await resolveRunConfig(options, (resolved) => {
       telemetryContext.provider = resolved;
     });
+    debugFetchCapture.setRetryAttempts(config.providerRetryAttempts);
 
     return await runOpenWikiAgentCore(
       command,
@@ -287,6 +303,7 @@ async function resolveRunConfig(
   provider: OpenWikiProvider;
   modelId: string;
   providerRetryAttempts: number;
+  pageConcurrency: number;
   maxOutputTokens: number | undefined;
   streamIdleTimeout: number | undefined;
 }> {
@@ -345,7 +362,11 @@ async function resolveRunConfig(
         }`,
       );
     }
-    const providerRetryAttempts = resolveProviderRetryAttempts();
+    const pageConcurrency = resolvePageConcurrency();
+    emitDebug(options, `generation.pageConcurrency=${pageConcurrency}`);
+    const providerRetryAttempts = resolveProviderRetryAttempts(process.env, {
+      pageConcurrency,
+    });
     emitDebug(options, `provider.retryAttempts=${providerRetryAttempts}`);
     const maxOutputTokens = resolveConfiguredMaxOutputTokens(provider);
     emitDebug(
@@ -362,6 +383,7 @@ async function resolveRunConfig(
       provider,
       modelId,
       providerRetryAttempts,
+      pageConcurrency,
       maxOutputTokens,
       streamIdleTimeout,
     };
@@ -392,7 +414,7 @@ export type OpenWikiAgentOptions = {
  */
 export async function createOpenWikiAgent(
   options: OpenWikiAgentOptions,
-): Promise<ReturnType<typeof createDeepAgent>> {
+): Promise<DeepAgent> {
   if (!path.isAbsolute(options.cwd)) {
     throw new Error("OpenWiki agent cwd must be an absolute path.");
   }
@@ -450,7 +472,7 @@ type OpenWikiAgentGraphOptions = OpenWikiAgentOptions & {
 
 function createOpenWikiAgentGraph(
   options: OpenWikiAgentGraphOptions,
-): ReturnType<typeof createDeepAgent> {
+): DeepAgent {
   const wikiBackend = new OpenWikiLocalShellBackend({
     docsOnly: options.command !== "chat",
     openWikiIgnore: options.openWikiIgnore,
@@ -483,8 +505,26 @@ function createOpenWikiAgentGraph(
     tools: createOpenWikiConnectorTools(options.outputMode),
     checkpointer: options.checkpointer,
     backend,
-    middleware:
-      options.command === "chat"
+    middleware: [
+      // DeepAgents also applies this replacement to its general-purpose
+      // subagent. Personal runs have no shell tool, regardless of command.
+      ...(options.outputMode === "local-wiki"
+        ? [
+            createFilesystemMiddleware({
+              backend,
+              permissions: AGENT_FILESYSTEM_PERMISSIONS,
+              tools: [
+                "ls",
+                "read_file",
+                "glob",
+                "grep",
+                "write_file",
+                "edit_file",
+              ],
+            }),
+          ]
+        : []),
+      ...(options.command === "chat"
         ? []
         : [
             ...(translation
@@ -523,7 +563,8 @@ function createOpenWikiAgentGraph(
               conceptType,
               options.runTimestamp,
             ),
-          ],
+          ]),
+    ],
     skills: ["/skills/"],
     subagents: [],
     permissions: AGENT_FILESYSTEM_PERMISSIONS,
@@ -1021,6 +1062,11 @@ export function resolveModelId(
   options: OpenWikiRunOptions,
   provider: OpenWikiProvider,
 ): string {
+  const fixedModel = getProviderFixedModel(provider);
+  if (fixedModel) {
+    return fixedModel;
+  }
+
   const configuredModelId =
     options.modelId ?? process.env[OPENWIKI_MODEL_ID_ENV_KEY];
 
@@ -1081,6 +1127,17 @@ export function createModel(
   maxOutputTokens?: number,
   streamIdleTimeout?: number,
 ) {
+  if (provider === "mistral") {
+    if (!getProviderApiKey(provider)?.trim()) {
+      throw new Error("MISTRAL_API_KEY is required for the Mistral provider.");
+    }
+    if (process.env.OPENAI_CUSTOM_HEADERS?.trim()) {
+      throw new Error(
+        "Remove OPENAI_CUSTOM_HEADERS when using the Mistral provider.",
+      );
+    }
+  }
+
   const retryOptions = { maxRetries: providerRetryAttempts };
   const configuredMaxOutputTokens =
     maxOutputTokens ?? resolveConfiguredMaxOutputTokens(provider);
@@ -1170,6 +1227,12 @@ export function createModel(
       apiKey: getProviderApiKey(provider),
       ...(baseURL ? { anthropicApiUrl: baseURL } : {}),
       ...(maxTokens !== undefined ? { maxTokens } : {}),
+      // The Anthropic SDK rejects non-streaming requests whose max_tokens
+      // implies more than 10 minutes (above ~21,333 tokens) before sending
+      // them, which caps OPENWIKI_MAX_OUTPUT_TOKENS well below the models'
+      // real output limits (issue #1046). Streaming has no such guard, and
+      // ChatAnthropic still returns one aggregated message from `.invoke()`.
+      streaming: true,
       ...retryOptions,
     });
   }
@@ -1241,16 +1304,46 @@ export function createModel(
   }
 
   const baseURL = resolveProviderBaseUrl(provider);
+  const configuration =
+    provider === "openai-compatible" && !chatOpenAiUsesResponsesApi
+      ? {
+          ...(baseURL ? { baseURL } : {}),
+          fetch: createOpenAiCompatibleFetch(),
+        }
+      : baseURL
+        ? {
+            baseURL,
+          }
+        : undefined;
+
+  if (provider === "bob") {
+    return new ChatOpenAI({
+      // Placeholder silences the ChatOpenAI constructor's "missing apiKey"
+      // check; the real key is injected via the custom fetch wrapper below.
+      apiKey: "bob-placeholder",
+      configuration: {
+        baseURL: baseURL ?? "https://api.us-east.bob.ibm.com/inference/v1",
+        fetch: createBobFetch(),
+      },
+      model: modelId,
+      ...maxTokensOptions,
+      ...(providerUsesStreaming(provider) ? { streaming: true } : {}),
+      ...retryOptions,
+    });
+  }
 
   return new ChatOpenAI({
-    apiKey: getProviderApiKey(provider),
-    configuration: baseURL
-      ? {
-          baseURL,
-        }
-      : undefined,
+    apiKey: providerUsesEntraId(provider)
+      ? createEntraTokenProvider(baseURL, resolveOpenAICompatibleEntraScope())
+      : getProviderApiKey(provider),
+    configuration,
     model: modelId,
     useResponsesApi: chatOpenAiUsesResponsesApi,
+    // OpenAI-compatible gateways may treat omitted strict mode differently.
+    // These tools use optional fields, so preserve their non-strict semantics.
+    ...(provider === "openai-compatible"
+      ? { supportsStrictToolCalling: false }
+      : {}),
     ...maxTokensOptions,
     ...responsesReasoningOptions,
     ...chatCompletionsReasoningOptions,
@@ -1261,6 +1354,114 @@ export function createModel(
     ...(providerUsesStreaming(provider) ? { streaming: true } : {}),
     ...retryOptions,
   });
+}
+
+function createOpenAiCompatibleFetch(): typeof fetch {
+  return (input, init) =>
+    globalThis.fetch(
+      input,
+      normalizeOpenAiCompatibleChatCompletionsInit(input, init) ?? init,
+    );
+}
+
+function normalizeOpenAiCompatibleChatCompletionsInit(
+  input: Parameters<typeof fetch>[0],
+  init: Parameters<typeof fetch>[1],
+): Parameters<typeof fetch>[1] | null {
+  if (!isOpenAiCompatibleChatCompletionsRequest(input, init)) {
+    return null;
+  }
+
+  const body = typeof init?.body === "string" ? init.body : null;
+  const parsedBody = parseJsonRecord(body);
+  const normalizedBody =
+    parsedBody === null
+      ? null
+      : normalizeOpenAiCompatibleChatCompletionsBody(parsedBody);
+
+  return normalizedBody === null
+    ? null
+    : {
+        ...init,
+        body: JSON.stringify(normalizedBody),
+      };
+}
+
+function isOpenAiCompatibleChatCompletionsRequest(
+  input: Parameters<typeof fetch>[0],
+  init: Parameters<typeof fetch>[1],
+): boolean {
+  const method = init?.method;
+
+  if (method !== undefined && method.toUpperCase() !== "POST") {
+    return false;
+  }
+
+  const url = getFetchInputUrl(input);
+
+  if (url === null) {
+    return false;
+  }
+
+  try {
+    return new URL(url).pathname.endsWith("/chat/completions");
+  } catch {
+    return url.includes("/chat/completions");
+  }
+}
+
+function normalizeOpenAiCompatibleChatCompletionsBody(
+  body: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const messages = body.messages;
+
+  if (!Array.isArray(messages)) {
+    return null;
+  }
+
+  let changed = false;
+  const normalizedMessages = (messages as unknown[]).map((message) => {
+    if (!isRecord(message)) {
+      return message;
+    }
+
+    const content = normalizeOpenAiCompatibleTextContent(message.content);
+
+    if (content === null) {
+      return message;
+    }
+
+    changed = true;
+    return { ...message, content };
+  });
+
+  return changed ? { ...body, messages: normalizedMessages } : null;
+}
+
+function normalizeOpenAiCompatibleTextContent(
+  content: unknown,
+): Record<string, unknown>[] | null {
+  if (!Array.isArray(content) || content.length !== 1) {
+    return null;
+  }
+
+  const [nestedContent] = content as unknown[];
+
+  if (!Array.isArray(nestedContent) || nestedContent.length === 0) {
+    return null;
+  }
+
+  return nestedContent.every(isOpenAiCompatibleTextContentBlock)
+    ? nestedContent
+    : null;
+}
+
+function isOpenAiCompatibleTextContentBlock(
+  block: unknown,
+): block is Record<string, unknown> {
+  return (
+    isRecord(block) && block.type === "text" && typeof block.text === "string"
+  );
 }
 
 const CHATGPT_LOGIN_INCOMPLETE_MESSAGE =
@@ -1397,6 +1598,9 @@ function createGeminiEnterpriseModel(
               }),
           ),
         ...(maxTokens !== undefined ? { maxTokens } : {}),
+        // Same non-streaming max_tokens guard as the direct Anthropic provider
+        // (AnthropicVertex shares the SDK's Messages resource); see #1046.
+        streaming: true,
         ...retryOptions,
       });
     }
@@ -1957,6 +2161,11 @@ type OpenRouterFetchCapture = {
   clearLastFailure: () => void;
   getLastFailure: () => OpenRouterFetchFailure | null;
   restore: () => void;
+  setRetryAttempts: (retryAttempts: number) => void;
+};
+
+type OpenRouterFetchOptions = {
+  sleep?: (ms: number) => Promise<void>;
 };
 
 type OpenRouterFetchFailure = {
@@ -1980,8 +2189,11 @@ type OpenRouterRequestSummary = {
 type OpenRouterResponseSummary = {
   bodyPreview: string;
   headers: Record<string, string>;
+  malformedReason?: string;
   status: number;
   statusText: string;
+  upstreamStatus?: number;
+  upstreamStatusText?: string;
 };
 
 const OPENROUTER_DEBUG_PROPERTY = "openRouterDebug";
@@ -1998,10 +2210,14 @@ const OPENROUTER_DEBUG_BODY_LIMIT = 4_000;
 type OpenRouterFetchSink = {
   lastFailure: OpenRouterFetchFailure | null;
   options: OpenWikiRunOptions;
+  retryAttempts: number;
+  sleep: (ms: number) => Promise<void>;
 };
 
 const activeOpenRouterSinks = new Set<OpenRouterFetchSink>();
 let openRouterOriginalFetch: typeof fetch | null = null;
+const OPENROUTER_PROVIDER_ERROR_RETRY_BASE_DELAY_MS = 1_000;
+const OPENROUTER_PROVIDER_ERROR_RETRY_MAX_DELAY_MS = 30_000;
 
 function openRouterDebugFetch(
   input: Parameters<typeof fetch>[0],
@@ -2024,31 +2240,90 @@ function openRouterDebugFetch(
   };
 
   return (async () => {
+    let attempt = 0;
+
     try {
-      const response = await baseFetch(input, init);
+      while (true) {
+        const response = await baseFetch(input, init);
 
-      if (!response.ok) {
-        const failure: OpenRouterFetchFailure = {
-          request,
-          response: {
-            bodyPreview: await readResponseBodyPreview(response),
-            headers: getSafeResponseHeaders(response.headers),
-            status: response.status,
-            statusText: response.statusText,
-          },
-        };
-        recordFailure(failure);
-        for (const sink of activeOpenRouterSinks) {
-          emitDebug(
-            sink.options,
-            `openrouter.http status=${response.status} statusText=${JSON.stringify(
-              response.statusText,
-            )}`,
-          );
+        if (response.ok && request.stream === false) {
+          const malformedResponse =
+            await createMalformedOpenRouterResponse(response);
+
+          if (malformedResponse) {
+            const body = await readResponseBody(response);
+            const failure: OpenRouterFetchFailure = {
+              request,
+              response: {
+                bodyPreview: body.preview,
+                headers: getSafeResponseHeaders(response.headers),
+                malformedReason: malformedResponse.reason,
+                status: malformedResponse.response.status,
+                statusText: malformedResponse.response.statusText,
+                upstreamStatus: response.status,
+                upstreamStatusText: response.statusText,
+              },
+            };
+            recordFailure(failure);
+            for (const sink of activeOpenRouterSinks) {
+              emitDebug(
+                sink.options,
+                `openrouter.http status=${malformedResponse.response.status} statusText=${JSON.stringify(
+                  malformedResponse.response.statusText,
+                )} upstreamStatus=${response.status} malformed=${JSON.stringify(
+                  malformedResponse.reason,
+                )}`,
+              );
+            }
+
+            await response.body?.cancel().catch(() => undefined);
+            return malformedResponse.response;
+          }
         }
-      }
 
-      return response;
+        if (!response.ok) {
+          const body = await readResponseBody(response);
+          const failure: OpenRouterFetchFailure = {
+            request,
+            response: {
+              bodyPreview: body.preview,
+              headers: getSafeResponseHeaders(response.headers),
+              status: response.status,
+              statusText: response.statusText,
+            },
+          };
+          recordFailure(failure);
+          for (const sink of activeOpenRouterSinks) {
+            emitDebug(
+              sink.options,
+              `openrouter.http status=${response.status} statusText=${JSON.stringify(
+                response.statusText,
+              )}`,
+            );
+          }
+
+          const retry = getOpenRouterProviderErrorRetry();
+          if (
+            attempt < retry.maxRetries &&
+            isOpenRouterRequestResendable(input, init) &&
+            isTransientOpenRouterProvider404(response, body.raw)
+          ) {
+            attempt += 1;
+            const delayMs = getOpenRouterProviderErrorRetryDelayMs(attempt);
+            for (const sink of activeOpenRouterSinks) {
+              emitDebug(
+                sink.options,
+                `openrouter.retry status=404 attempt=${attempt}/${retry.maxRetries} delayMs=${delayMs}`,
+              );
+            }
+            await response.body?.cancel().catch(() => undefined);
+            await retry.sleep(delayMs);
+            continue;
+          }
+        }
+
+        return response;
+      }
     } catch (error) {
       recordFailure({
         fetchError: error instanceof Error ? error.message : String(error),
@@ -2059,6 +2334,109 @@ function openRouterDebugFetch(
   })();
 }
 
+async function createMalformedOpenRouterResponse(
+  response: Response,
+): Promise<{ reason: string; response: Response } | null> {
+  let body: unknown;
+
+  try {
+    body = await response.clone().json();
+  } catch {
+    return {
+      reason: "invalid_json",
+      response: createOpenRouterMalformedSuccessResponse(
+        response,
+        "the response body was not valid JSON",
+      ),
+    };
+  }
+
+  const reason = getMalformedOpenRouterChatCompletionReason(body);
+
+  if (reason === null) {
+    return null;
+  }
+
+  return {
+    reason,
+    response: createOpenRouterMalformedSuccessResponse(
+      response,
+      describeMalformedOpenRouterReason(reason),
+    ),
+  };
+}
+
+function getMalformedOpenRouterChatCompletionReason(
+  body: unknown,
+): string | null {
+  if (!isRecord(body)) {
+    return "root_not_object";
+  }
+
+  if (!Array.isArray(body.choices) || body.choices.length === 0) {
+    return "missing_choices";
+  }
+
+  const firstChoice: unknown = body.choices[0];
+
+  if (!isRecord(firstChoice)) {
+    return "first_choice_not_object";
+  }
+
+  if (!isRecord(firstChoice.message)) {
+    return "missing_choices_0_message";
+  }
+
+  return null;
+}
+
+function describeMalformedOpenRouterReason(reason: string): string {
+  switch (reason) {
+    case "root_not_object":
+      return "the JSON root was not an object";
+    case "missing_choices":
+      return "choices was missing or empty";
+    case "first_choice_not_object":
+      return "choices[0] was not an object";
+    case "missing_choices_0_message":
+      return "choices[0].message was missing or not an object";
+    default:
+      return reason;
+  }
+}
+
+function createOpenRouterMalformedSuccessResponse(
+  upstreamResponse: Response,
+  detail: string,
+): Response {
+  const headers = new Headers({ "content-type": "application/json" });
+
+  for (const [key, value] of Object.entries(
+    getSafeResponseHeaders(upstreamResponse.headers),
+  )) {
+    headers.set(key, value);
+  }
+
+  return new Response(
+    JSON.stringify({
+      error: {
+        code: 502,
+        message: `OpenRouter returned a malformed successful non-streaming chat completion response: ${detail}.`,
+        metadata: {
+          openwiki_reason: "malformed_success_response",
+          upstream_status: upstreamResponse.status,
+          upstream_status_text: upstreamResponse.statusText,
+        },
+      },
+    }),
+    {
+      headers,
+      status: 502,
+      statusText: "Bad Gateway",
+    },
+  );
+}
+
 /**
  * Installs the reference-counted OpenRouter debug-fetch wrapper for one run and
  * returns that run's capture handle. Exported for testing. Safe under
@@ -2067,8 +2445,15 @@ function openRouterDebugFetch(
  */
 export function installOpenRouterDebugFetch(
   options: OpenWikiRunOptions,
+  retryAttempts = 0,
+  fetchOptions: OpenRouterFetchOptions = {},
 ): OpenRouterFetchCapture {
-  const sink: OpenRouterFetchSink = { lastFailure: null, options };
+  const sink: OpenRouterFetchSink = {
+    lastFailure: null,
+    options,
+    retryAttempts,
+    sleep: fetchOptions.sleep ?? sleep,
+  };
 
   // Install the wrapper once, capturing the genuine original fetch. Concurrent
   // runs share the single wrapper and each detach their own sink; the global
@@ -2095,7 +2480,76 @@ export function installOpenRouterDebugFetch(
         openRouterOriginalFetch = null;
       }
     },
+    setRetryAttempts: (updatedRetryAttempts) => {
+      sink.retryAttempts = updatedRetryAttempts;
+    },
   };
+}
+
+function getOpenRouterProviderErrorRetry(): {
+  maxRetries: number;
+  sleep: (ms: number) => Promise<void>;
+} {
+  let maxRetries = 0;
+  let retrySleep = sleep;
+
+  // The OpenRouter wrapper is process-global, so retry follows the same
+  // best-effort active-run fan-out contract used for debug capture.
+  for (const sink of activeOpenRouterSinks) {
+    if (sink.retryAttempts > maxRetries) {
+      maxRetries = sink.retryAttempts;
+      retrySleep = sink.sleep;
+    }
+  }
+
+  return { maxRetries, sleep: retrySleep };
+}
+
+function getOpenRouterProviderErrorRetryDelayMs(attempt: number): number {
+  return Math.min(
+    OPENROUTER_PROVIDER_ERROR_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+    OPENROUTER_PROVIDER_ERROR_RETRY_MAX_DELAY_MS,
+  );
+}
+
+function isOpenRouterRequestResendable(
+  input: Parameters<typeof fetch>[0],
+  init: Parameters<typeof fetch>[1],
+): boolean {
+  if (input instanceof Request && input.body !== null) {
+    return false;
+  }
+
+  return (
+    init?.body === undefined ||
+    init.body === null ||
+    typeof init.body === "string"
+  );
+}
+
+function isTransientOpenRouterProvider404(
+  response: Response,
+  rawBody: string | null,
+): boolean {
+  if (response.status !== 404 || rawBody === null) {
+    return false;
+  }
+
+  const parsedBody = parseJsonRecord(rawBody);
+  if (parsedBody === null) {
+    return false;
+  }
+
+  const error = isRecord(parsedBody?.error) ? parsedBody.error : parsedBody;
+  const message = getStringRecordValue(error, "message");
+  const metadata = isRecord(error?.metadata) ? error.metadata : null;
+
+  return (
+    metadata !== null &&
+    message === "Provider returned error" &&
+    metadata.raw === "" &&
+    typeof metadata.provider_name === "string"
+  );
 }
 
 function attachOpenRouterDebugInfo(
@@ -2224,19 +2678,32 @@ function countMessageContentChars(content: unknown): number {
   }, 0);
 }
 
-async function readResponseBodyPreview(response: Response): Promise<string> {
+async function readResponseBody(
+  response: Response,
+): Promise<{ preview: string; raw: string | null }> {
   try {
     const body = await response.clone().text();
     const sanitizedBody = sanitizeOpenRouterResponseBody(body);
 
-    return sanitizedBody.length <= OPENROUTER_DEBUG_BODY_LIMIT
-      ? sanitizedBody
-      : `${sanitizedBody.slice(0, OPENROUTER_DEBUG_BODY_LIMIT - 3)}...`;
+    return {
+      preview:
+        sanitizedBody.length <= OPENROUTER_DEBUG_BODY_LIMIT
+          ? sanitizedBody
+          : `${sanitizedBody.slice(0, OPENROUTER_DEBUG_BODY_LIMIT - 3)}...`,
+      raw: body,
+    };
   } catch (error) {
-    return `Unable to read response body: ${
-      error instanceof Error ? error.message : String(error)
-    }`;
+    return {
+      preview: `Unable to read response body: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      raw: null,
+    };
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function sanitizeOpenRouterResponseBody(body: string): string {
@@ -2302,6 +2769,7 @@ export function formatEnvironmentDebugValue(
     key === BASETEN_BASE_URL_ENV_KEY ||
     key === COPILOT_BASE_URL_ENV_KEY ||
     key === FIREWORKS_BASE_URL_ENV_KEY ||
+    key === MISTRAL_BASE_URL_ENV_KEY ||
     key === NVIDIA_BASE_URL_ENV_KEY ||
     key === OPENAI_BASE_URL_ENV_KEY ||
     key === OPENAI_COMPATIBLE_BASE_URL_ENV_KEY
@@ -2325,6 +2793,8 @@ export function formatEnvironmentDebugValue(
     key === OPENWIKI_STREAM_IDLE_TIMEOUT_ENV_KEY ||
     key === OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY ||
     key === OPENWIKI_OPENROUTER_MAX_TOKENS_ENV_KEY ||
+    key === OPENAI_COMPATIBLE_AUTH_ENV_KEY ||
+    key === OPENAI_COMPATIBLE_ENTRA_SCOPE_ENV_KEY ||
     key === OPENAI_COMPATIBLE_STREAMING_ENV_KEY ||
     key === BEDROCK_AWS_REGION_ENV_KEY
   ) {

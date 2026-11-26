@@ -56,6 +56,24 @@ describe("splitFrontmatter", () => {
     expect(meta).toEqual({});
     expect(body).toBe("# Just markdown\n");
   });
+
+  test("treats a closing delimiter at end of file as a valid frontmatter close", () => {
+    const { meta, body } = splitFrontmatter(
+      ["---", "type: Reference", "title: Stub page", "---"].join("\n"),
+    );
+    expect(meta.type).toBe("Reference");
+    expect(meta.title).toBe("Stub page");
+    expect(body).toBe("");
+  });
+
+  test("treats CRLF files ending at the closing delimiter as an empty body", () => {
+    const { meta, body } = splitFrontmatter(
+      "---\r\ntype: Reference\r\ntitle: Stub page\r\n---",
+    );
+    expect(meta.type).toBe("Reference");
+    expect(meta.title).toBe("Stub page");
+    expect(body).toBe("");
+  });
 });
 
 describe("firstHeading", () => {
@@ -66,6 +84,16 @@ describe("firstHeading", () => {
 });
 
 describe("buildGraph", () => {
+  test("strips front matter from a stub page that ends at the closing delimiter", async () => {
+    const root = await makeWiki({
+      "stub.md": "---\ntype: Reference\ntitle: Stub page\n---",
+    });
+    const graph = await buildGraph(root);
+    expect(graph.nodes).toHaveLength(1);
+    expect(graph.nodes[0].body).toBe("");
+    expect(graph.nodes[0].size).toBe(0);
+  });
+
   test("builds nodes, resolves links to edges, and records backlinks", async () => {
     const root = await makeWiki({
       "index.md": "---\ntype: Section\n---\n# Files\n[Arch](architecture.md)\n",
@@ -107,6 +135,68 @@ describe("buildGraph", () => {
     });
     const graph = await buildGraph(root);
     expect(graph.edges).toEqual([]);
+  });
+
+  test("decodes Unicode and special-character links and records backlinks", async () => {
+    const name = "靖难之役 #1%.md";
+    const href = encodeURIComponent(name);
+    const root = await makeWiki({
+      "events/index.md": `[Event](${href})\n[Same event](${href}#details)\n[Person](../${encodeURIComponent("人物")}/${encodeURIComponent("朱棣.md")})\n`,
+      [`events/${name}`]: "# Event\n",
+      "人物/朱棣.md": "# Person\n",
+      "literal.md": "[Decode once](%25E4%25B8%2580.md)\n",
+      "%E4%B8%80.md": "# Literal percent-encoded filename\n",
+    });
+
+    const graph = await buildGraph(root);
+
+    expect(graph.edges).toHaveLength(3);
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        { source: "events/index", target: "events/靖难之役 #1%" },
+        { source: "events/index", target: "人物/朱棣" },
+        { source: "literal", target: "%E4%B8%80" },
+      ]),
+    );
+    expect(
+      graph.nodes.find((n) => n.id === "events/靖难之役 #1%")?.backlinks,
+    ).toEqual(["events/index"]);
+  });
+
+  test("preserves raw percent and Unicode filenames and deduplicates encoded links", async () => {
+    const root = await makeWiki({
+      "index.md":
+        "[Progress](progress100%.md)\n[Encoded progress](progress100%25.md)\n[Unicode](朱棣.md)\n",
+      "progress100%.md": "# Progress\n",
+      "朱棣.md": "# Person\n",
+      "raw.md": "[Progress](progress100%.md)\n",
+    });
+
+    const graph = await buildGraph(root);
+
+    expect(graph.edges).toHaveLength(3);
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        { source: "index", target: "progress100%" },
+        { source: "index", target: "朱棣" },
+        { source: "raw", target: "progress100%" },
+      ]),
+    );
+    expect(graph.nodes.find((n) => n.id === "progress100%")?.backlinks).toEqual(
+      ["index", "raw"],
+    );
+  });
+
+  test("malformed URL encoding does not prevent valid graph links", async () => {
+    const root = await makeWiki({
+      "index.md":
+        "[Invalid escape](bad%ZZ.md)\n[Incomplete encoding](%E4%B8.md)\n[Valid page](valid.md)\n",
+      "valid.md": "# Valid page\n",
+    });
+
+    const graph = await buildGraph(root);
+
+    expect(graph.edges).toEqual([{ source: "index", target: "valid" }]);
   });
 
   test("does not follow a symlink that escapes the wiki root", async () => {

@@ -67,6 +67,25 @@ describe("createSystemPrompt output language", () => {
  * type non-absolute host paths into filesystem tools and crash the run.
  */
 describe("createSystemPrompt filesystem path guidance", () => {
+  test.each(["chat", "init", "update"] as const)(
+    "%s personal prompts direct raw reads through connector tools",
+    (command) => {
+      const system = createSystemPrompt(command, "local-wiki");
+      const user = createUserPrompt(
+        command,
+        emptyContext(),
+        "Inspect the wiki",
+        "local-wiki",
+        "/tmp/wiki",
+      );
+      expect(system).toContain("Shell execution is disabled in personal mode");
+      expect(system).toContain("openwiki_read_raw_item");
+      expect(system).not.toContain("shell execute");
+      expect(system).not.toContain("explicit shell reads");
+      expect(user).not.toContain("Shell execute commands run on the host");
+    },
+  );
+
   const commands = ["chat"] as const;
 
   describe("repository mode", () => {
@@ -205,6 +224,25 @@ describe("createUserPrompt", () => {
   test("chat returns the user message verbatim, trimmed", () => {
     expect(createUserPrompt("chat", emptyContext(), "  what changed?  ")).toBe(
       "what changed?",
+    );
+  });
+
+  test("keeps dollar sequences in the user message literal", () => {
+    const message =
+      "What do `echo $$` and `$'\\n'` do in deploy.sh? Also $& and $`.";
+
+    expect(createUserPrompt("chat", emptyContext(), message)).toBe(message);
+    expect(
+      createUserPrompt("chat", emptyContext(), message, "repository", "/repo"),
+    ).not.toContain("{RUNTIME_CONTEXT}");
+    expect(
+      createUserPrompt(
+        "init",
+        emptyContext({ wikiGoal: "Cover the $$ PID trick" }),
+        message,
+      ),
+    ).toContain(
+      `Cover the $$ PID trick\n\nAdditional user instruction:\n${message}`,
     );
   });
 

@@ -1,9 +1,14 @@
 import { describe, expect, test } from "vitest";
 import {
   BASETEN_BASE_URL_ENV_KEY,
+  BOB_BASE_URL_ENV_KEY,
   BEDROCK_DEFAULT_MAX_TOKENS,
   DEFAULT_MODEL_ID,
+  DEFAULT_OPENAI_COMPATIBLE_ENTRA_SCOPE,
+  DEFAULT_PAGE_CONCURRENCY,
   DEFAULT_PROVIDER_RETRY_ATTEMPTS,
+  MAX_PAGE_CONCURRENCY,
+  PARALLEL_PROVIDER_RETRY_ATTEMPTS,
   DEFAULT_PROVIDER,
   DEFAULT_VERTEX_LOCATION,
   getDefaultModelId,
@@ -11,6 +16,7 @@ import {
   getMissingProviderEnvKey,
   getProviderApiKeyEnvKey,
   getProviderAuthMethod,
+  getProviderCredentialHint,
   getProviderModelOptions,
   getProviderRegionEnvKey,
   FIREWORKS_BASE_URL_ENV_KEY,
@@ -21,11 +27,13 @@ import {
   isValidProviderBaseUrl,
   isValidModelId,
   isValidProvider,
+  MISTRAL_BASE_URL_ENV_KEY,
   NEBIUS_BASE_URL,
   NVIDIA_BASE_URL_ENV_KEY,
   normalizeModelId,
   normalizeProvider,
   providerRequiresApiKey,
+  providerUsesEntraId,
   providerRequiresRegion,
   providerRequiresSecretKey,
   providerUsesAwsSdkCredentials,
@@ -37,11 +45,15 @@ import {
   resolveOpenAiCompatibleReasoningEffortSupported,
   resolveOpenAiCompatibleStreaming,
   resolveOpenAiCompatibleUseResponsesApi,
+  resolveOpenAICompatibleAuthMode,
+  resolveOpenAICompatibleEntraScope,
   resolveOpenRouterMaxTokens,
   resolveOpenRouterProviderOnly,
   resolveProviderBaseUrl,
   resolveProviderLocation,
   resolveProviderRegion,
+  resolvePageConcurrency,
+  resolveTraceThreadId,
   resolveProviderRetryAttempts,
   resolveStreamIdleTimeout,
   resolveStreamIdleTimeoutForProvider,
@@ -59,6 +71,7 @@ describe("isValidModelId", () => {
     expect(isValidModelId("gpt-5.4-mini")).toBe(true);
     expect(isValidModelId("claude-sonnet-5")).toBe(true);
     expect(isValidModelId("nvidia/nemotron-3-super-120b-a12b")).toBe(true);
+    expect(isValidModelId("mistral-medium-3-5")).toBe(true);
   });
 
   test("accepts comma-bearing gateway/proxy routing ids", () => {
@@ -121,6 +134,7 @@ describe("normalizeProvider / isValidProvider", () => {
     expect(isValidProvider("openai-compatible")).toBe(true);
     expect(isValidProvider("copilot")).toBe(true);
     expect(isValidProvider("nvidia")).toBe(true);
+    expect(isValidProvider("mistral")).toBe(true);
     expect(isValidProvider("gemini")).toBe(true);
     expect(isValidProvider("gemini-enterprise")).toBe(true);
     expect(isValidProvider("nope")).toBe(false);
@@ -160,6 +174,10 @@ describe("resolveConfiguredProvider", () => {
 
   test("falls back to nvidia when only an NVIDIA key is present", () => {
     expect(resolveConfiguredProvider({ NVIDIA_API_KEY: "x" })).toBe("nvidia");
+  });
+
+  test("falls back to mistral when only a Mistral key is present", () => {
+    expect(resolveConfiguredProvider({ MISTRAL_API_KEY: "x" })).toBe("mistral");
   });
 
   test("falls back to bedrock when a complete legacy key pair is present", () => {
@@ -212,6 +230,9 @@ describe("resolveProviderBaseUrl", () => {
     expect(resolveProviderBaseUrl("nvidia", {})).toBe(
       "https://integrate.api.nvidia.com/v1",
     );
+    expect(resolveProviderBaseUrl("mistral", {})).toBe(
+      "https://api.mistral.ai/v1",
+    );
   });
 
   test("prefers a non-empty env override over the default", () => {
@@ -234,6 +255,11 @@ describe("resolveProviderBaseUrl", () => {
       }),
     ).toBe("https://gateway.example/baseten/v1");
     expect(
+      resolveProviderBaseUrl("bob", {
+        [BOB_BASE_URL_ENV_KEY]: "https://gateway.example/bob/v1",
+      }),
+    ).toBe("https://gateway.example/bob/v1");
+    expect(
       resolveProviderBaseUrl("fireworks", {
         [FIREWORKS_BASE_URL_ENV_KEY]: "https://gateway.example/fireworks/v1",
       }),
@@ -243,6 +269,11 @@ describe("resolveProviderBaseUrl", () => {
         [NVIDIA_BASE_URL_ENV_KEY]: "https://gateway.example/nvidia/v1",
       }),
     ).toBe("https://gateway.example/nvidia/v1");
+    expect(
+      resolveProviderBaseUrl("mistral", {
+        [MISTRAL_BASE_URL_ENV_KEY]: "https://gateway.example/mistral/v1",
+      }),
+    ).toBe("https://gateway.example/mistral/v1");
   });
 
   test("ignores a whitespace-only override", () => {
@@ -261,6 +292,9 @@ describe("resolveProviderBaseUrl", () => {
     expect(
       resolveProviderBaseUrl("nvidia", { [NVIDIA_BASE_URL_ENV_KEY]: "   " }),
     ).toBe("https://integrate.api.nvidia.com/v1");
+    expect(
+      resolveProviderBaseUrl("mistral", { [MISTRAL_BASE_URL_ENV_KEY]: "   " }),
+    ).toBe("https://api.mistral.ai/v1");
   });
 
   test("returns undefined for a provider with no default and no override", () => {
@@ -268,7 +302,83 @@ describe("resolveProviderBaseUrl", () => {
   });
 });
 
+describe("resolveTraceThreadId", () => {
+  test("defaults to the run id", () => {
+    expect(resolveTraceThreadId("run-1", {})).toBe("run-1");
+  });
+
+  test("prefers a trimmed OPENWIKI_TRACE_THREAD_ID", () => {
+    expect(
+      resolveTraceThreadId("run-1", {
+        OPENWIKI_TRACE_THREAD_ID: " ingest-a1 ",
+      }),
+    ).toBe("ingest-a1");
+  });
+
+  test("ignores a blank override", () => {
+    expect(
+      resolveTraceThreadId("run-1", { OPENWIKI_TRACE_THREAD_ID: "   " }),
+    ).toBe("run-1");
+  });
+});
+
+describe("resolvePageConcurrency", () => {
+  test("defaults to one sequential worker", () => {
+    expect(resolvePageConcurrency({})).toBe(DEFAULT_PAGE_CONCURRENCY);
+    expect(DEFAULT_PAGE_CONCURRENCY).toBe(1);
+  });
+
+  test("accepts integers up to the cap and trims whitespace", () => {
+    expect(resolvePageConcurrency({ OPENWIKI_PAGE_CONCURRENCY: "1" })).toBe(1);
+    expect(resolvePageConcurrency({ OPENWIKI_PAGE_CONCURRENCY: " 4 " })).toBe(
+      4,
+    );
+    expect(
+      resolvePageConcurrency({
+        OPENWIKI_PAGE_CONCURRENCY: String(MAX_PAGE_CONCURRENCY),
+      }),
+    ).toBe(MAX_PAGE_CONCURRENCY);
+  });
+
+  test("rejects values outside 1 to the cap", () => {
+    for (const value of [
+      "",
+      "   ",
+      "0",
+      "-1",
+      "1.5",
+      "abc",
+      "1e1",
+      String(MAX_PAGE_CONCURRENCY + 1),
+    ]) {
+      expect(() =>
+        resolvePageConcurrency({ OPENWIKI_PAGE_CONCURRENCY: value }),
+      ).toThrow(
+        `Invalid OPENWIKI_PAGE_CONCURRENCY. Expected an integer from 1 to ${MAX_PAGE_CONCURRENCY}.`,
+      );
+    }
+  });
+});
+
 describe("resolveProviderRetryAttempts", () => {
+  test("raises the default for concurrent page workers unless overridden", () => {
+    expect(resolveProviderRetryAttempts({}, { pageConcurrency: 1 })).toBe(
+      DEFAULT_PROVIDER_RETRY_ATTEMPTS,
+    );
+    expect(resolveProviderRetryAttempts({}, { pageConcurrency: 2 })).toBe(
+      PARALLEL_PROVIDER_RETRY_ATTEMPTS,
+    );
+    expect(PARALLEL_PROVIDER_RETRY_ATTEMPTS).toBeGreaterThan(
+      DEFAULT_PROVIDER_RETRY_ATTEMPTS,
+    );
+    expect(
+      resolveProviderRetryAttempts(
+        { OPENWIKI_PROVIDER_RETRY_ATTEMPTS: "2" },
+        { pageConcurrency: 4 },
+      ),
+    ).toBe(2);
+  });
+
   test("uses the OpenWiki default when no override is set", () => {
     expect(resolveProviderRetryAttempts({})).toBe(
       DEFAULT_PROVIDER_RETRY_ATTEMPTS,
@@ -643,6 +753,12 @@ describe("providerUsesStreaming", () => {
     expect(providerUsesStreaming("copilot")).toBe(true);
   });
 
+  test("always forces streaming for bob", () => {
+    delete process.env.OPENWIKI_OPENAI_COMPATIBLE_STREAMING;
+
+    expect(providerUsesStreaming("bob")).toBe(true);
+  });
+
   test("never applies to the other providers sharing the ChatOpenAI branch", () => {
     process.env.OPENWIKI_OPENAI_COMPATIBLE_STREAMING = "true";
 
@@ -651,6 +767,7 @@ describe("providerUsesStreaming", () => {
         "openai",
         "baseten",
         "fireworks",
+        "mistral",
         "nebius",
         "nvidia",
       ] as const) {
@@ -887,9 +1004,89 @@ describe("providerRequiresApiKey / getProviderApiKeyEnvKey", () => {
     expect(providerRequiresApiKey("openrouter")).toBe(true);
     expect(getProviderApiKeyEnvKey("anthropic")).toBe("ANTHROPIC_API_KEY");
   });
+
+  test("Entra removes only the OpenAI-compatible static-key requirement", () => {
+    const entraEnv = { OPENAI_COMPATIBLE_AUTH: "entra-id" };
+    expect(providerRequiresApiKey("openai-compatible", {})).toBe(true);
+    expect(providerRequiresApiKey("openai-compatible", entraEnv)).toBe(false);
+    expect(providerRequiresApiKey("anthropic", entraEnv)).toBe(true);
+    expect(providerUsesEntraId("openai-compatible", entraEnv)).toBe(true);
+    expect(providerUsesEntraId("anthropic", entraEnv)).toBe(false);
+  });
+});
+
+describe("OpenAI-compatible authentication configuration", () => {
+  test("defaults missing or blank auth mode to the existing API-key mode", () => {
+    expect(resolveOpenAICompatibleAuthMode({})).toBe("api-key");
+    expect(
+      resolveOpenAICompatibleAuthMode({ OPENAI_COMPATIBLE_AUTH: "  " }),
+    ).toBe("api-key");
+    expect(
+      resolveOpenAICompatibleAuthMode({ OPENAI_COMPATIBLE_AUTH: " API-KEY " }),
+    ).toBe("api-key");
+  });
+
+  test("accepts Entra mode case-insensitively", () => {
+    expect(
+      resolveOpenAICompatibleAuthMode({ OPENAI_COMPATIBLE_AUTH: " EnTrA-Id " }),
+    ).toBe("entra-id");
+  });
+
+  test("rejects an invalid mode even if a static key is present", () => {
+    const env = {
+      OPENAI_COMPATIBLE_AUTH: "entra",
+      OPENAI_COMPATIBLE_API_KEY: "existing-key",
+    };
+    expect(() => resolveOpenAICompatibleAuthMode(env)).toThrow(
+      "OPENAI_COMPATIBLE_AUTH must be one of: api-key, entra-id.",
+    );
+    expect(() => providerRequiresApiKey("openai-compatible", env)).toThrow();
+    expect(() => getMissingProviderEnvKey("openai-compatible", env)).toThrow();
+  });
+
+  test("trims a custom scope and defaults a missing or blank scope", () => {
+    expect(resolveOpenAICompatibleEntraScope({})).toBe(
+      DEFAULT_OPENAI_COMPATIBLE_ENTRA_SCOPE,
+    );
+    expect(
+      resolveOpenAICompatibleEntraScope({
+        OPENAI_COMPATIBLE_ENTRA_SCOPE: "  ",
+      }),
+    ).toBe(DEFAULT_OPENAI_COMPATIBLE_ENTRA_SCOPE);
+    expect(
+      resolveOpenAICompatibleEntraScope({
+        OPENAI_COMPATIBLE_ENTRA_SCOPE: " api://gateway/.default ",
+      }),
+    ).toBe("api://gateway/.default");
+  });
+
+  test("explains how to configure Entra credentials and gateway scope", () => {
+    expect(getProviderCredentialHint("openai-compatible")).toContain(
+      "OPENAI_COMPATIBLE_AUTH=entra-id",
+    );
+    expect(getProviderCredentialHint("openai-compatible")).toContain(
+      "OPENAI_COMPATIBLE_ENTRA_SCOPE",
+    );
+  });
 });
 
 describe("getMissingProviderEnvKey", () => {
+  test("requires a key by default, but not in Entra mode", () => {
+    expect(getMissingProviderEnvKey("openai-compatible", {})).toBe(
+      "OPENAI_COMPATIBLE_API_KEY",
+    );
+    expect(
+      getMissingProviderEnvKey("openai-compatible", {
+        OPENAI_COMPATIBLE_AUTH: "entra-id",
+      }),
+    ).toBeNull();
+    expect(
+      getMissingProviderEnvKey("anthropic", {
+        OPENAI_COMPATIBLE_AUTH: "entra-id",
+      }),
+    ).toBe("ANTHROPIC_API_KEY");
+  });
+
   test("reports the missing API key for key-based providers", () => {
     expect(getMissingProviderEnvKey("anthropic", {})).toBe("ANTHROPIC_API_KEY");
     expect(
@@ -1066,6 +1263,7 @@ describe("getDefaultModelId", () => {
     expect(getDefaultModelId("nvidia")).toBe(
       "nvidia/nemotron-3-super-120b-a12b",
     );
+    expect(getDefaultModelId("mistral")).toBe("mistral-small-2603");
     expect(getDefaultModelId("gemini")).toBe("gemini-3.6-flash");
     expect(getDefaultModelId("gemini-enterprise")).toBe("gemini-3.6-flash");
     expect(getDefaultModelId(DEFAULT_PROVIDER)).toBe(DEFAULT_MODEL_ID);
@@ -1127,6 +1325,15 @@ describe("isModelIdForOtherProvider", () => {
     expect(isModelIdForOtherProvider("claude-opus-4-8", "anthropic")).toBe(
       false,
     );
+  });
+
+  test("does not flag Claude Opus 5 on the providers that serve Claude", () => {
+    // Opus 5 was listed only under copilot, so both providers that serve Claude
+    // directly warned that it "belongs to GitHub Copilot" on every run.
+    expect(isModelIdForOtherProvider("claude-opus-5", "anthropic")).toBe(false);
+    expect(
+      isModelIdForOtherProvider("claude-opus-5", "gemini-enterprise"),
+    ).toBe(false);
   });
 
   test("does not flag shared OpenAI models across openai / openai-chatgpt", () => {

@@ -10,6 +10,8 @@ sources:
     resource: repo://src/cli/runners.ts
   - id: openwiki-source-d80f123259efa4712b198b63
     resource: repo://src/cli/startup.ts
+  - id: openwiki-source-278e7e180eac811fc1a24f7a
+    resource: repo://src/config/constants.ts
   - id: openwiki-source-c2770ac037a7f4b0116a0dc5
     resource: repo://src/config/env.ts
   - id: openwiki-source-7d433875b0854d0b8b951be0
@@ -32,10 +34,10 @@ sources:
     resource: repo://src/setup/onboarding.ts
   - id: openwiki-source-224b03172757408e1b558fa7
     resource: repo://test/ingestion/code-mode.test.ts
-generated: { by: "openwiki/0.5.1", at: "2026-09-11T08:09:37.996Z" }
+generated: { by: "openwiki/0.8.0", at: "2026-11-05T08:06:42.707Z" }
 verified:
-  - by: openwiki/0.5.1
-    at: 2026-09-11T08:09:37.996Z
+  - by: openwiki/0.8.0
+    at: 2026-11-05T08:06:42.707Z
 ---
 
 # Onboarding and Setup
@@ -113,8 +115,11 @@ collected (provider, primary credential, base URL, secret key, region, GCP
 project/location, model id, reasoning effort, and LangSmith key), performing no
 IO; the caller persists the result via `saveOpenWikiEnv`. The provider key is
 written only when it differs from the current environment, so re-running setup
-with the same provider does not churn the file. A LangSmith key toggles tracing:
-a non-empty key also sets `LANGCHAIN_PROJECT=openwiki` and
+with the same provider does not churn the file. For the `openai-compatible`
+provider the auth mode (`OPENAI_COMPATIBLE_AUTH`) and, when the mode is
+`entra-id`, the Entra token scope (`OPENAI_COMPATIBLE_ENTRA_SCOPE`) are included
+in the update map alongside the other provider settings. A LangSmith key toggles
+tracing: a non-empty key also sets `LANGCHAIN_PROJECT=openwiki` and
 `LANGCHAIN_TRACING_V2=true`, while a blank input sets `LANGCHAIN_TRACING_V2=false`
 so tracing is explicitly disabled rather than silently left on.
 
@@ -123,24 +128,32 @@ so tracing is explicitly disabled rather than silently left on.
 The setup UI is a thin composition root (`InitSetup`) that renders a view driven
 by a controller state machine. The steps that apply to a given provider and run
 mode, in walk order, are produced by `orderedSetupSteps`: an optional run-mode
-chooser, the provider selection, the provider's primary credential step, any
-provider-specific steps (secret key, GCP project/location, base URL, region),
-then the model step, the LangSmith step, and finally — only in code mode — a
-`code-repo-confirm` step.
+chooser, the provider selection, an `auth-mode` chooser **only** for the
+`openai-compatible` provider, the provider's primary credential step, any
+provider-specific steps (secret key, GCP project/location, base URL, an
+`entra-scope` step in Entra mode, region), then the model step (skipped for
+providers that pin a single `fixedModel`), the LangSmith step, and finally —
+only in code mode — a `code-repo-confirm` step.
 
 The primary credential step is chosen per provider by `credentialStep`: OAuth
 providers use `oauth-login`, AWS-SDK providers have no in-wizard step (they are
 handled via AWS credentials), external-CLI providers use `external-cli-auth`,
 API-key providers use `api-key`, and keyless providers that require a GCP project
-use `gcp-project`.
+use `gcp-project`. The `openai-compatible` provider is the credential-mode
+special case: when the selected auth mode is `entra-id` it has **no** primary
+credential step (Entra delegates to Azure Identity, so there is no key to
+paste), and when the mode is `api-key` it uses the `api-key` step.
 
 ```mermaid
 stateDiagram-v2
   [*] --> run_mode
   run_mode --> provider
-  provider --> credential
+  provider --> auth_mode: openai-compatible
+  provider --> credential: other provider
+  auth_mode --> credential
   credential --> extra_provider_steps
-  extra_provider_steps --> model
+  extra_provider_steps --> model: non-fixedModel provider
+  extra_provider_steps --> langsmith: fixedModel provider
   model --> langsmith
   langsmith --> code_repo_confirm: code mode
   langsmith --> [*]: personal mode
@@ -148,6 +161,12 @@ stateDiagram-v2
 ```
 
 Ordered setup steps for code vs. personal mode as returned by orderedSetupSteps.
+Only the `openai-compatible` provider inserts an `auth-mode` chooser after
+`provider`, and (only in `entra-id` mode) an `entra-scope` step among the
+provider-specific steps; both are driven by the selected `authMode`. The model
+step is emitted only when the provider does not pin a fixedModel
+(`providerHasFixedModel`), so a fixedModel provider such as IBM Bob goes straight
+from the provider-specific steps to the LangSmith step.
 
 Two functions distinguish "which step to jump to" from "which steps exist".
 `getInitialStep` is a skip-based waterfall that lands on the first unsatisfied
@@ -158,6 +177,72 @@ already-satisfied step. `needsCredentialSetup` decides whether the wizard is
 required at all: it returns true when the provider is invalid or missing any
 credential/model/LangSmith input, and otherwise defers to whether onboarding is
 complete for the mode.
+
+A provider with a `fixedModel` (checked by `providerHasFixedModel`) always uses
+that single model ID and skips the model-selection step entirely — the value is
+used verbatim rather than normalized. The IBM Bob provider is the fixed-model
+case: it pins `fixedModel: "premium"`, authenticates with an API key
+(`BOB_API_KEY`, via the `api-key` credential step), and exposes an optional
+`BOB_BASE_URL`, so its spine runs provider → api-key → langsmith →
+(code-repo-confirm in code mode) with no model step.
+
+### API-key providers and Mistral
+
+Most selectable providers are plain `api-key` providers (default
+`authMethod` when a config omits it): the wizard collects a pasted key via the
+`api-key` step and, where applicable, an optional base URL, then the model. The
+Mistral provider (`mistral`) is one such provider and is now offered in the
+first-run model-provider menu (it is last in `SELECTABLE_OPENWIKI_PROVIDERS`,
+after `nvidia`). It targets Mistral's OpenAI-compatible chat completions surface
+at `https://api.mistral.ai/v1` (overridable via `MISTRAL_BASE_URL`), collects
+`MISTRAL_API_KEY` through the `api-key` credential step, and its built-in model
+options are `mistral-small-2603` (Mistral Small 4), `mistral-large-4` (Mistral
+Large 4), and `codestral-2508` (Codestral); the rolling `*-latest` aliases
+Mistral publishes can also be pasted directly as custom model IDs. See
+[Model Providers](../concepts/model-providers.md) for the full provider table,
+Mistral's credential-isolation checks in `createModel`, and the other API-key
+providers. Because `getProviderArticle` returns `"a"` for `mistral`, the
+wizard's prompts read "Enter a Mistral API key" rather than "an".
+
+### Entra ID (Microsoft Entra) setup flow
+
+The `openai-compatible` provider supports two credential modes, chosen in the
+wizard by the `auth-mode` step (`OPENAI_COMPATIBLE_AUTH_OPTIONS`):
+
+- **API key** (`api-key`, the default) — paste a static gateway key.
+- **Microsoft Entra ID** (`entra-id`) — delegate authentication to Azure
+  Identity, so no key is collected. This is the path for enterprise gateways
+  that issue tokens from Entra rather than handing out a shared secret.
+
+The auth mode is resolved by `resolveOpenAICompatibleAuthMode` from
+`OPENAI_COMPATIBLE_AUTH` (defaulting to `api-key`), and
+`providerUsesEntraId` reports whether a given environment resolves to Entra
+mode. Because `providerRequiresApiKey` is gated on `!providerUsesEntraId`,
+selecting Entra removes the API-key requirement; `credentialStep` returns `null`
+for Entra mode (no paste-a-key step), and `isCredentialConfigured` treats Entra
+mode as always-credential-satisfied since the token is acquired on first
+request.
+
+In Entra mode the wizard inserts an `entra-scope` step (after `base-url`, before
+`region`) that captures the Microsoft Entra token scope and stores it as
+`OPENAI_COMPATIBLE_ENTRA_SCOPE`. The scope defaults to Azure OpenAI's Cognitive
+Services scope
+(`https://cognitiveservices.azure.com/.default`) via
+`DEFAULT_OPENAI_COMPATIBLE_ENTRA_SCOPE`; enterprise gateways normally set their
+own application ID URI here. Selecting `entra-id` also clears any stale API key
+held in wizard state, so the persisted update map never carries a key for an
+Entra run. Switching back to `api-key` mode persists the mode and key and omits
+the scope key, so the two modes are cleanly toggleable.
+
+The Entra scope and auth mode are persisted like every other provider setting:
+`buildCredentialEnvUpdates` emits `OPENAI_COMPATIBLE_AUTH` whenever the
+`openai-compatible` provider is selected and a mode was collected, and emits
+`OPENAI_COMPATIBLE_ENTRA_SCOPE` only when that mode is `entra-id` and a scope was
+collected. The runtime resolves the scope back with
+`resolveOpenAICompatibleEntraScope` (saved value, then the Cognitive Services
+default), and `getProviderCredentialHint` points the operator to configure Azure
+Identity (`az login`, managed identity, workload identity, or environment
+credentials) and set the gateway scope for non-interactive use.
 
 ## Onboarding config format and completion
 
@@ -201,14 +286,30 @@ invoked before both interactive/`--print` runs (in the CLI runner) and durable
 repository runs (`beginRepositoryRun`). It:
 
 - Refreshes the managed agent-instruction snippets in `AGENTS.md` and
-  `CLAUDE.md`. Each file is created when missing and, when present, only the
-  region between the `<!-- OPENWIKI:START -->` / `<!-- OPENWIKI:END -->` markers
-  is replaced, so operator content outside the markers survives. Both files are
+  `CLAUDE.md`. Only `AGENTS.md` is created when missing — `CLAUDE.md` is not,
+  because Claude Code falls back to reading `AGENTS.md` when no `CLAUDE.md` sits
+  beside it, so creating one would only shadow it. When present, only the region
+  between the `<!-- OPENWIKI:START -->` / `<!-- OPENWIKI:END -->` markers is
+  replaced, so operator content outside the markers survives. Both files are
   prepared and validated before either is written, and malformed or duplicated
   markers abort the update with the file left unchanged. By default the
   `CLAUDE.md` managed block is deliberately minimal and just points to
   `AGENTS.md` via the `@AGENTS.md` import, so `AGENTS.md` stays the single
   canonical source of agent instructions.
+- **Retrieval-first AGENTS.md block.** The `AGENTS.md` managed block
+  (`createCodeModeAgentsSnippet`) is retrieval-first rather than eager-load: it
+  tells the agent **not** to enumerate, preload, or search wikis at task start,
+  but to reach for `openwiki_search` (just-in-time context) and `openwiki_read`
+  (the relevant complete sections) when the user asks for it, when unfamiliar
+  architecture or dependency behavior materially affects the task, or when
+  source inspection leaves an important uncertainty — stopping once the
+  question is grounded. If a search
+  returns `workspace_required`, the agent asks which listed workspace to use and
+  retries with its ID; `openwiki_list_workspaces`/`openwiki_list_wikis` are for
+  discovering workspace membership itself. `openwiki/quickstart.md` and its
+  links are the fallback only when the retrieval tools are unavailable. Source
+  code and tests are treated as authoritative, and the brief's unknowns/review
+  items are verification gaps, not automatic requirements.
 - **Import-only CLAUDE.md preservation.** Two branches keep a forwarding
   `CLAUDE.md` intact. First, a `CLAUDE.md` whose trimmed content is exactly
   `@AGENTS.md` (the `CLAUDE_AGENTS_IMPORT` sentinel) is left entirely unchanged —
@@ -224,6 +325,29 @@ repository runs (`beginRepositoryRun`). It:
   `CLAUDE.md` that is neither the bare import nor the same file as `AGENTS.md`,
   but contains marker regions or any other content, is refreshed in place like
   `AGENTS.md`.
+- **Legacy pre-marker section removal.** Pre-marker (0.0.x) releases wrote an
+  unmarked `## OpenWiki` section straight into `AGENTS.md`/`CLAUDE.md`. Before
+  deciding where the managed block goes, `prepareCodeModeAgentSnippet` strips
+  those legacy sections via `findLegacyOpenWikiSections` so a file that was
+  first touched by an old release is not left with a stale section sitting
+  beside the new managed block (two `## OpenWiki` headings). A heading only
+  qualifies as legacy when its next non-blank line is exactly the released
+  template sentence ("This repository has documentation located in the
+  /openwiki directory."), so a hand-written `## OpenWiki` section that merely
+  shares the heading is never touched, and a heading quoted inside a fenced
+  code block is skipped (the parser tracks CommonMark fence state, so a `~~~`
+  line inside a ` ``` ` block does not close the outer fence). The removal
+  consumes only the known template lines beneath the heading and stops at the
+  first line that is not one of them, so hand-edited content below the section
+  — a customized quickstart link, an appended sentence, a trailing paragraph —
+  survives intact. With markers absent and a legacy section present, the
+  managed block is placed where the section was (preserving the file's shape)
+  rather than appended to the end; with no markers and no legacy section it is
+  appended after existing content. When stripping a legacy section from an
+  import-only `CLAUDE.md` leaves nothing but `@AGENTS.md`, that import is kept
+  verbatim (no managed block is added, since `AGENTS.md` already carries the
+  instructions). Marker validation runs on the post-legacy-removal content, so
+  a malformed/duplicated marker set still aborts with the file unchanged.
 - Creates the scheduled-update GitHub Actions workflow
   (`.github/workflows/openwiki-update.yml`) **only** when `createWorkflow` is set,
   which is the case only for the `init` command. `--update` and chat runs leave
@@ -285,6 +409,16 @@ Cloudflare Workers AI's leading `@`, are not plain YAML scalars), defaulting to
 the operator's choice or the provider's first suggested model; an opted-in
 `OPENAI_COMPATIBLE_STREAMING` transport override is propagated so a SSE-only
 gateway does not commit a blank wiki unattended.
+
+For an `openai-compatible` provider configured in Entra mode
+(`providerUsesEntraId`), `createWorkflowProviderEnv` emits the auth and scope
+explicitly — `OPENAI_COMPATIBLE_AUTH: entra-id` and the quoted
+`OPENAI_COMPATIBLE_ENTRA_SCOPE` (resolved from the saved value or the Cognitive
+Services default) — followed by a comment instructing the operator to configure
+unattended Azure Identity before the scheduled run (for example `azure/login`
+with OIDC, a managed identity, or workload identity). No API-key secret line is
+emitted for Entra, since the token is acquired from Azure Identity at request
+time rather than pinned in the repo's secrets.
 
 Repository content the doc agent must not read or edit is governed by a
 gitignore-style `.openwikiignore` file loaded via `OpenWikiIgnore.load`. Rules

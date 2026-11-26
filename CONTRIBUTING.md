@@ -37,26 +37,34 @@ typechecks, builds, and runs the Vitest suite with coverage.
 Install an integration backed by the current checkout with:
 
 ```sh
-pnpm integrations:dev <codex|claude|opencode|cursor>
+pnpm integrations:dev <bob|codex|claude|opencode|cursor|kiro|omp|antigravity|copilot>
 ```
 
 The command builds OpenWiki, refreshes the host skill, and records absolute
 paths to the current Node executable and `dist/cli/cli.js`. Restart the coding
-agent after installation. Codex, Claude Code, OpenCode, and Cursor install at
-user scope. Later source changes only require `pnpm build` unless the bundled
-skill itself changes. Rerun `integrations:dev` to refresh the skill or after
-switching Node installations.
+agent after installation. IBM Bob, Codex, Claude Code, OpenCode, Cursor, Kiro,
+Oh My Pi, Antigravity CLI, and GitHub Copilot CLI install at user scope. Later source changes only
+require `pnpm build`
+unless the bundled skill itself changes. Rerun `integrations:dev` to refresh
+the skill or after switching Node installations.
 
-User-scope destinations match each host's own conventions: Codex writes under
-`~/.agents` and `~/.codex`, Claude Code under `~/.claude`, OpenCode under
-`~/.config/opencode` (OpenCode's global configuration directory on every
-supported platform), and Cursor under `~/.cursor`.
+User-scope destinations match each host's own conventions: IBM Bob writes under
+`~/.agents` and `~/.bob`, Codex writes under `~/.agents` and `~/.codex`, Claude
+Code under `~/.claude`, OpenCode under `~/.config/opencode` (OpenCode's global
+configuration directory on every supported platform), Cursor under `~/.cursor`,
+Kiro under `~/.kiro`, Oh My Pi under `~/.omp/agent` (default profile), and
+Antigravity CLI under `~/.gemini`, and GitHub Copilot CLI under `~/.copilot`.
+
+Pi uses the package system and is not installed by the OpenWiki integration CLI. For local development, build the package and install it with `pi install /absolute/path/to/openwiki`; do not use a local-install flag. Published users install `pi install npm:openwiki`. The package includes `dist/integrations/pi/openwiki.js` and `integrations/openwiki`; the extension starts its package-local `dist/cli/cli.js` through Node.
 
 ## Adding a coding-agent integration
 
-OpenWiki host integrations share one canonical skill and five MCP tools:
+OpenWiki host integrations share one canonical skill, four read-only retrieval
+tools (`openwiki_list_workspaces`, `openwiki_list_wikis`, `openwiki_search`, and
+`openwiki_read`), and six generation lifecycle tools:
 `openwiki_begin`, `openwiki_submit_plan`, `openwiki_next_page`,
-`openwiki_submit_page`, and `openwiki_finish`. Add host-specific behavior to the
+`openwiki_inspect_page_claims`, `openwiki_submit_page`, and `openwiki_finish`.
+Add host-specific behavior to the
 registry and config boundary rather than copying the skill or adding
 host-specific tools. The host model researches and authors only the current
 OpenWiki PageJob; OpenWiki owns durable run state, Claims reconciliation,

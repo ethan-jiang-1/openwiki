@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { formatEnv, MANAGED_ENV_KEYS, parseEnv } from "../../src/config/env.ts";
+import {
+  formatEnv,
+  MANAGED_ENV_KEYS,
+  parseEnv,
+  createCredentialPreview,
+} from "../../src/config/env.ts";
 
 describe("parseEnv", () => {
   test("parses simple KEY=value lines", () => {
@@ -125,6 +130,14 @@ describe("formatEnv", () => {
 });
 
 describe("MANAGED_ENV_KEYS", () => {
+  test("manages OpenAI-compatible auth mode and scope in provider order", () => {
+    const baseUrlIndex = MANAGED_ENV_KEYS.indexOf("OPENAI_COMPATIBLE_BASE_URL");
+    expect(MANAGED_ENV_KEYS.slice(baseUrlIndex + 1, baseUrlIndex + 3)).toEqual([
+      "OPENAI_COMPATIBLE_AUTH",
+      "OPENAI_COMPATIBLE_ENTRA_SCOPE",
+    ]);
+  });
+
   test("manages the model output token limit", () => {
     expect(MANAGED_ENV_KEYS).toContain("OPENWIKI_MAX_OUTPUT_TOKENS");
   });
@@ -135,6 +148,10 @@ describe("MANAGED_ENV_KEYS", () => {
 
   test("manages the Bedrock stream idle timeout", () => {
     expect(MANAGED_ENV_KEYS).toContain("OPENWIKI_STREAM_IDLE_TIMEOUT");
+  });
+
+  test("manages the repository page worker concurrency", () => {
+    expect(MANAGED_ENV_KEYS).toContain("OPENWIKI_PAGE_CONCURRENCY");
   });
 
   test("manages the Google Cloud settings for the gemini-enterprise provider", () => {
@@ -149,8 +166,10 @@ describe("MANAGED_ENV_KEYS", () => {
 
   test("manages hosted OpenAI-compatible provider base URLs", () => {
     expect(MANAGED_ENV_KEYS).toContain("BASETEN_BASE_URL");
+    expect(MANAGED_ENV_KEYS).toContain("BOB_BASE_URL");
     expect(MANAGED_ENV_KEYS).toContain("FIREWORKS_BASE_URL");
     expect(MANAGED_ENV_KEYS).toContain("NVIDIA_BASE_URL");
+    expect(MANAGED_ENV_KEYS).toContain("MISTRAL_BASE_URL");
   });
 
   test("manages the reasoning effort setting", () => {
@@ -165,6 +184,14 @@ describe("MANAGED_ENV_KEYS", () => {
 });
 
 describe("parseEnv <-> formatEnv round-trip", () => {
+  test("preserves OpenAI-compatible auth mode and scope", () => {
+    const original = {
+      OPENAI_COMPATIBLE_AUTH: "entra-id",
+      OPENAI_COMPATIBLE_ENTRA_SCOPE: "api://gateway/.default",
+    };
+    expect(parseEnv(formatEnv(original))).toEqual(original);
+  });
+
   test("values survive a format -> parse round-trip", () => {
     const original = {
       OPENAI_API_KEY: 'weird "value" with\nnewline and \\ backslash',
@@ -194,5 +221,19 @@ describe("parseEnv <-> formatEnv round-trip", () => {
     };
 
     expect(parseEnv(formatEnv(original))).toEqual(original);
+  });
+});
+
+describe("createCredentialPreview", () => {
+  test("returns full string of asterisks for strings 10 chars or shorter", () => {
+    expect(createCredentialPreview("short1234")).toBe('"*********"');
+    expect(createCredentialPreview("1234567890")).toBe('"**********"');
+  });
+
+  test("returns ellipsis and last 4 characters for long strings", () => {
+    expect(createCredentialPreview("sk-abc123DEF456")).toBe('"...F456"');
+    expect(
+      createCredentialPreview("sk-or-v1-abcdefghijklmnopqrstuvwxyz0123"),
+    ).toBe('"...0123"');
   });
 });

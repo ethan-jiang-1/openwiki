@@ -8,6 +8,7 @@ import {
   submitRepositoryPlan,
   type ActiveRepositoryRun,
 } from "../../generation/repository-run.js";
+import { toHostActiveBeginView } from "./begin-view.js";
 import { HostIntegrationError } from "./errors.js";
 import {
   BeginInput,
@@ -26,6 +27,7 @@ import {
   type SubmitPlanRequest,
 } from "./protocol.js";
 import { resolveRepositoryRoot } from "./repository-root.js";
+import { createRetrievalTools } from "./retrieval-tools.js";
 
 /**
  * Stable host identity and optional deterministic clock for the MCP adapter.
@@ -48,7 +50,7 @@ export interface HostSessionManagerOptions {
 }
 
 /**
- * Thin single-run MCP adapter over the transport-neutral lifecycle core.
+ * Read-only repository memory plus a single-run generation lifecycle adapter.
  */
 export class HostSessionManager {
   /**
@@ -145,7 +147,7 @@ export class HostSessionManager {
       }
 
       this.active = result.run;
-      return result.view;
+      return toHostActiveBeginView(result.view);
     });
   }
 
@@ -161,6 +163,7 @@ export class HostSessionManager {
       return submitRepositoryPlan(run, {
         pages: input.pages,
         deletePages: input.deletePages,
+        deferUnplannedClaimIssues: input.deferUnplannedClaimIssues,
       });
     });
   }
@@ -178,7 +181,7 @@ export class HostSessionManager {
     });
   }
 
-  /** Returns the current pending page's complete Claims only when requested. */
+  /** Returns a pending page job's complete Claims only when requested. */
   async inspectPageClaims(input: InspectPageClaimsRequest): Promise<unknown> {
     return this.runOperation(() => {
       const run = this.requireSession(input.runId);
@@ -215,16 +218,17 @@ export class HostSessionManager {
   }
 
   /**
-   * Returns exactly the six OpenWiki 0.5 lifecycle tools.
+   * Returns read-only retrieval followed by the six generation lifecycle tools.
    *
    * @returns Ordered transport-neutral tool definitions.
    */
   tools(): readonly ProtocolTool[] {
     return [
+      ...createRetrievalTools(),
       {
         name: "openwiki_begin",
         description:
-          "Start or resume OpenWiki repository generation. Returns status=noop for a clean update, otherwise the durable planning/generation run state. An unrecognized `language` fails the call with invalid_input instead of starting a run.",
+          "Start or resume OpenWiki repository generation. Returns status=noop for a clean update, otherwise the durable planning/generation run state. Long lists are capped, with exact changedPathCount and claimIssueCount totals: when a changedPathsTruncated flag is true, find the rest with `git diff --name-only <baseGitHead>..HEAD` (not on a fullReview window), `git diff --name-only HEAD` and `git ls-files --others --exclude-standard`, leaving out openwiki/ and .openwikiignore paths; claimIssuePages names every page with a Claims issue. An unrecognized `language` fails the call with invalid_input instead of starting a run.",
         schema: BeginInput,
         handle: async (input) => this.begin(BeginInput.parse(input)),
       },
@@ -245,7 +249,7 @@ export class HostSessionManager {
       {
         name: "openwiki_inspect_page_claims",
         description:
-          "Return the current pending page's complete Claim set without opaque evidence versions. Use only before intentionally revising or removing otherwise-current content; focused updates normally need only the issue Claims returned by openwiki_next_page.",
+          "Return the pending page job's complete Claim set without opaque evidence versions. Use only before intentionally revising or removing otherwise-current content; focused updates normally need only the issue Claims returned by openwiki_next_page.",
         schema: InspectPageClaimsInput,
         handle: async (input) =>
           this.inspectPageClaims(InspectPageClaimsInput.parse(input)),
@@ -253,7 +257,7 @@ export class HostSessionManager {
       {
         name: "openwiki_submit_page",
         description:
-          "Complete the current page job after its Markdown is written. Submit only sparse decisions: confirmedClaimIds for rechecked issue Claims retained unchanged, claims for revisions or additions, and retractedClaimIds for removals. Other current Claims are retained automatically. The final page and reconciled Claim set must agree.",
+          "Complete the pending page job after its Markdown is written. Submit only sparse decisions: confirmedClaimIds for rechecked issue Claims retained unchanged, claims for revisions or additions, and retractedClaimIds for removals. Other current Claims are retained automatically. The final page and reconciled Claim set must agree.",
         schema: SubmitPageInput,
         handle: async (input) => this.submitPage(SubmitPageInput.parse(input)),
       },

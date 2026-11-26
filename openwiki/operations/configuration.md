@@ -1,7 +1,7 @@
 ---
 type: operations-reference
 title: Configuration and Environment
-description: How OpenWiki loads, resolves, and persists configuration through environment variables and the ~/.openwiki state directory, including secret sanitization, atomic env writes, and provider/token/reasoning settings.
+description: How OpenWiki loads, resolves, and persists configuration through environment variables and the ~/.openwiki state directory, including secret sanitization, atomic env writes, Entra ID auth, and provider/token/reasoning settings.
 tags:
   [
     configuration,
@@ -10,9 +10,12 @@ tags:
     secrets,
     providers,
     reasoning,
+    entra-id,
     operations,
   ]
 sources:
+  - id: openwiki-source-049f71d42424ecd8987d5e9f
+    resource: repo://src/agent/entra-auth.ts
   - id: openwiki-source-a953060a04ccefcf777de48e
     resource: repo://src/agent/index.ts
   - id: openwiki-source-278e7e180eac811fc1a24f7a
@@ -27,24 +30,31 @@ sources:
     resource: repo://src/platform/diagnostics.ts
   - id: openwiki-source-27fbd70857f0fae28185fe91
     resource: repo://src/platform/windows-acl.ts
+  - id: openwiki-source-c35800ddf00768a1fa848d13
+    resource: repo://src/setup/credentials/persistence.ts
+  - id: openwiki-source-76702f01df0808033c14cf17
+    resource: repo://test/agent/create-model-entra.test.ts
+  - id: openwiki-source-6e76d6023798412a72871e94
+    resource: repo://test/agent/entra-auth.test.ts
   - id: openwiki-source-5fc87e9739dab52c4e447110
     resource: repo://test/config/constants.test.ts
   - id: openwiki-source-3782823f29993efcdedd20ac
     resource: repo://test/config/env-behavior.test.ts
-generated: { by: "openwiki/0.5.1", at: "2026-09-11T08:09:37.996Z" }
+generated: { by: "openwiki/0.7.3", at: "2026-11-04T08:06:10.698Z" }
 verified:
-  - by: openwiki/0.5.1
-    at: 2026-09-11T08:09:37.996Z
+  - by: openwiki/0.7.3
+    at: 2026-11-04T08:06:10.698Z
 ---
 
 # Configuration and Environment
 
 OpenWiki is configured almost entirely through environment variables. Provider
-credentials, model selection, token limits, streaming toggles, and reasoning
-effort are all read from `process.env`, with a persisted fallback file at
-`~/.openwiki/.env`. This page describes where that state lives, how values are
-loaded and saved, the precedence between the shell and the saved file, how
-secrets are sanitized, and the key settings a reader needs to operate OpenWiki.
+credentials, model selection, token limits, streaming toggles, reasoning
+effort, and Entra ID authentication are all read from `process.env`, with a
+persisted fallback file at `~/.openwiki/.env`. This page describes where that
+state lives, how values are loaded and saved, the precedence between the shell
+and the saved file, how secrets are sanitized, and the key settings a reader
+needs to operate OpenWiki.
 
 Related reading: [Model providers](../concepts/model-providers.md),
 [CLI reference](./cli-reference.md), and [Onboarding](../workflows/onboarding.md).
@@ -83,9 +93,19 @@ OpenWiki reads or persists, in the exact order they are written to
 `~/.openwiki/.env`. It is the single source of truth: both the credential
 diagnostics list (`CREDENTIAL_DIAGNOSTIC_ENV_KEYS`) and the agent's debug-dump
 key list (`DEBUG_ENV_KEYS`) are derived from it by filtering, so they cannot
-silently drift out of sync when a new managed key is added. LangChain
-project/tracing settings are managed but are not credentials, so they are
-excluded from the diagnostics panel via `NON_CREDENTIAL_ENV_KEYS`.
+silently drift out of sync when a new managed key is added. The Entra ID keys
+`OPENAI_COMPATIBLE_AUTH` and `OPENAI_COMPATIBLE_ENTRA_SCOPE` sit alongside the
+other OpenAI-compatible settings (`OPENAI_COMPATIBLE_STREAM_MESSAGES`,
+`OPENAI_COMPATIBLE_REASONING_EFFORT_SUPPORTED`, and the streaming/Responses-API
+toggles) in the managed list, and the newer `OPENWIKI_PAGE_CONCURRENCY` and
+`OPENWIKI_PROVIDER_RETRY_ATTEMPTS` keys are also present. The Bob keys
+(`BOB_API_KEY`, `BOB_BASE_URL`), Copilot keys (`COPILOT_API_KEY`,
+`COPILOT_BASE_URL`), and Mistral keys (`MISTRAL_API_KEY`, `MISTRAL_BASE_URL`)
+are managed too, so they appear in the credential diagnostics panel and are
+written to `~/.openwiki/.env` like every other provider pair. LangChain project/tracing settings
+(`LANGCHAIN_PROJECT`, `LANGCHAIN_TRACING_V2`) are managed but are not
+credentials, so they are excluded from the diagnostics panel via
+`NON_CREDENTIAL_ENV_KEYS`.
 
 ## Loading and precedence
 
@@ -178,37 +198,88 @@ unescaped output is ever re-scanned.
 model. When `OPENWIKI_PROVIDER` is unset, `resolveConfiguredProvider` infers the
 provider from whichever credential is present, checking API keys in a fixed order
 (`OPENAI_API_KEY`, then OpenAI-compatible, OpenRouter, Anthropic, Baseten,
-Fireworks, Nebius, NVIDIA, then Bedrock access/secret keys) and falling back to
-`DEFAULT_PROVIDER` (`openai`). Each provider declares its own credential env
+Fireworks, Nebius, NVIDIA, Mistral, then Bedrock access/secret keys) and falling
+back to `DEFAULT_PROVIDER` (`openai`). Each provider declares its own credential env
 variables and optional base-URL override in `PROVIDER_CONFIGS`; see
 [Model providers](../concepts/model-providers.md) for the full registry.
+
+### OpenAI-compatible authentication and Entra ID
+
+The `openai-compatible` provider supports two authentication modes, selected by
+`OPENAI_COMPATIBLE_AUTH` (`api-key` or `entra-id`) and resolved by
+`resolveOpenAICompatibleAuthMode`:
+
+- **`api-key`** (default) sends a static `OPENAI_COMPATIBLE_API_KEY` as the
+  bearer credential. A missing or blank `OPENAI_COMPATIBLE_AUTH` retains this
+  behavior; an explicit value other than `api-key` or `entra-id` throws
+  "must be one of: api-key, entra-id", so an invalid mode fails closed.
+- **`entra-id`** delegates authentication to Microsoft Entra ID through Azure
+  Identity. `createEntraTokenProvider` returns an async API-key callback that
+  the OpenAI SDK invokes per request, so a long-running OpenWiki model uses
+  refreshed tokens without reconstruction. Azure Identity is loaded lazily on
+  first invocation; a configured `AZURE_FEDERATED_TOKEN_FILE` selects
+  `WorkloadIdentityCredential` (with `AZURE_CLIENT_ID` and `AZURE_TENANT_ID`)
+  explicitly, otherwise the `DefaultAzureCredential` chain is used.
+
+The token scope comes from `OPENAI_COMPATIBLE_ENTRA_SCOPE`, resolved by
+`resolveOpenAICompatibleEntraScope`. Enterprise gateways normally declare their
+own application ID URI as the scope; when the variable is unset or blank it
+defaults to `DEFAULT_OPENAI_COMPATIBLE_ENTRA_SCOPE`
+(`https://cognitiveservices.azure.com/.default`), the Azure OpenAI Cognitive
+Services scope. The setup wizard collects an optional custom scope (`entra-scope`
+step) and persists it only when Entra mode is chosen, alongside
+`OPENAI_COMPATIBLE_AUTH=entra-id`.
+
+`createEntraTokenProvider` validates the endpoint up front: it requires an
+HTTPS `OPENAI_COMPATIBLE_BASE_URL` with no embedded username/password and
+rejects cloud-metadata hostnames (`169.254.169.254`,
+`metadata.google.internal`) before any credential is acquired, so an unsafe
+endpoint never reaches Azure Identity. Token-acquisition and import failures
+are rethrown as a generic "Unable to obtain a Microsoft Entra ID access token"
+error that never attaches or logs the original SDK error (which can contain
+response details and credential material), and a constructor failure clears
+the cached provider so the next request can retry initialization.
+
+`providerUsesEntraId` returns true only for the `openai-compatible` provider in
+`entra-id` mode, and `providerRequiresApiKey` returns false for it (Entra does
+not need a static API key). In `createModel`, the `apiKey` field is set to the
+Entra token callback when `providerUsesEntraId(provider)` is true, otherwise to
+the provider's static key — so a stale `OPENAI_COMPATIBLE_API_KEY` is ignored in
+Entra mode. The Responses-API and streaming toggles still apply on top of Entra
+auth, so the same renewable callback works across chat-completions and
+Responses surfaces, JSON and SSE transports.
 
 ### Token limits
 
 OpenWiki caps per-request output tokens through three settings, resolved by
-`resolveConfiguredMaxOutputTokens` in a fixed precedence:
+`resolveConfiguredMaxOutputTokens`. The precedence has one provider-specific
+exception before the neutral rule:
 
-1. `OPENWIKI_MAX_OUTPUT_TOKENS` — the provider-neutral cap, parsed by
+1. **OpenRouter legacy cap.** When the provider is `openrouter` **and**
+   `OPENWIKI_OPENROUTER_MAX_TOKENS` is set, that value is used immediately — it
+   wins even over the provider-neutral `OPENWIKI_MAX_OUTPUT_TOKENS`, so existing
+   low-balance installations keep their provider-specific credit limit. This is
+   a legacy cap retained because, without one, OpenRouter's credit pre-check
+   budgets the model's full advertised output ceiling and rejects requests with
+   HTTP 402.
+2. **Provider-neutral cap.** Otherwise `OPENWIKI_MAX_OUTPUT_TOKENS` is parsed by
    `resolveMaxOutputTokens`, which accepts only a positive safe integer (no
-   fractions, exponents, or hex). When set, it applies to every provider.
-2. Provider-specific caps, used only when the neutral setting is unset:
-   - On **OpenRouter**, `OPENWIKI_OPENROUTER_MAX_TOKENS` is a legacy cap retained
-     for existing low-balance installations. It takes precedence over the
-     Bedrock default whenever set, because without a cap OpenRouter's credit
-     pre-check budgets the model's full advertised output ceiling and rejects
-     requests with HTTP 402.
-   - On **Bedrock**, `OPENWIKI_BEDROCK_MAX_TOKENS` caps output for the Bedrock
-     Converse API. `resolveBedrockMaxTokens` **defaults to
-     `BEDROCK_DEFAULT_MAX_TOKENS` (16000)** when unset, matching
-     `@langchain/anthropic`'s built-in ceiling for Claude models — without an
-     explicit `maxTokens`, Bedrock caps output at 4096 tokens and truncates long
-     wiki pages mid-write. Override it for models with a lower ceiling.
-3. When all of the above are unset, the resolved cap is `undefined` and the
-   provider SDK's own default applies (Bedrock excepted, which always gets the
-   16000 default).
+   fractions, exponents, or hex). When set, it applies to every other provider.
+3. **Bedrock default.** When the neutral setting is also unset and the provider
+   is `bedrock`, `OPENWIKI_BEDROCK_MAX_TOKENS` caps output for the Bedrock
+   Converse API. `resolveBedrockMaxTokens` **defaults to
+   `BEDROCK_DEFAULT_MAX_TOKENS` (16000)** when unset, matching
+   `@langchain/anthropic`'s built-in ceiling for Claude models — without an
+   explicit `maxTokens`, Bedrock caps output at 4096 tokens and truncates long
+   wiki pages mid-write. Override it for models with a lower ceiling.
+4. When all of the above are unset and the provider is not `bedrock`, the resolved
+   cap is `undefined` and the provider SDK's own default applies (Bedrock always
+   gets the 16000 default).
 
-In short: `OPENWIKI_MAX_OUTPUT_TOKENS` > provider-specific (OpenRouter legacy /
-Bedrock default) > unset.
+In short: on OpenRouter, `OPENWIKI_OPENROUTER_MAX_TOKENS` (if set) overrides
+everything; otherwise `OPENWIKI_MAX_OUTPUT_TOKENS` (if set) applies to all
+providers; otherwise Bedrock gets its 16000 default and every other provider gets
+`undefined`.
 
 ### Streaming and Responses API toggles
 
@@ -235,8 +306,20 @@ next Bedrock stream chunk; `resolveStreamIdleTimeoutForProvider` applies it only
 to the `bedrock` provider, and a value of `0` disables the stream watchdog
 entirely (stalled streams may then hang indefinitely).
 
-`OPENWIKI_PROVIDER_RETRY_ATTEMPTS` (`resolveProviderRetryAttempts`) sets provider
-retry attempts, defaulting to `DEFAULT_PROVIDER_RETRY_ATTEMPTS` (3).
+`OPENWIKI_PAGE_CONCURRENCY` (`resolvePageConcurrency`) sets how many
+repository page workers may run at once, accepting an integer from 1 to
+`MAX_PAGE_CONCURRENCY` (8) and defaulting to `DEFAULT_PAGE_CONCURRENCY` (1) when
+unset. Concurrent workers share one provider key, so they make transient rate
+limits the common failure; the upper bound keeps a single key from being
+rate-limit bound and keeps the progress view readable.
+
+`OPENWIKI_PROVIDER_RETRY_ATTEMPTS` (`resolveProviderRetryAttempts`) sets the
+provider retry count as a positive integer. An explicit value always wins. When
+unset, the default adapts to the run's page concurrency: a single-worker run
+gets `DEFAULT_PROVIDER_RETRY_ATTEMPTS` (3), while a concurrent run (more than
+one page worker) gets `PARALLEL_PROVIDER_RETRY_ATTEMPTS` (5), because
+concurrent workers make transient rate limits the common failure and need more
+headroom.
 
 ### Reasoning effort
 
@@ -289,8 +372,10 @@ for those models even though it is valid for OpenAI GPT-5.6.
 `CREDENTIAL_DIAGNOSTIC_ENV_KEYS`, comparing the file value against the
 `process.env` value. Each entry reports its source — `process.env`, the env file
 path, "process.env over <file>" when both are set, or `unset` — and a
-masked preview. Non-secret settings (provider, model, token limits, base URLs,
-region, Google project/location, and the boolean toggles, including
+masked preview. Non-secret settings (provider, model, token limits, page concurrency, retry
+attempts, base URLs, region, Google project/location, OpenRouter provider-only filter, the
+Entra auth mode and scope, the Mistral base URL, and the boolean toggles, including
+`OPENWIKI_OPENAI_COMPATIBLE_STREAM_MESSAGES` and
 `OPENWIKI_OPENAI_COMPATIBLE_REASONING_EFFORT_SUPPORTED`) are shown verbatim;
 true secrets are previewed as a short masked fragment (or all-asterisks for short
 values).
@@ -298,12 +383,16 @@ values).
 Diagnostics surface per-key warnings through a dedicated validator per key:
 invalid provider, invalid model ID, invalid token limits (neutral, Bedrock, and
 OpenRouter each have their own validator), invalid boolean, invalid reasoning
-effort, invalid retry attempts, invalid stream idle timeout, base-URL provider
-mismatches, credential whitespace/newline/quote issues, and a warning that the
-Bedrock stream watchdog is disabled when the idle timeout is `0`. The boolean
-validator `getBooleanWarnings` covers all three `openai-compatible` toggles —
+effort, invalid retry attempts, invalid page concurrency, invalid stream idle
+timeout, base-URL provider mismatches (Anthropic, Baseten, Bob, Fireworks, Mistral,
+NVIDIA, OpenAI, and the OpenAI-compatible base URL each validated through
+`getProviderBaseUrlWarnings`), credential
+whitespace/newline/quote issues, and a warning that the Bedrock stream watchdog
+is disabled when the idle timeout is `0`. The boolean validator
+`getBooleanWarnings` covers all four `openai-compatible` toggles —
 `OPENWIKI_OPENAI_COMPATIBLE_USE_RESPONSES_API`,
-`OPENWIKI_OPENAI_COMPATIBLE_STREAMING`, and
+`OPENWIKI_OPENAI_COMPATIBLE_STREAMING`,
+`OPENWIKI_OPENAI_COMPATIBLE_STREAM_MESSAGES`, and
 `OPENWIKI_OPENAI_COMPATIBLE_REASONING_EFFORT_SUPPORTED` — reporting "invalid
 boolean" for any value that does not trim to `true` or `false`.
 
@@ -319,9 +408,12 @@ validators.
 `sanitizeDiagnosticText` is the security boundary for anything shown to the user
 or written to a log: every error message, header value, or provider response body
 that could contain a credential must pass through it first. It redacts (1) the
-exact values of secrets currently set in the environment, replacing each with
-`[REDACTED:<KEY>]`, and (2) anything matching known key/token shapes — OpenAI and
-OpenRouter `sk-…` keys, `Bearer …` headers, LangSmith `ls…` tokens, and the
+exact values of secrets currently set in the environment — iterated over a fixed
+list of credential env keys (provider API keys, AWS/Bedrock credentials, the
+OpenAI-compatible key, `LANGSMITH_API_KEY`, the Mistral key, and Azure client
+secret/certificate-password keys), replacing each with `[REDACTED:<KEY>]` — and
+(2) anything matching known key/token shapes — OpenAI and OpenRouter `sk-…`
+keys, `Bearer …` headers, LangSmith `ls…` tokens, and the
 "Incorrect API key provided: …" phrasing. `getErrorMessage` routes user-facing
 errors through this sanitizer (with a friendlier message for provider HTTP 500s).
 

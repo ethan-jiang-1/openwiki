@@ -6,8 +6,10 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, test } from "vitest";
 import { parse } from "yaml";
 import {
@@ -19,6 +21,26 @@ import type { OpenWikiRunEvent } from "../../src/agent/types.ts";
 const SNIPPET_START = "<!-- OPENWIKI:START -->";
 const SNIPPET_END = "<!-- OPENWIKI:END -->";
 
+// The bare `## OpenWiki` section a pre-marker (0.0.x) release wrote directly
+// into AGENTS.md / CLAUDE.md, before the managed markers existed.
+const LEGACY_SENTENCE =
+  "This repository has documentation located in the /openwiki directory.";
+const LEGACY_SECTION = `## OpenWiki
+
+${LEGACY_SENTENCE}
+
+Start here:
+
+- [OpenWiki quickstart](openwiki/quickstart.md)
+
+OpenWiki includes repository overview, architecture notes, workflows, domain concepts, operations, integrations, testing guidance, and source maps.
+
+When working in this repository, read the OpenWiki quickstart first, then follow its links to the relevant architecture, workflow, domain, operation, and testing notes.`;
+
+function countOccurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
 const tempRepos: string[] = [];
 
 interface WorkflowStep {
@@ -29,6 +51,7 @@ interface WorkflowStep {
   run?: string;
   uses?: string;
   with?: Record<string, unknown>;
+  env?: Record<string, string>;
 }
 
 async function createTempRepo(): Promise<string> {
@@ -78,12 +101,17 @@ function expectFailurePreservingWorkflow(workflow: string): void {
     steps,
     "Create OpenWiki update pull request",
   );
+  const annotation = requireWorkflowStep(
+    steps,
+    "Annotate OpenWiki update pull request",
+  );
   const propagate = requireWorkflowStep(steps, "Propagate OpenWiki failure");
 
   expect(run.id).toBe("openwiki");
   expect(run["continue-on-error"]).toBe(true);
   expect(cleanup.if).toBe("${{ !cancelled() }}");
   expect(cleanup.run).toBe("rm -f -- openwiki/.run.json");
+  expect(pullRequest.id).toBe("create-pr");
   expect(pullRequest.if).toBe("${{ !cancelled() }}");
   expect(pullRequest.uses).toMatch(
     /^peter-evans\/create-pull-request@[a-f0-9]{40}$/u,
@@ -91,8 +119,11 @@ function expectFailurePreservingWorkflow(workflow: string): void {
   expect(pullRequest.with?.branch).toBe("openwiki/update");
   expect(pullRequest.with?.["commit-message"]).toBe("docs: update OpenWiki");
   expect(pullRequest.with?.title).toBe("docs: update OpenWiki");
+  const paths = requireWorkflowStep(steps, "List OpenWiki update paths");
+  expect(paths.id).toBe("paths");
+  expect(paths.if).toBe("${{ !cancelled() }}");
   expect(pullRequest.with?.["add-paths"]).toBe(
-    "openwiki\nAGENTS.md\nCLAUDE.md\n.github/workflows/openwiki-update.yml\n",
+    "${{ steps.paths.outputs.list }}",
   );
   expect(pullRequest.with?.body).toContain(
     "OpenWiki result: ${{ steps.openwiki.outcome }}",
@@ -103,12 +134,19 @@ function expectFailurePreservingWorkflow(workflow: string): void {
   expect(pullRequest.with?.body).toContain(
     "baseline for the next scheduled run",
   );
+  expect(annotation.if).toBe(
+    "${{ !cancelled() && steps.create-pr.outputs.pull-request-url != '' }}",
+  );
+  expect(annotation.run).toBe(
+    'echo "::notice title=OpenWiki update pull request::${{ steps.create-pr.outputs.pull-request-url }}"',
+  );
   expect(propagate.if).toBe("${{ steps.openwiki.outcome == 'failure' }}");
   expect(propagate.run).toBe("exit 1");
 
   expect(steps.indexOf(run)).toBeLessThan(steps.indexOf(cleanup));
   expect(steps.indexOf(cleanup)).toBeLessThan(steps.indexOf(pullRequest));
-  expect(steps.indexOf(pullRequest)).toBeLessThan(steps.indexOf(propagate));
+  expect(steps.indexOf(pullRequest)).toBeLessThan(steps.indexOf(annotation));
+  expect(steps.indexOf(annotation)).toBeLessThan(steps.indexOf(propagate));
   expect(
     steps
       .map((step) => step.run)
@@ -126,22 +164,74 @@ afterEach(async () => {
 });
 
 describe("ensureCodeModeRepoSetup agent files", () => {
-  test("creates both AGENTS.md and CLAUDE.md when neither exists", async () => {
+  test.each([false, true])(
+    "does not assume scheduled maintenance is active (createWorkflow=%s)",
+    async (createWorkflow) => {
+      const repo = await createTempRepo();
+      const authored = "Repository maintenance is managed externally.\n\n";
+      await writeFile(path.join(repo, "AGENTS.md"), authored, "utf8");
+      await ensureCodeModeRepoSetup(repo, { createWorkflow });
+      const first = await readFile(path.join(repo, "AGENTS.md"), "utf8");
+      expect(first.startsWith(authored)).toBe(true);
+      expect(first).not.toContain(
+        "The scheduled OpenWiki GitHub Actions workflow refreshes the repository wiki.",
+      );
+      expect(first).toContain("Check its configuration and completed runs");
+      await ensureCodeModeRepoSetup(repo, { createWorkflow });
+      expect(await readFile(path.join(repo, "AGENTS.md"), "utf8")).toBe(first);
+    },
+  );
+
+  test("creates AGENTS.md but not CLAUDE.md when neither exists", async () => {
     const repo = await createTempRepo();
 
     await ensureCodeModeRepoSetup(repo);
 
-    for (const fileName of ["AGENTS.md", "CLAUDE.md"]) {
-      const content = await readIfPresent(path.join(repo, fileName));
-      expect(content, `${fileName} should be created`).not.toBeNull();
-      expect(content).toContain(SNIPPET_START);
-      expect(content).toContain(SNIPPET_END);
-      expect(content).toContain("## OpenWiki");
-    }
+    const content = await readIfPresent(path.join(repo, "AGENTS.md"));
+    expect(content, "AGENTS.md should be created").not.toBeNull();
+    expect(content).toContain(SNIPPET_START);
+    expect(content).toContain(SNIPPET_END);
+    expect(content).toContain("## OpenWiki");
+    // Claude Code reads AGENTS.md when no CLAUDE.md exists, so creating one
+    // would only shadow it.
+    expect(await readIfPresent(path.join(repo, "CLAUDE.md"))).toBeNull();
+  });
+
+  test("refreshes the block in an existing CLAUDE.md", async () => {
+    const repo = await createTempRepo();
+    await writeFile(path.join(repo, "CLAUDE.md"), "# Team notes\n", "utf8");
+
+    await ensureCodeModeRepoSetup(repo);
+
+    const content = await readIfPresent(path.join(repo, "CLAUDE.md"));
+    expect(content).toMatch(/^# Team notes\n/u);
+    expect(content).toContain(SNIPPET_START);
+    expect(content).toContain("@AGENTS.md");
+  });
+
+  test("prefers progressive retrieval tools and keeps quickstart as fallback", async () => {
+    const repo = await createTempRepo();
+
+    await ensureCodeModeRepoSetup(repo);
+
+    const agentsContent = await readIfPresent(path.join(repo, "AGENTS.md"));
+    expect(agentsContent).toContain(
+      "Do not enumerate, preload, or search wikis at task start",
+    );
+    expect(agentsContent).toContain("Stop once the question is grounded");
+    expect(agentsContent).toContain(
+      "When those conditions apply and OpenWiki retrieval tools are available",
+    );
+    expect(agentsContent).toContain("use `openwiki_search`");
+    expect(agentsContent).toContain("`openwiki_read`");
+    expect(agentsContent).toContain("`workspace_required`");
+    expect(agentsContent).toContain("retrieval tools are unavailable");
+    expect(agentsContent).toContain("`openwiki/quickstart.md`");
   });
 
   test("CLAUDE.md is a simple reference to AGENTS.md, not a copy of its full content", async () => {
     const repo = await createTempRepo();
+    await writeFile(path.join(repo, "CLAUDE.md"), "", "utf8");
 
     await ensureCodeModeRepoSetup(repo);
 
@@ -228,6 +318,21 @@ Trailing notes that must survive.
     );
   });
 
+  test("does not claim a scheduled update exists in repository guidance", async () => {
+    const repo = await createTempRepo();
+    await writeFile(
+      path.join(repo, "AGENTS.md"),
+      "No scheduled wiki workflow is installed.\n",
+      "utf8",
+    );
+    await ensureCodeModeRepoSetup(repo);
+    const content = await readIfPresent(path.join(repo, "AGENTS.md"));
+    expect(content).toContain("No scheduled wiki workflow is installed.");
+    expect(content).not.toContain(
+      "The scheduled OpenWiki GitHub Actions workflow refreshes",
+    );
+  });
+
   test("is idempotent across repeated runs", async () => {
     const repo = await createTempRepo();
 
@@ -237,6 +342,327 @@ Trailing notes that must survive.
     const second = await readIfPresent(path.join(repo, "CLAUDE.md"));
 
     expect(second).toEqual(first);
+  });
+
+  test("replaces a legacy unmarked OpenWiki section in place and stays idempotent", async () => {
+    const repo = await createTempRepo();
+    await writeFile(
+      path.join(repo, "AGENTS.md"),
+      `${LEGACY_SECTION}\n`,
+      "utf8",
+    );
+
+    await ensureCodeModeRepoSetup(repo);
+    const first = await readIfPresent(path.join(repo, "AGENTS.md"));
+
+    expect(first).toContain(SNIPPET_START);
+    expect(first).toContain(SNIPPET_END);
+    // The old section is gone, so only the managed block's heading remains.
+    expect(first).not.toContain(LEGACY_SENTENCE);
+    expect(countOccurrences(first ?? "", "## OpenWiki")).toBe(1);
+
+    await ensureCodeModeRepoSetup(repo);
+    const second = await readIfPresent(path.join(repo, "AGENTS.md"));
+    expect(second).toBe(first);
+  });
+
+  for (const [name, trailing, marker] of [
+    [
+      "a ### subsection",
+      "### My notes\n\nKeep this subsection.\n",
+      "Keep this subsection.",
+    ],
+    [
+      "a plain paragraph",
+      "Keep this hand-written paragraph.\n",
+      "Keep this hand-written paragraph.",
+    ],
+    [
+      "a setext heading",
+      "My Notes\n--------\n\nKeep this setext body.\n",
+      "Keep this setext body.",
+    ],
+    [
+      "an Nx-style comment block",
+      "<!-- nx configuration -->\n\nKeep this tool block.\n",
+      "Keep this tool block.",
+    ],
+  ] as const) {
+    test(`preserves ${name} written below a legacy section`, async () => {
+      const repo = await createTempRepo();
+      await writeFile(
+        path.join(repo, "AGENTS.md"),
+        `${LEGACY_SECTION}\n\n${trailing}`,
+        "utf8",
+      );
+
+      await ensureCodeModeRepoSetup(repo);
+      const content = await readIfPresent(path.join(repo, "AGENTS.md"));
+
+      // The template lines go; the user's content underneath does not.
+      expect(content).not.toContain(LEGACY_SENTENCE);
+      expect(content).toContain(marker);
+      expect(content).toContain(SNIPPET_START);
+      // The block lands where the section was, above the preserved content.
+      expect(content?.indexOf(SNIPPET_START)).toBeLessThan(
+        content?.indexOf(marker) ?? -1,
+      );
+    });
+  }
+
+  test("replaces a legacy section that sits at the end of the file", async () => {
+    const repo = await createTempRepo();
+    await writeFile(
+      path.join(repo, "AGENTS.md"),
+      `# My Project\n\nSome intro that must survive.\n\n${LEGACY_SECTION}\n`,
+      "utf8",
+    );
+
+    await ensureCodeModeRepoSetup(repo);
+    const content = await readIfPresent(path.join(repo, "AGENTS.md"));
+
+    expect(content).toContain("Some intro that must survive.");
+    expect(content).not.toContain(LEGACY_SENTENCE);
+    expect(content).toContain(SNIPPET_START);
+    expect(content?.indexOf("Some intro that must survive.")).toBeLessThan(
+      content?.indexOf(SNIPPET_START) ?? -1,
+    );
+  });
+
+  test("handles a legacy section written with CRLF line endings", async () => {
+    const repo = await createTempRepo();
+    const crlf = `${LEGACY_SECTION}\n\nKeep this CRLF line.\n`.replace(
+      /\n/gu,
+      "\r\n",
+    );
+    await writeFile(path.join(repo, "AGENTS.md"), crlf, "utf8");
+
+    await ensureCodeModeRepoSetup(repo);
+    const content = await readIfPresent(path.join(repo, "AGENTS.md"));
+
+    expect(content).not.toContain(LEGACY_SENTENCE);
+    expect(content).toContain("Keep this CRLF line.");
+    expect(content).toContain(SNIPPET_START);
+    expect(countOccurrences(content ?? "", "## OpenWiki")).toBe(1);
+  });
+
+  test("removes every legacy section when a file has more than one", async () => {
+    const repo = await createTempRepo();
+    await writeFile(
+      path.join(repo, "AGENTS.md"),
+      `${LEGACY_SECTION}\n\n${LEGACY_SECTION}\n\nKeep this trailer.\n`,
+      "utf8",
+    );
+
+    await ensureCodeModeRepoSetup(repo);
+    const content = await readIfPresent(path.join(repo, "AGENTS.md"));
+
+    expect(content).not.toContain(LEGACY_SENTENCE);
+    expect(content).toContain("Keep this trailer.");
+    // Both old sections collapse into the single managed block.
+    expect(countOccurrences(content ?? "", "## OpenWiki")).toBe(1);
+    expect(countOccurrences(content ?? "", SNIPPET_START)).toBe(1);
+  });
+
+  test("removes a legacy section that sits beside an existing managed block", async () => {
+    const repo = await createTempRepo();
+    await writeFile(
+      path.join(repo, "AGENTS.md"),
+      `${LEGACY_SECTION}\n\n${SNIPPET_START}\nstale managed block\n${SNIPPET_END}\n`,
+      "utf8",
+    );
+
+    await ensureCodeModeRepoSetup(repo);
+    const content = await readIfPresent(path.join(repo, "AGENTS.md"));
+
+    expect(content).not.toContain(LEGACY_SENTENCE);
+    expect(content).not.toContain("stale managed block");
+    expect(countOccurrences(content ?? "", SNIPPET_START)).toBe(1);
+    expect(countOccurrences(content ?? "", "## OpenWiki")).toBe(1);
+  });
+
+  test("reduces an @AGENTS.md CLAUDE.md with a legacy section to just the import", async () => {
+    const repo = await createTempRepo();
+    await writeFile(
+      path.join(repo, "CLAUDE.md"),
+      `@AGENTS.md\n\n${LEGACY_SECTION}\n`,
+      "utf8",
+    );
+
+    await ensureCodeModeRepoSetup(repo);
+
+    // AGENTS.md carries the managed block, so CLAUDE.md is left as the import.
+    expect(await readIfPresent(path.join(repo, "CLAUDE.md"))).toBe(
+      "@AGENTS.md\n",
+    );
+  });
+
+  test("leaves a fenced quote of the old snippet untouched", async () => {
+    const repo = await createTempRepo();
+    await writeFile(
+      path.join(repo, "AGENTS.md"),
+      `# Docs\n\nExample of the old snippet:\n\n\`\`\`markdown\n${LEGACY_SECTION}\n\`\`\`\n`,
+      "utf8",
+    );
+
+    await ensureCodeModeRepoSetup(repo);
+    const content = await readIfPresent(path.join(repo, "AGENTS.md"));
+
+    // A heading inside a code fence is not a real section, so it survives and
+    // the block is simply appended after it.
+    expect(content).toContain(LEGACY_SENTENCE);
+    expect(content).toContain("```markdown");
+    expect(content).toContain(SNIPPET_START);
+    expect(content?.indexOf("```markdown")).toBeLessThan(
+      content?.indexOf(SNIPPET_START) ?? -1,
+    );
+  });
+
+  test("leaves a hand-written OpenWiki section without the template sentence", async () => {
+    const repo = await createTempRepo();
+    const handWritten =
+      "## OpenWiki\n\nOur own notes about the OpenWiki feature, unrelated to the generated wiki.\n";
+    await writeFile(path.join(repo, "AGENTS.md"), handWritten, "utf8");
+
+    await ensureCodeModeRepoSetup(repo);
+    const content = await readIfPresent(path.join(repo, "AGENTS.md"));
+
+    // No template sentence means it is not ours to remove.
+    expect(content).toContain(
+      "Our own notes about the OpenWiki feature, unrelated to the generated wiki.",
+    );
+    expect(content).toContain(SNIPPET_START);
+  });
+
+  test("leaves an indented legacy snippet shown as a Markdown code block", async () => {
+    const repo = await createTempRepo();
+    const indented = LEGACY_SECTION.replace(/^/gmu, "    ");
+    await writeFile(path.join(repo, "AGENTS.md"), `${indented}\n`, "utf8");
+
+    await ensureCodeModeRepoSetup(repo);
+    const content = await readIfPresent(path.join(repo, "AGENTS.md"));
+
+    expect(content).toContain(`    ${LEGACY_SENTENCE}`);
+    expect(content).toContain(SNIPPET_START);
+  });
+
+  test("stops at a customized quickstart link", async () => {
+    const repo = await createTempRepo();
+    const customized = LEGACY_SECTION.replace(
+      "- [OpenWiki quickstart](openwiki/quickstart.md)",
+      "- [Team OpenWiki guide](openwiki/quickstart.md)",
+    );
+    await writeFile(path.join(repo, "AGENTS.md"), `${customized}\n`, "utf8");
+
+    await ensureCodeModeRepoSetup(repo);
+    const content = await readIfPresent(path.join(repo, "AGENTS.md"));
+
+    expect(content).toContain(
+      "- [Team OpenWiki guide](openwiki/quickstart.md)",
+    );
+    expect(content).toContain(SNIPPET_START);
+  });
+
+  test("stops at a template line the user appended text to, keeping it and everything below", async () => {
+    const repo = await createTempRepo();
+    // The "When working…" line is edited, so it is no longer a template line and
+    // must halt the removal instead of being deleted with the user's addition.
+    const edited = `## OpenWiki
+
+${LEGACY_SENTENCE}
+
+Start here:
+
+- [OpenWiki quickstart](openwiki/quickstart.md)
+
+OpenWiki includes repository overview, architecture notes, workflows, domain concepts, operations, integrations, testing guidance, and source maps.
+
+When working in this repository, and ALSO CHECK OUR INTERNAL WIKI at https://wiki.example.com.
+
+More hand-written notes below.
+`;
+    await writeFile(path.join(repo, "AGENTS.md"), edited, "utf8");
+
+    await ensureCodeModeRepoSetup(repo);
+    const content = await readIfPresent(path.join(repo, "AGENTS.md"));
+
+    // The pristine template lines are gone, but the edited line and the notes
+    // under it survive in full.
+    expect(content).not.toContain(LEGACY_SENTENCE);
+    expect(content).toContain(
+      "When working in this repository, and ALSO CHECK OUR INTERNAL WIKI at https://wiki.example.com.",
+    );
+    expect(content).toContain("More hand-written notes below.");
+    expect(content).toContain(SNIPPET_START);
+  });
+
+  test("leaves a snippet quoted in a ``` fence that itself contains a ~~~ line", async () => {
+    const repo = await createTempRepo();
+    // The nested `~~~` must not close the outer ``` fence, or the quoted heading
+    // and sentence would be mistaken for a real section and removed.
+    const existing = `# Docs
+
+The old snippet, shown with a tilde block inside it:
+
+\`\`\`md
+~~~
+## OpenWiki
+
+${LEGACY_SENTENCE}
+
+Start here:
+
+- [OpenWiki quickstart](openwiki/quickstart.md)
+~~~
+\`\`\`
+`;
+    await writeFile(path.join(repo, "AGENTS.md"), existing, "utf8");
+
+    await ensureCodeModeRepoSetup(repo);
+    const content = await readIfPresent(path.join(repo, "AGENTS.md"));
+
+    // Everything inside the fence survives; the block is merely appended after.
+    expect(content).toContain(LEGACY_SENTENCE);
+    expect(content).toContain("~~~");
+    expect(content).toContain(SNIPPET_START);
+    expect(content?.indexOf("~~~")).toBeLessThan(
+      content?.indexOf(SNIPPET_START) ?? -1,
+    );
+  });
+
+  test("reducing an @AGENTS.md CLAUDE.md with a legacy section is idempotent", async () => {
+    const repo = await createTempRepo();
+    await writeFile(
+      path.join(repo, "CLAUDE.md"),
+      `@AGENTS.md\n\n${LEGACY_SECTION}\n`,
+      "utf8",
+    );
+
+    await ensureCodeModeRepoSetup(repo);
+    const first = await readIfPresent(path.join(repo, "CLAUDE.md"));
+    await ensureCodeModeRepoSetup(repo);
+    const second = await readIfPresent(path.join(repo, "CLAUDE.md"));
+
+    expect(first).toBe("@AGENTS.md\n");
+    // The second run sees a bare import and leaves it byte-for-byte alone.
+    expect(second).toBe(first);
+  });
+
+  test("removes a legacy section that follows an existing managed block", async () => {
+    const repo = await createTempRepo();
+    await writeFile(
+      path.join(repo, "AGENTS.md"),
+      `${SNIPPET_START}\nstale managed block\n${SNIPPET_END}\n\n${LEGACY_SECTION}\n`,
+      "utf8",
+    );
+
+    await ensureCodeModeRepoSetup(repo);
+    const content = await readIfPresent(path.join(repo, "AGENTS.md"));
+
+    expect(content).not.toContain(LEGACY_SENTENCE);
+    expect(content).not.toContain("stale managed block");
+    expect(countOccurrences(content ?? "", SNIPPET_START)).toBe(1);
+    expect(countOccurrences(content ?? "", "## OpenWiki")).toBe(1);
   });
 
   for (const [name, existing] of [
@@ -301,25 +727,39 @@ ${SNIPPET_END}
 });
 
 describe("ensureCodeModeRepoSetup workflow", () => {
-  test("generated PR includes agent files and the workflow in add-paths", async () => {
-    const repo = await createTempRepo();
+  // The step is POSIX shell run on ubuntu-latest, so it is not exercised on
+  // Windows test runners.
+  test
+    .skipIf(process.platform === "win32")
+    .each([{ hasClaude: false }, { hasClaude: true }])(
+    "generated PR lists CLAUDE.md in add-paths only when it exists (%o)",
+    async ({ hasClaude }) => {
+      const repo = await createTempRepo();
+      if (hasClaude) {
+        await writeFile(path.join(repo, "CLAUDE.md"), "", "utf8");
+      }
+      await ensureCodeModeRepoSetup(repo, { createWorkflow: true });
+      const workflow = await readIfPresent(
+        path.join(repo, ".github", "workflows", "openwiki-update.yml"),
+      );
+      const step = requireWorkflowStep(
+        parseWorkflowSteps(workflow ?? ""),
+        "List OpenWiki update paths",
+      );
+      const outputPath = path.join(repo, "github-output");
+      await writeFile(outputPath, "", "utf8");
 
-    await ensureCodeModeRepoSetup(repo, { createWorkflow: true });
+      await promisify(execFile)("bash", ["-e", "-c", step.run ?? ""], {
+        cwd: repo,
+        env: { ...process.env, GITHUB_OUTPUT: outputPath },
+      });
 
-    const workflow = await readIfPresent(
-      path.join(repo, ".github", "workflows", "openwiki-update.yml"),
-    );
-    expect(workflow).not.toBeNull();
-    expect(workflow).toContain("add-paths: |");
-    for (const managedPath of [
-      "openwiki",
-      "AGENTS.md",
-      "CLAUDE.md",
-      ".github/workflows/openwiki-update.yml",
-    ]) {
-      expect(workflow).toContain(managedPath);
-    }
-  });
+      const claude = hasClaude ? ",CLAUDE.md" : "";
+      expect(await readFile(outputPath, "utf8")).toBe(
+        `list=openwiki,AGENTS.md,.github/workflows/openwiki-update.yml${claude}\n`,
+      );
+    },
+  );
 
   test("publishes completed pages before propagating an OpenWiki failure", async () => {
     const repo = await createTempRepo();
@@ -473,7 +913,44 @@ describe("ensureCodeModeRepoSetup workflow provider block", () => {
     expect(workflow).toContain(
       "OPENAI_COMPATIBLE_API_KEY: ${{ secrets.OPENAI_COMPATIBLE_API_KEY }}",
     );
+    const run = requireWorkflowStep(
+      parseWorkflowSteps(workflow),
+      "Run OpenWiki",
+    );
+    expect(run.env?.OPENAI_COMPATIBLE_API_KEY).toBe(
+      "${{ secrets.OPENAI_COMPATIBLE_API_KEY }}",
+    );
   });
+
+  test.each([
+    ["custom", " api://gateway/.default ", "api://gateway/.default"],
+    ["default", undefined, "https://cognitiveservices.azure.com/.default"],
+  ])(
+    "generates keyless Entra workflow with %s scope",
+    async (_name, scope, expectedScope) => {
+      const workflow = await generateWorkflow({
+        OPENWIKI_PROVIDER: "openai-compatible",
+        OPENAI_COMPATIBLE_AUTH: "entra-id",
+        OPENAI_COMPATIBLE_ENTRA_SCOPE: scope,
+        OPENWIKI_MODEL_ID: "gateway-model",
+      });
+      const run = requireWorkflowStep(
+        parseWorkflowSteps(workflow),
+        "Run OpenWiki",
+      );
+
+      expect(run.env).toMatchObject({
+        OPENWIKI_PROVIDER: "openai-compatible",
+        OPENAI_COMPATIBLE_AUTH: "entra-id",
+        OPENAI_COMPATIBLE_ENTRA_SCOPE: expectedScope,
+        OPENAI_COMPATIBLE_BASE_URL: "${{ vars.OPENAI_COMPATIBLE_BASE_URL }}",
+        OPENWIKI_MODEL_ID: "gateway-model",
+      });
+      expect(run.env).not.toHaveProperty("OPENAI_COMPATIBLE_API_KEY");
+      expect(workflow).not.toContain("secrets.OPENAI_COMPATIBLE_API_KEY");
+      expect(workflow).toContain("Configure unattended Azure Identity");
+    },
+  );
 
   test("carries the streaming opt-in into the scheduled run", async () => {
     // A gateway that only serves SSE would otherwise return empty content in

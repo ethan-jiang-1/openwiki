@@ -4,10 +4,14 @@ export const UPDATE_METADATA_PATH = `${OPEN_WIKI_DIR}/.last-update.json`;
 
 export const BASETEN_API_KEY_ENV_KEY = "BASETEN_API_KEY";
 export const BASETEN_BASE_URL_ENV_KEY = "BASETEN_BASE_URL";
+export const BOB_API_KEY_ENV_KEY = "BOB_API_KEY";
+export const BOB_BASE_URL_ENV_KEY = "BOB_BASE_URL";
 export const COPILOT_API_KEY_ENV_KEY = "COPILOT_API_KEY";
 export const COPILOT_BASE_URL_ENV_KEY = "COPILOT_BASE_URL";
 export const FIREWORKS_API_KEY_ENV_KEY = "FIREWORKS_API_KEY";
 export const FIREWORKS_BASE_URL_ENV_KEY = "FIREWORKS_BASE_URL";
+export const MISTRAL_API_KEY_ENV_KEY = "MISTRAL_API_KEY";
+export const MISTRAL_BASE_URL_ENV_KEY = "MISTRAL_BASE_URL";
 export const NEBIUS_API_KEY_ENV_KEY = "NEBIUS_API_KEY";
 export const NVIDIA_API_KEY_ENV_KEY = "NVIDIA_API_KEY";
 export const NVIDIA_BASE_URL_ENV_KEY = "NVIDIA_BASE_URL";
@@ -15,6 +19,14 @@ export const OPENAI_API_KEY_ENV_KEY = "OPENAI_API_KEY";
 export const OPENAI_BASE_URL_ENV_KEY = "OPENAI_BASE_URL";
 export const OPENAI_COMPATIBLE_API_KEY_ENV_KEY = "OPENAI_COMPATIBLE_API_KEY";
 export const OPENAI_COMPATIBLE_BASE_URL_ENV_KEY = "OPENAI_COMPATIBLE_BASE_URL";
+export const OPENAI_COMPATIBLE_AUTH_ENV_KEY = "OPENAI_COMPATIBLE_AUTH";
+export const OPENAI_COMPATIBLE_ENTRA_SCOPE_ENV_KEY =
+  "OPENAI_COMPATIBLE_ENTRA_SCOPE";
+/**
+ * Azure OpenAI's standard Entra scope, used unless a gateway scope is configured.
+ */
+export const DEFAULT_OPENAI_COMPATIBLE_ENTRA_SCOPE =
+  "https://cognitiveservices.azure.com/.default";
 export const OPENAI_COMPATIBLE_STREAMING_ENV_KEY =
   "OPENWIKI_OPENAI_COMPATIBLE_STREAMING";
 export const OPENAI_COMPATIBLE_USE_RESPONSES_API_ENV_KEY =
@@ -72,6 +84,25 @@ export const OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY =
   "OPENWIKI_PROVIDER_RETRY_ATTEMPTS";
 export const OPENWIKI_REASONING_EFFORT_ENV_KEY = "OPENWIKI_REASONING_EFFORT";
 export const DEFAULT_PROVIDER_RETRY_ATTEMPTS = 3;
+/**
+ * Model retry count used when several page workers share one provider key and
+ * no explicit `OPENWIKI_PROVIDER_RETRY_ATTEMPTS` override is set. Concurrent
+ * workers make transient rate limits the common failure, so they get more
+ * headroom than a single sequential worker.
+ */
+export const PARALLEL_PROVIDER_RETRY_ATTEMPTS = 5;
+export const OPENWIKI_PAGE_CONCURRENCY_ENV_KEY = "OPENWIKI_PAGE_CONCURRENCY";
+export const DEFAULT_PAGE_CONCURRENCY = 1;
+/**
+ * Upper bound on concurrent repository page workers. Beyond this a single
+ * provider key is rate-limit bound and the progress view stops being readable.
+ */
+export const MAX_PAGE_CONCURRENCY = 8;
+/**
+ * Overrides the LangSmith thread one repository run's traces are grouped under,
+ * so CI can name it after the change that caused the run.
+ */
+const OPENWIKI_TRACE_THREAD_ID_ENV_KEY = "OPENWIKI_TRACE_THREAD_ID";
 export const DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS = 16_384;
 const TRUE_ENV_VALUE = "true";
 export const OPENWIKI_GOOGLE_ACCESS_TOKEN_ENV_KEY =
@@ -109,10 +140,12 @@ export type OpenWikiProvider =
   | "anthropic"
   | "baseten"
   | "bedrock"
+  | "bob"
   | "copilot"
   | "fireworks"
   | "gemini"
   | "gemini-enterprise"
+  | "mistral"
   | "nebius"
   | "nvidia"
   | "openai"
@@ -208,6 +241,12 @@ type ProviderConfig = {
    */
   locationEnvKey?: string;
   defaultLocation?: string;
+  /**
+   * When set, the provider always uses this model ID and the model-selection
+   * step is skipped entirely. The value is used verbatim; it is not passed
+   * through {@link normalizeModelId}.
+   */
+  fixedModel?: string;
   label: string;
   modelOptions: ProviderModelOption[];
   /**
@@ -240,6 +279,7 @@ export const SELECTABLE_OPENWIKI_PROVIDERS = [
   "openai",
   "openai-chatgpt",
   "anthropic",
+  "bob",
   "copilot",
   "gemini",
   "gemini-enterprise",
@@ -250,6 +290,7 @@ export const SELECTABLE_OPENWIKI_PROVIDERS = [
   "baseten",
   "nebius",
   "nvidia",
+  "mistral",
 ] as const satisfies readonly SelectableOpenWikiProvider[];
 
 export const PROVIDER_CONFIGS: Record<OpenWikiProvider, ProviderConfig> = {
@@ -262,6 +303,14 @@ export const PROVIDER_CONFIGS: Record<OpenWikiProvider, ProviderConfig> = {
       { id: "zai-org/GLM-5.2", label: "GLM 5.2" },
       { id: "moonshotai/Kimi-K2.7-Code", label: "Kimi K2.7 Code" },
     ],
+  },
+  bob: {
+    apiKeyEnvKey: BOB_API_KEY_ENV_KEY,
+    baseURL: "https://api.us-east.bob.ibm.com/inference/v1",
+    baseUrlEnvKey: BOB_BASE_URL_ENV_KEY,
+    fixedModel: "premium",
+    label: "IBM Bob",
+    modelOptions: [{ id: "premium", label: "Premium" }],
   },
   bedrock: {
     apiKeyEnvKey: BEDROCK_AWS_ACCESS_KEY_ID_ENV_KEY,
@@ -311,6 +360,22 @@ export const PROVIDER_CONFIGS: Record<OpenWikiProvider, ProviderConfig> = {
         id: "accounts/fireworks/models/kimi-k2p7-code",
         label: "Kimi K2.7 Code",
       },
+    ],
+  },
+  mistral: {
+    apiKeyEnvKey: MISTRAL_API_KEY_ENV_KEY,
+    baseURL: "https://api.mistral.ai/v1",
+    baseUrlEnvKey: MISTRAL_BASE_URL_ENV_KEY,
+    label: "Mistral",
+    // Mistral serves chat completions with tool calling on an OpenAI-compatible
+    // surface, so it shares the ChatOpenAI branch with Fireworks and NVIDIA.
+    // IDs are the active releases from docs.mistral.ai/models (Medium 3.5 and
+    // Large 3 were deprecated on 2026-10-31); Mistral also exposes rolling
+    // "*-latest" aliases that can be pasted directly as custom model IDs.
+    modelOptions: [
+      { id: "mistral-small-2603", label: "Mistral Small 4" },
+      { id: "mistral-large-4", label: "Mistral Large 4" },
+      { id: "codestral-2508", label: "Codestral" },
     ],
   },
   nebius: {
@@ -369,7 +434,8 @@ export const PROVIDER_CONFIGS: Record<OpenWikiProvider, ProviderConfig> = {
     modelOptions: [
       { id: "claude-haiku-4-5", label: "Haiku" },
       { id: "claude-sonnet-5", label: "Sonnet" },
-      { id: "claude-opus-4-8", label: "Opus" },
+      { id: "claude-opus-5", label: "Opus" },
+      { id: "claude-opus-4-8", label: "Opus 4.8" },
     ],
   },
   gemini: {
@@ -392,7 +458,8 @@ export const PROVIDER_CONFIGS: Record<OpenWikiProvider, ProviderConfig> = {
       ...GEMINI_MODELS,
       { id: "claude-haiku-4-5@20251001", label: "Claude Haiku" },
       { id: "claude-sonnet-5", label: "Claude Sonnet" },
-      { id: "claude-opus-4-8", label: "Claude Opus" },
+      { id: "claude-opus-5", label: "Claude Opus" },
+      { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
     ],
   },
   openrouter: {
@@ -460,8 +527,67 @@ export function getProviderExternalCliAuthAdapter(
   return getProviderConfig(provider).externalCliAuthAdapter;
 }
 
-export function providerRequiresApiKey(provider: OpenWikiProvider): boolean {
+/**
+ * Authentication mechanisms supported by the OpenAI-compatible provider.
+ */
+export type OpenAICompatibleAuthMode = "api-key" | "entra-id";
+
+/**
+ * Resolve the OpenAI-compatible authentication mode. A missing or blank value
+ * retains API-key behavior; an invalid explicit value fails closed.
+ */
+export function resolveOpenAICompatibleAuthMode(
+  env: NodeJS.ProcessEnv = process.env,
+): OpenAICompatibleAuthMode {
+  const mode = env[OPENAI_COMPATIBLE_AUTH_ENV_KEY]?.trim().toLowerCase();
+
+  if (!mode || mode === "api-key") {
+    return "api-key";
+  }
+  if (mode === "entra-id") {
+    return mode;
+  }
+
+  throw new Error(
+    `${OPENAI_COMPATIBLE_AUTH_ENV_KEY} must be one of: api-key, entra-id.`,
+  );
+}
+
+/**
+ * Resolve the Microsoft Entra token scope. Enterprise gateways normally use
+ * their own application ID URI; Azure OpenAI uses the Cognitive Services scope.
+ */
+export function resolveOpenAICompatibleEntraScope(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
   return (
+    env[OPENAI_COMPATIBLE_ENTRA_SCOPE_ENV_KEY]?.trim() ||
+    DEFAULT_OPENAI_COMPATIBLE_ENTRA_SCOPE
+  );
+}
+
+/**
+ * Return whether this provider delegates authentication to Azure Identity.
+ */
+export function providerUsesEntraId(
+  provider: OpenWikiProvider,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    provider === "openai-compatible" &&
+    resolveOpenAICompatibleAuthMode(env) === "entra-id"
+  );
+}
+
+/**
+ * Return whether a provider needs a static API key in the supplied environment.
+ */
+export function providerRequiresApiKey(
+  provider: OpenWikiProvider,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    !providerUsesEntraId(provider, env) &&
     getProviderAuthMethod(provider) === "api-key" &&
     getProviderConfig(provider).apiKeyEnvKey !== undefined
   );
@@ -496,6 +622,13 @@ export function providerUsesStreaming(provider: OpenWikiProvider): boolean {
   // that use the Responses API (useResponsesApi: true), streaming: true is
   // redundant but harmless, matching the openai-chatgpt provider pattern.
   if (provider === "copilot") {
+    return true;
+  }
+
+  // Long generations, such as planning a large repository, can outlast the Bob
+  // endpoint's response timeout when sent as a single non-streaming completion.
+  // Streaming returns output as it is produced, including tool calls.
+  if (provider === "bob") {
     return true;
   }
 
@@ -563,7 +696,11 @@ export function getMissingProviderEnvKey(
     return null;
   }
 
-  if (config.apiKeyEnvKey && !env[config.apiKeyEnvKey]) {
+  if (
+    !providerUsesEntraId(provider, env) &&
+    config.apiKeyEnvKey &&
+    !env[config.apiKeyEnvKey]
+  ) {
     return config.apiKeyEnvKey;
   }
 
@@ -603,6 +740,15 @@ export function resolveProviderLocation(
 export function getProviderCredentialHint(
   provider: OpenWikiProvider,
 ): string | null {
+  if (provider === "openai-compatible") {
+    return (
+      "For Microsoft Entra ID authentication, set " +
+      `${OPENAI_COMPATIBLE_AUTH_ENV_KEY}=entra-id and configure Azure Identity ` +
+      "with az login, managed identity, workload identity, or environment credentials. " +
+      `Set ${OPENAI_COMPATIBLE_ENTRA_SCOPE_ENV_KEY} to your gateway's token scope.`
+    );
+  }
+
   if (provider === "gemini-enterprise") {
     return (
       "Authenticate to Google Cloud with Application Default Credentials " +
@@ -659,6 +805,16 @@ export function getProviderBaseUrlEnvKey(
 
 export function providerRequiresBaseUrl(provider: OpenWikiProvider): boolean {
   return getProviderConfig(provider).requiresBaseUrl === true;
+}
+
+export function providerHasFixedModel(provider: OpenWikiProvider): boolean {
+  return getProviderConfig(provider).fixedModel !== undefined;
+}
+
+export function getProviderFixedModel(
+  provider: OpenWikiProvider,
+): string | undefined {
+  return getProviderConfig(provider).fixedModel;
 }
 
 export function getProviderSecretKeyEnvKey(
@@ -855,16 +1011,18 @@ export function resolveConfiguredProvider(
                   ? "nebius"
                   : env[NVIDIA_API_KEY_ENV_KEY]
                     ? "nvidia"
-                    : hasNonEmptyEnvValue(
-                          env,
-                          BEDROCK_AWS_ACCESS_KEY_ID_ENV_KEY,
-                        ) ||
-                        hasNonEmptyEnvValue(
-                          env,
-                          BEDROCK_AWS_SECRET_ACCESS_KEY_ENV_KEY,
-                        )
-                      ? "bedrock"
-                      : DEFAULT_PROVIDER)
+                    : env[MISTRAL_API_KEY_ENV_KEY]
+                      ? "mistral"
+                      : hasNonEmptyEnvValue(
+                            env,
+                            BEDROCK_AWS_ACCESS_KEY_ID_ENV_KEY,
+                          ) ||
+                          hasNonEmptyEnvValue(
+                            env,
+                            BEDROCK_AWS_SECRET_ACCESS_KEY_ENV_KEY,
+                          )
+                        ? "bedrock"
+                        : DEFAULT_PROVIDER)
   );
 }
 
@@ -975,13 +1133,79 @@ export function resolveStreamIdleTimeoutForProvider(
   return provider === "bedrock" ? resolveStreamIdleTimeout(env) : undefined;
 }
 
+/**
+ * Resolves the LangSmith thread id shared by one repository run's planner and
+ * page workers, so their separate traces group into one thread.
+ *
+ * @param runId - The durable run's id, stable across a resumed run.
+ * @param env - Process environment to read.
+ * @returns The trimmed override when set and non-empty, else `runId`.
+ */
+export function resolveTraceThreadId(
+  runId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const override = env[OPENWIKI_TRACE_THREAD_ID_ENV_KEY]?.trim();
+  return override ? override : runId;
+}
+
+/**
+ * Resolves how many repository page workers may run at once.
+ *
+ * @param env - Process environment to read.
+ * @returns Integer from 1 to {@link MAX_PAGE_CONCURRENCY}; 1 when unset.
+ */
+export function resolvePageConcurrency(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const rawConcurrency = env[OPENWIKI_PAGE_CONCURRENCY_ENV_KEY];
+
+  if (rawConcurrency === undefined) {
+    return DEFAULT_PAGE_CONCURRENCY;
+  }
+
+  const concurrency = rawConcurrency.trim();
+  const invalid = new Error(
+    `Invalid ${OPENWIKI_PAGE_CONCURRENCY_ENV_KEY}. Expected an integer from 1 to ${MAX_PAGE_CONCURRENCY}.`,
+  );
+
+  if (!/^[1-9]\d*$/u.test(concurrency)) {
+    throw invalid;
+  }
+
+  const parsedConcurrency = Number(concurrency);
+
+  if (
+    !Number.isSafeInteger(parsedConcurrency) ||
+    parsedConcurrency > MAX_PAGE_CONCURRENCY
+  ) {
+    throw invalid;
+  }
+
+  return parsedConcurrency;
+}
+
+/**
+ * Resolves the provider retry count for model calls.
+ *
+ * An explicit `OPENWIKI_PROVIDER_RETRY_ATTEMPTS` always wins. When unset, a
+ * run with more than one page worker gets {@link PARALLEL_PROVIDER_RETRY_ATTEMPTS}
+ * because concurrent workers make transient rate limits the common failure.
+ *
+ * @param env - Process environment to read.
+ * @param options - Resolved page concurrency for the run, when known.
+ * @returns Positive integer retry count.
+ */
 export function resolveProviderRetryAttempts(
   env: NodeJS.ProcessEnv = process.env,
+  options: { pageConcurrency?: number } = {},
 ): number {
   const rawRetryAttempts = env[OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY];
 
   if (rawRetryAttempts === undefined) {
-    return DEFAULT_PROVIDER_RETRY_ATTEMPTS;
+    return (options.pageConcurrency ?? DEFAULT_PAGE_CONCURRENCY) > 1
+      ? PARALLEL_PROVIDER_RETRY_ATTEMPTS
+      : DEFAULT_PROVIDER_RETRY_ATTEMPTS;
   }
 
   const retryAttempts = rawRetryAttempts.trim();

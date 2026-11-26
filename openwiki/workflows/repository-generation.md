@@ -1,7 +1,7 @@
 ---
 type: workflow
 title: Repository Generation Lifecycle
-description: How OpenWiki drives resumable repository wiki generation through the six durable operations begin, submit_plan, next_page, inspect_page_claims, submit_page, and finish, backed by an ordered PageJob queue in openwiki/.run.json with source-fingerprint invalidation, sparse Claim reconciliation, and skipped-page handling.
+description: How OpenWiki drives resumable repository wiki generation through the six durable operations begin, submit_plan, next_page, inspect_page_claims, submit_page, and finish, backed by an ordered PageJob queue in openwiki/.run.json with source-fingerprint invalidation, sparse Claim reconciliation, skipped-page handling, and optional parallel page workers.
 tags:
   [
     repository-generation,
@@ -11,14 +11,21 @@ tags:
     run-state,
     source-fingerprint,
     claims,
+    parallel-workers,
   ]
 sources:
+  - id: openwiki-source-8b316b2a9d744597bffd9c56
+    resource: repo://src/agent/repository-prompts.ts
   - id: openwiki-source-6cb3236b8c1412a26d832fcf
     resource: repo://src/agent/repository-runner.ts
+  - id: openwiki-source-5d1891104d4c886504a5cc7d
+    resource: repo://src/agent/types.ts
   - id: openwiki-source-69abc6f0f641147820a274bc
     resource: repo://src/agent/utils.ts
   - id: openwiki-source-9697823032111d36e2d4caa9
     resource: repo://src/agent/wiki-replacement.ts
+  - id: openwiki-source-278e7e180eac811fc1a24f7a
+    resource: repo://src/config/constants.ts
   - id: openwiki-source-ed90c6fa13119927ecd82845
     resource: repo://src/generation/errors.ts
   - id: openwiki-source-1197594de038075f3570340c
@@ -27,18 +34,22 @@ sources:
     resource: repo://src/generation/repository-run.ts
   - id: openwiki-source-080c4525024a9b689e361cbb
     resource: repo://src/generation/run-state.ts
+  - id: openwiki-source-ada7fcb0bef11e183302d637
+    resource: repo://src/integrations/core/begin-view.ts
   - id: openwiki-source-58835b77ce38a0dd1fed8d09
     resource: repo://src/integrations/core/session-manager.ts
+  - id: openwiki-source-5835357b69a5869be210533b
+    resource: repo://src/okf/index-sync.ts
   - id: openwiki-source-349c953869b025f9d4935470
     resource: repo://src/platform/language.ts
   - id: openwiki-source-ec5a58d1a89689ead79b8150
     resource: repo://test/agent/repository-runner.test.ts
   - id: openwiki-source-77febf5d49f26cc2405db8dd
     resource: repo://test/generation/repository-run.test.ts
-generated: { by: "openwiki/0.5.0", at: "2026-09-02T08:09:44.873Z" }
+generated: { by: "openwiki/0.8.0", at: "2026-11-05T08:06:42.707Z" }
 verified:
-  - by: openwiki/0.5.0
-    at: 2026-09-02T08:09:44.873Z
+  - by: openwiki/0.8.0
+    at: 2026-11-05T08:06:42.707Z
 ---
 
 # Repository Generation Lifecycle
@@ -218,38 +229,89 @@ stopped early). The lifecycle never lets such a worker leave partial Markdown or
 Claims behind, and it never blocks the run from finishing — instead it marks the
 job `skipped` and restores the page, deferring that page to a future run.
 
-### Per-job status and when a worker is skipped
+### Per-job status
 
 A `PageJobStatus` is one of `pending`, `skipped`, or `complete`. `skipped` is a
 third durable per-job status, distinct from `complete`, that records "this page
 was attempted, failed or abandoned, and was rolled back to its pre-worker state."
 
-The native runner handles four failure modes inside `runPageAgent`, each of
-which preserves the per-job durability guarantee differently:
+### Retry before skip
+
+`runPageAgent` captures a single `RepositoryPageSnapshot` before any model work,
+then loops up to `PAGE_WORKER_ATTEMPT_LIMIT` (2) times. Each iteration runs one
+fresh bounded worker via `runPageWorkerAttempt`. If an attempt returns
+`submitted`, the page is done and the loop returns immediately. If an attempt
+returns `skipped` and it is not the last attempt and the failure was not a
+provider rate limit, the runner restores the page to its pre-worker snapshot via
+`restoreRepositoryPage` — which writes back the snapshot Markdown (or deletes the
+page if none existed) and restores the Claims sidecar, but does not write a
+checkpoint or change the job status — so both attempts start from identical
+state. A rate-limit failure breaks the loop immediately rather than retrying at
+once, so the provider can recover. Only after the loop is exhausted does
+`runPageAgent` call `skipRepositoryPage`, which durably marks the job `skipped`
+and writes the checkpoint, then emits a deferred-page warning.
+
+```mermaid
+flowchart TD
+    Start([runPageAgent]) --> Snap[captureRepositoryPageSnapshot once]
+    Snap --> Loop{attempt less than or equal to 2}
+    Loop -- yes --> Attempt[runPageWorkerAttempt fresh worker]
+    Attempt --> Check{outcome}
+    Check -- submitted --> Done([return submitted])
+    Check -- skipped --> RL{rate limit or last attempt}
+    RL -- no, retryable --> Restore[restoreRepositoryPage to snapshot]
+    Restore --> Loop
+    RL -- yes, give up --> Skip[skipRepositoryPage with snapshot]
+    Skip --> Warn[emit deferred page warning]
+    Warn --> Ret([return skipped])
+    Loop -- no --> Skip
+```
+
+`runPageAgent` retry-before-skip control flow. A single snapshot is captured
+once; `restoreRepositoryPage` resets the page between attempts without touching
+the checkpoint; `skipRepositoryPage` is called only after every attempt is
+exhausted.
+
+The test "retries a failed page worker once before completing the page" verifies
+the recovery path: `pageRestoreCalls` is 1 (the between-attempts restore),
+`restoreCalls` (skip) is 0, and both pages end `complete`. The test "skips a page
+worker that fails every attempt and continues the queue" verifies the skip path:
+`pageRestoreCalls` is 1, `restoreCalls` is 1, and the failed page is `skipped`
+while its sibling completes. The test "retries once when a worker exits without
+submitting and completes the page" verifies the clean-exit retry path: the first
+page gets two workers (attempt plus retry), the deferred-page warning is never
+emitted, and both pages end `complete`.
+
+### Four failure modes per attempt
+
+Inside each `runPageWorkerAttempt`, four failure modes preserve the per-job
+durability guarantee differently:
 
 1. **Non-fatal pre-submit error** — the worker throws a recoverable error before
-   calling `submit_page`. The catch block calls `skipRepositoryPage` with the
-   pre-worker snapshot, restoring the page and marking the job `skipped`.
+   calling `submit_page`. The catch block returns a `skipped` outcome carrying
+   the error, which the retry loop may recover from on the next attempt.
 2. **Exit without submit** — the worker returns cleanly without ever calling
-   `submit_page` (for example, because the model stopped early). The post-loop
-   guard calls `skipRepositoryPage` with the snapshot, same as above.
+   `submit_page` (for example, because the model stopped early). The post-try
+   guard returns a `skipped` outcome, same as above.
 3. **Fatal pre-submit error** — a fatal submission failure (an error from
-   `submitRepositoryPage` that is not a correctable `invalid_input`) is rethrown
-   rather than skipped, because it signals a durable-invariant violation the
-   worker cannot correct. `submit_page` rejections with `invalid_input` are by
-   design returned to the worker as failed tool results so its loop stays active;
-   only a non-`invalid_input` failure triggers a rethrow.
+   `submitRepositoryPage` that is not a correctable `invalid_input`) sets
+   `fatalSubmissionFailure` and is rethrown, because it signals a
+   durable-invariant violation the worker cannot correct. `submit_page`
+   rejections with `invalid_input` are by design returned to the worker as
+   failed tool results so its loop stays active; only a non-`invalid_input`
+   failure triggers a rethrow. A rethrown fatal error propagates past
+   `runPageAgent` to `runWorkerLoop`, which records it in `pool.fatal`.
 4. **Post-submit failure (durability guarantee)** — a worker that throws after
    `submit_page` succeeds does NOT get rolled back. The `submitted` flag is set
    before `submitRepositoryPage` returns, so the catch block checks
-   `if (submitted) return null;` and the post-loop guard does the same — neither
-   calls `skipRepositoryPage`, and the page stays durably complete. The page is
-   already a self-contained durability unit: its Claims were persisted and proven
-   durable by `assertPageClaimsDurable` before the job was marked `complete`, so a
-   later failure cannot undo that durability. The test "keeps a durably
-   completed page after a later worker failure" (the `pageWorkerPostSubmitFailures`
-   harness field) verifies that `restoreCalls` stays zero and the page's status
-   remains `complete`.
+   `if (submitted) return { status: "submitted" };` and the post-try guard does
+   the same — neither returns a `skipped` outcome, and the page stays durably
+   complete. The page is already a self-contained durability unit: its Claims
+   were persisted and proven durable by `assertPageClaimsDurable` before the job
+   was marked `complete`, so a later failure cannot undo that durability. The
+   test "keeps a durably completed page after a later worker failure" (the
+   `pageWorkerPostSubmitFailures` harness field) verifies that `restoreCalls`
+   stays zero and the page's status remains `complete`.
 
 ### Snapshot capture, skip, and restore
 
@@ -260,16 +322,19 @@ and the page's existing Claims sidecar (or `null`). Snapshotting is itself
 strict: only the current pending job may be snapshotted, and the page must be
 text (a snapshot of a non-text page rejects with `invalid_state`).
 
-When a worker must be skipped, the runner calls `skipRepositoryPage` with that
-snapshot. `skipRepositoryPage` verifies the caller still owns the current pending
-job, then restores the page exactly: `restoreRepositoryPageMarkdown` writes back
-the snapshot Markdown, or deletes the page if the snapshot had none, so the
-worker's partial writes are discarded. The Claims sidecar is likewise restored —
-written back if the snapshot had Claims, deleted otherwise. A fresh process-local
-Claims runtime is rebuilt from durable state, `interrupted` last-update metadata
-is written, and a new checkpoint marks the job `skipped` without advancing the
-queue. `nextRepositoryPage` then sees the next `pending` job, so the run
-continues with the remaining pages.
+Two functions restore from that snapshot. `restoreRepositoryPage` rolls the
+Markdown and Claims sidecar back to the snapshot — `restoreRepositoryPageMarkdown`
+writes back the snapshot Markdown, or deletes the page if the snapshot had none,
+and the store writes back or deletes the Claims sidecar — but it leaves the
+pending checkpoint and run metadata untouched. It is the between-attempts reset
+inside `runPageAgent`. When the page is finally given up on, `skipRepositoryPage`
+calls `restoreRepositoryPage` and then rebuilds a fresh process-local Claims
+runtime from durable state, writes `interrupted` last-update metadata, and writes
+a new checkpoint marking the job `skipped` without advancing the queue. The
+restore, Claims rebuild, and checkpoint write all run under the `withRunMutation`
+lock so a concurrent worker's submission is fully durable before the shared
+Claims session is rebuilt from disk. `nextRepositoryPage` then sees the next
+`pending` job, so the run continues with the remaining pages.
 
 ### Tolerant not-found handling on restore and deletion
 
@@ -304,6 +369,33 @@ skipped or source changed during the finish window, finish writes `interrupted`
 metadata instead of `complete` metadata, and then removes `openwiki/.run.json`
 last as usual. The run therefore completes deterministically, but the persisted
 `interrupted` status tells a later `begin` that work remains.
+
+### Restamping only pages the run regenerated
+
+Finish does not restamp every surviving page with the run's own source checkpoint.
+Before finalization it reads the page manifest and builds `producerActorsByPage`
+keyed by the pages whose manifest entry records `completedRunId === run.state.runId`
+— that is, only the pages this run actually (re)completed. After Claims finalization
+and the whole-run durability proof, finish partitions the surviving page inventory
+into three sets:
+
+- **Regenerated pages** (`producerActorsByPage` keys) are restamped with this run's
+  source checkpoint — they earned new coverage by completing a job.
+- **Skipped pages** are restored from their snapshots and, like other excluded
+  pages, are not required to carry durable Claims; they keep their prior coverage.
+- **Untouched pages** — pages outside this run's plan, or already durable from an
+  earlier run — keep their prior source checkpoint via `preserveSourcePages`, so a
+  disjoint run that touched an unrelated page never advances a neighbor's baseline.
+
+`replaceRepositoryPageManifest` receives the run checkpoint for regenerated pages,
+the `skippedPages` set, and the `preserveSourcePages` set. For a preserved-source
+page it re-proves the final Markdown/Claims pair: if deterministic finalization
+rewrote code-owned metadata (for example, repaired a broken internal link) the entry
+refreshes its `pageVersion` to match the final durable bytes while keeping the prior
+`gitHead` and `sourceFingerprint`; if nothing changed the exact prior entry is
+retained. This is why a later `begin` sees the correct per-page update window: a
+page a run did not regenerate is not advanced to this run's baseline, so a
+subsequent update only re-evaluates it against its own prior checkpoint.
 
 ### Resume resets skipped jobs to pending
 
@@ -393,30 +485,42 @@ touching `initialPages`), applies the plan's explicit deletions, reconciles
 Claims sidecars for deleted pages, finalizes wiki artifacts (indexes and
 provenance), restores any skipped pages, finalizes Claims (excluding skipped
 pages), and proves the whole repository has no orphaned or partially durable
-Claims via `assertRepositoryClaimsDurable` (also excluding skipped pages). It
-then persists completion metadata — `interrupted` when any page was skipped or
-source changed during the finish window, otherwise `complete` — and, last of
-all, removes `openwiki/.run.json`. The checkpoint is deleted last on purpose:
-every earlier failure leaves the run resumable so `begin` can reconstruct and
-retry.
+Claims via `assertRepositoryClaimsDurable` (also excluding skipped pages).
+During the deterministic index-sync pass finish also captures a
+`WikiFrontmatterReport` — which pages still carry code-derived
+`openwiki_generated: true` front matter and which indexed pages have no usable
+`description`. It then rebuilds the page manifest so that only pages this run
+actually regenerated are restamped with this run's source checkpoint, while
+skipped and untouched pages retain their prior checkpoint via
+`preserveSourcePages` (a deterministic-finalization rewrite still refreshes
+`pageVersion`). It then persists completion metadata — `interrupted` when any
+page was skipped or source changed during the finish window, otherwise
+`complete` — and, last of all, removes `openwiki/.run.json`. The checkpoint is
+deleted last on purpose: every earlier failure leaves the run resumable so
+`begin` can reconstruct and retry.
+
+After the checkpoint is removed, finish emits the captured frontmatter report
+as a non-fatal `text` event (when an `onEvent` consumer was supplied) listing
+the affected pages, using the same operator-visible channel as the
+source-changed notice. The report only describes metadata quality the
+deterministic pass leaves as-is by design; it never changes what the run
+persisted.
 
 ## One lifecycle, two drivers
 
 Both entrypoints drive the identical durable core.
 
 The **native runner** (`runNativeRepositoryGeneration`) begins the run with a
-stable OpenWiki producer actor, then loops: it runs a bounded planning agent
-when the phase is `planning`, runs one fresh non-delegating page worker per
-pending job (each bounded to writing only its assigned page and calling
-`submit_page`, with `inspect_claims` available on demand), and then calls
-`finish`. The page loop collects a `RepositoryPageSnapshot` for every worker it
-skips and passes them all to `finishRepositoryRun`. When `finish` reports
-`sourceChanged: true`, the runner emits a user-facing message explaining that the
-wiki was finalized without advancing the source checkpoint and a later
-`--update` will reconcile the drift. Workers reuse the supplied model but keep no
-repository-generation state beyond the durable core. The native runner captures
-the snapshot _before_ each worker and restores it on non-fatal failure, so a
-worker can never leave partial page content behind.
+stable OpenWiki producer actor, then loops: it runs a bounded planning agent when
+the phase is `planning`, runs every remaining page job via
+`runPendingPageAgents` (up to `pageConcurrency` fresh non-delegating workers at
+once, each bounded to writing only its assigned page and calling `submit_page`,
+with `inspect_claims` available on demand), and then calls `finish`, forwarding
+its own `onEvent` consumer so finish can surface frontmatter-quality signals.
+When `finish` reports `sourceChanged: true`, the runner emits a user-facing
+message explaining that the wiki was finalized without advancing the source
+checkpoint and a later `--update` will reconcile the drift. Workers reuse the
+supplied model but keep no repository-generation state beyond the durable core.
 
 The **host integration** (`HostSessionManager`) exposes the same six operations
 as the OpenWiki MCP tools, including `openwiki_inspect_page_claims`. It holds one
@@ -430,6 +534,266 @@ and source-fingerprint invalidation semantics. The host adapter does not, howeve
 participate in skipped-page handling: it calls `finishRepositoryRun` without
 `skippedPageSnapshots`, so a skipped job in a host-driven run makes finish report
 the missing-snapshot `invalid_state` unless the host supplies snapshots itself.
+
+### Host begin view capping
+
+A host transport (MCP) cannot stream arbitrarily large begin views to a model the
+way the in-process native runner can. The adapter therefore routes every active
+begin view through `toHostActiveBeginView` (in
+`src/integrations/core/begin-view.ts`) before returning it. Capping keeps totals
+exact while bounding only the lists a model must read:
+
+- `changedPaths` is capped to `HOST_BEGIN_PATH_LIMIT` (200), split evenly across
+  update windows (`Math.floor(200 / pageUpdateWindows.length)` per window). The
+  view still carries the exact `changedPathCount` and a per-window
+  `changedPathCount`, plus `changedPathsTruncated` flags (top-level and per
+  window) that are true when the corresponding list was trimmed.
+- `claimIssues` is capped to `HOST_BEGIN_CLAIM_ISSUE_LIMIT` (50), while the exact
+  `claimIssueCount`, `claimIssuesTruncated`, and `claimIssuePages` (every page
+  with a Claims issue, including pages whose issues were omitted) are preserved.
+
+The host loses no required work from the trimming: omitted changed paths come
+from its own Git, and each page's Claims come back from `openwiki_next_page`.
+Planning and page jobs read the run's own durable state, not the capped view, so
+the cap affects only what the model sees.
+
+### The `tools()` block and tool descriptions
+
+`HostSessionManager.tools()` returns the read-only retrieval tools followed by
+the six generation lifecycle tools, each with a model-facing description and a
+strict Zod input schema. The `openwiki_begin` description records the begin-view
+capping contract: it states that long lists are capped with exact
+`changedPathCount` and `claimIssueCount` totals, and gives the recovery commands
+for a truncated `changedPathsTruncated` flag — `git diff --name-only
+<baseGitHead>..HEAD` (not on a fullReview window), `git diff --name-only HEAD`,
+and `git ls-files --others --exclude-standard`, excluding `openwiki/` and
+`.openwikiignore` paths. It names `claimIssuePages` as every page with a Claims
+issue, and notes that an unrecognized `language` fails the call with
+`invalid_input` instead of starting a run. The other five tool descriptions
+(`openwiki_submit_plan`, `openwiki_next_page`, `openwiki_inspect_page_claims`,
+`openwiki_submit_page`, `openwiki_finish`) describe their operation contracts and
+are unchanged across the capping work.
+
+## Parallel page workers
+
+The native runner drives page generation through `runPendingPageAgents`, which
+runs up to `pageConcurrency` worker loops at once (default 1). Each worker still
+owns exactly one page; concurrency is about how many pages are in flight, not
+about splitting a single page.
+
+### Worker pool ownership
+
+`PageWorkerPool` is the process-local bookkeeping shared by the worker loops of
+one run. Nothing in it is durable: the checkpoint only records `pending`,
+`skipped`, and `complete` job statuses, and a resumed run rebuilds ownership from
+scratch. The pool tracks:
+
+- `concurrent` — whether the run was configured with more than one worker.
+- `claimed` — job ids handed to a worker in this process, never offered again.
+- `acquiring` — a promise that serializes job acquisition so two loops never
+  select the same job. `nextRepositoryPage` selects before its first `await`, so
+  concurrent calls in one tick would all see the same unclaimed head of the queue.
+- `inFlight` — canonical pages currently being written, in start order.
+- `size` — live worker limit; lowered after rate-limit failures, never below 1.
+- `fatal` — first fatal error; once set, loops stop taking new jobs.
+- `skipped` — snapshots of pages whose worker exited without submitting.
+
+### Job acquisition
+
+`acquireNextJob` chains each call onto the pool's `acquiring` promise so only
+one loop at a time calls `nextRepositoryPage`. It passes an `exclude` set built
+from the pool's `claimed` ids and the `heldBack` ids, so each call yields a
+distinct pending job. When `nextRepositoryPage` returns `status: "complete"`
+(no unowned pending job remains), the loop exits. A concurrent pool also
+temporarily holds back the quickstart page so its task-routing map links to
+pages that already exist.
+
+### Worker start stagger
+
+The first wave of worker starts is spread by `workerStartStaggerMs` (default
+1 000 ms) so concurrent workers do not hit the provider at the same instant.
+Each slot waits `slot * workerStartStaggerMs` before its first job; the delay is
+ignored for a single worker (`slot === 0`).
+
+### Rate-limit backoff
+
+When a worker is skipped due to a provider rate-limit error (`isRateLimitError`),
+the pool shrinks its live `size` by one (never below 1) and emits a user-facing
+message. The remaining workers continue; the fatal-error guard ensures the run
+never finalizes with pending jobs. `isRateLimitError` recognizes HTTP 429 across
+providers: it checks a `status`/`statusCode` field and a numeric `code === 429`,
+matches the AWS Bedrock `ThrottlingException` name (which is all a mid-stream
+throttle carries) and `$metadata.httpStatusCode === 429`, matches string `code`
+values and `message` text containing "429", "rate limit", or "too many
+requests", and walks `cause` chains so wrapped SDK errors are recognized too.
+Bedrock's token-quota message ("Too many tokens") deliberately matches no
+rate-limit text, so it is treated as a page problem rather than a throttle.
+
+### Fatal-error handling
+
+A fatal submission error (any error from `runPageAgent` that is not a skipped
+`PageAgentOutcome`) stops new work: `runWorkerLoop` records it in `pool.fatal`,
+removes the in-flight page, and returns. `runPendingPageAgents` rethrows
+`pool.fatal.error` before calling `finishRepositoryRun`, so the run never
+finalizes with pending jobs. In-flight workers that have already submitted or
+will skip are allowed to complete before the rethrow.
+
+### Quickstart holdback
+
+With more than one worker, `runPendingPageAgents` holds back the quickstart page
+(`/openwiki/quickstart.md`) until every other page has finished, then runs a
+single-worker pass for it. With one worker the queue order already places
+quickstart last, so no explicit holdback is needed.
+
+### Snapshot capture and restore
+
+The native runner captures a `RepositoryPageSnapshot` via
+`captureRepositoryPageSnapshot` before each worker attempt, recording the current
+pending job id, the page path, the pre-worker Markdown (or `null` if the page
+does not yet exist), and the page's existing Claims sidecar (or `null`).
+Snapshotting is itself strict: only the current pending job may be snapshotted,
+and the page must be text (a snapshot of a non-text page rejects with
+`invalid_state`).
+
+When a worker is skipped after exhausting its retries, the runner calls
+`skipRepositoryPage` with that snapshot. `skipRepositoryPage` verifies the caller
+still owns the current pending job, then restores the page exactly via
+`restoreRepositoryPage` (which writes back or deletes the Markdown and Claims
+sidecar), rebuilds a fresh process-local Claims runtime from durable state,
+writes `interrupted` last-update metadata, and writes a new checkpoint marking
+the job `skipped` without advancing the queue. The restore, Claims rebuild, and
+checkpoint write run under the `withRunMutation` lock so a concurrent worker's
+submission is fully durable before the shared Claims session is rebuilt from
+disk. `nextRepositoryPage` then sees the next `pending` job, so the run continues
+with the remaining pages.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Runner as runPendingPageAgents
+    participant Pool as PageWorkerPool
+    participant Worker as runWorkerLoop slot N
+    participant Agent as runPageAgent
+    participant Core as nextRepositoryPage and submitRepositoryPage
+    Runner ->> Pool: initialize claimed, acquiring, size, inFlight
+    Runner ->> Worker: runWorkerLoops starts pool.size loops
+    loop until queue drained or fatal
+        Worker ->> Pool: acquireNextJob serialized
+        Pool ->> Core: nextRepositoryPage exclude claimed
+        Core -->> Pool: pending job or complete
+        Worker ->> Agent: captureRepositoryPageSnapshot then runPageAgent
+        loop up to PAGE_WORKER_ATTEMPT_LIMIT
+            Agent ->> Agent: runPageWorkerAttempt fresh worker
+            Agent ->> Agent: streamWorkerTools threads resolveTraceThreadId
+            alt submit_page succeeds
+                Agent ->> Core: submitRepositoryPage
+                Core -->> Agent: complete
+            else non-fatal error or clean exit without submit
+                Agent ->> Agent: restoreRepositoryPage to snapshot if retry remains
+            else fatal error
+                Agent -->> Worker: rethrow sets pool.fatal
+            end
+        end
+        alt all attempts skipped
+            Agent ->> Core: skipRepositoryPage with snapshot
+            Pool ->> Pool: pool.skipped.push snapshot
+        end
+    end
+    Runner ->> Runner: rethrow pool.fatal if set
+    Runner ->> Runner: finishRepositoryRun with skipped snapshots
+```
+
+One pass of `runPendingPageAgents` with a concurrent worker pool. Job
+acquisition is serialized; model work runs in parallel; skip and submit mutate
+shared state under the `withRunMutation` lock. `runPageAgent` retries a skipped
+attempt once after restoring the page to its snapshot; only an exhausted retry
+loop calls `skipRepositoryPage`. `streamWorkerTools` threads
+`configurable.thread_id` (the run's `resolveTraceThreadId`) into every worker's
+`agent.stream` call so the planner and all page workers group into one LangSmith
+thread per run, and worker narration is never surfaced — only bounded tool
+lifecycle events pass through `parseWorkerToolEvent`.
+
+## Progress events
+
+The native runner reports lifecycle progress to CLI and event consumers through
+`RepositoryGenerationProgressEvent` (a variant of `OpenWikiRunEvent`). Each event
+carries a `stage` discriminator and a `resumed` flag:
+
+- `stage` — one of `planning`, `generating`, `finalizing`, `replanning`, or
+  `noop`. `noop` is emitted exactly once when a clean update preflight proves no
+  generation is needed; `planning`/`generating`/`finalizing` mark the native
+  runner's three lifecycle phases; `replanning` is reserved for a source-drift
+  re-plan triggered by invalidation during `begin`.
+- `resumed` — `true` only when the stage is continuing a previously interrupted
+  durable run (the `resumed` flag from the begin view). It defaults to `false`
+  and is omitted from the no-op event.
+
+During `generating`, the event is enriched with `page` (the canonical page owned
+by the active worker), `pageIndex` (its one-based position in the queue), and
+`pageCount` (the total queue size). A sequential worker reports at most one
+in-flight page, so consumers rely on `page` and `pageIndex`. A concurrent worker
+pool additionally emits `completedCount` (page jobs already complete or skipped)
+and `inFlightPages` (the canonical pages currently owned by in-flight workers,
+in start order), so a renderer never has to pretend a single queue position
+describes the whole run. `emitGeneratingProgress` keeps the sequential event
+shape unchanged when `pool.concurrent` is false; only a pool configured with
+more than one worker adds the concurrent fields.
+
+```mermaid
+stateDiagram-v2
+    [*] --> noop: clean update preflight
+    [*] --> planning: begin fresh or resume
+    planning --> replanning: source drift clears plan
+    planning --> generating: submit_plan installs queue
+    generating --> generating: next_page then submit_page per job
+    generating --> finalizing: queue drained
+    finalizing --> [*]: complete or interrupted metadata
+    finalizing --> [*]: sourceChanged writes interrupted metadata
+    noop --> [*]
+```
+
+Native-runner stage progression reported through `RepositoryGenerationProgressEvent`.
+`replanning` is reachable only when a resumed run's source fingerprint has
+drifted, which deletes the plan and resets the phase to `planning`.
+
+## Planner and worker prompts
+
+The native runner bounds the planning agent with `createRepositoryPlannerPrompt`,
+which builds the complete planner system prompt from the durable begin/resume
+view and any user/connector planning context. The prompt instructs the planner
+that its only output action is `submit_plan`: it must not write documentation,
+delegate work, or emit narrative or conversational text, and must invoke
+`submit_plan` directly. It directs the planner to explore the repository first —
+manifests, major directories, entrypoints, and public surfaces — then trace
+representative end-to-end flows and inspect focused tests before submitting the
+smallest complete information architecture. Update-specific context appends the
+committed per-page update windows and Claims requiring attention, so the planner
+can decide which pages actually need work. The page-worker prompt
+(`createRepositoryPagePrompt`) bounds each worker to exactly its assigned page,
+injects the sparse-Claim reconciliation guidance, and requires
+`submit_page` with canonical `repo://` evidence resources.
+
+### Shared LangSmith trace thread
+
+Every planner and page worker in one run groups into a single LangSmith thread.
+The planner agent is created with the name `PLANNER_AGENT_NAME`
+(`"planning agent"`), and each page worker is created with
+`workerAgentName(job.path)` — a human-readable name derived from the page it
+owns, such as `worker agent: architecture/agent-runtime`. Both the planner's
+`streamWorkerTools` call and every page worker's call thread the same
+`configurable.thread_id` into `agent.stream`: `resolveTraceThreadId(run.state.runId)`,
+which returns the `OPENWIKI_TRACE_THREAD_ID` env override when set (so CI can name
+the thread after the change that caused the run) or the run id otherwise. Because
+the workers have no checkpointer, sharing one thread id across concurrent workers
+is safe — it only affects LangSmith grouping, not execution state.
+
+`streamWorkerTools` streams with `streamMode: ["tools"]` and `subgraphs: true`,
+so worker narration (assistant text, reasoning) is never surfaced to the event
+consumer. Only bounded tool lifecycle events pass through: `parseWorkerToolEvent`
+keeps `on_tool_start`/`on_tool_end`/`on_tool_error` events for the approved
+worker tool names (`read_file`, `ls`, `glob`, `grep`, `write_file`, `edit_file`,
+`submit_plan`, `inspect_claims`, `submit_page`) and discards everything else,
+tagging each retained event with the owning page path.
 
 ## Failure semantics
 
