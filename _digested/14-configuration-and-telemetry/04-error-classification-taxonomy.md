@@ -266,7 +266,27 @@ owner 在记录时刻就推导并显式随事件发出（而非留给 PostHog �
 4. `deriveOwner("agent_error", …)` → `unowned`（:201-202）。
 5. 事件五字段：`{agent_error, MyLibError, <stage 或 undefined>, unowned, undefined}`——这个桶出现在仪表盘上就是要补分类规则的信号。
 
-## 7. 排错应用：错误类别 → 排查路径对照
+## 7. 排错应用：先看症状，再看类别
+
+这一节同时是 01 区原计划的「常见错误排查」——那份大纲已并入本文，因为排障的入口是**症状**，而定位的手段是**错误分类学**，拆成两篇会让读者来回跳。
+
+### 7.1 症状 → 类别 → 落点
+
+| 你看到的 | 多半是 | 先查哪里 |
+|---------|--------|---------|
+| 启动即退出，提示缺凭据 | `config_error`（missing_credentials） | 跑首跑向导或 `openwiki auth configure`；`.env` 读写见 `02-environment-and-config.md` |
+| 401/403、`invalid_api_key` | `provider_error`（auth） | key 是否过期、base URL 是否指错；openai-compatible 若开了 Entra，看 `OPENAI_COMPATIBLE_AUTH`（`../06-model-providers/01-provider-configuration.md` §7.6） |
+| 429、`rate limit` | `provider_error`（rate_limit） | 退避重试即可；页并行时 worker 池会自动降一档并发（`src/agent/repository-runner.ts:752`） |
+| `--update` 刚开跑就结束，没有新页 | **不是错误** | no-op 门全绿：源指纹与上次一致（`../16-production-paths/03-native-cli-production.md`）；想强制重跑看 `--init` |
+| 部分页没生成、状态是 skipped | 页 worker 两次尝试都失败，或触发提交上限 | `../05-generation-lifecycle/01-page-job-state-machine.md` §7 的失败分支；看 `error_stage` 与最后一条 rejection |
+| 生成跑完了，CI 却没提交/没开 PR | 内容没变 → 不写 `.last-update.json`；或 `add-paths` 没覆盖 | `../11-scheduling-and-ci/02-ci-workflow-generation.md` §3.4 |
+| `openwiki visualize` 打不开或空白 | 端口占用 / 导出目录为空 | `../12-visualizer/01-visualize-command-and-wikigraph.md` |
+| `openwiki integrations install` 报 conflict | 目标目录已有未受管或已改动的 skill | 需 `--force` 覆盖；回执与事务语义见 `../13-integrations/01-host-targets-and-transactional-install.md` |
+| host 里看不到 openwiki 的工具 | 安装后没重启宿主，或 config 未生效 | 重启 host 后确认 MCP server 起来；`openwiki mcp --host <target>` 可手动验证（`../13-integrations/02-mcp-lifecycle-protocol-and-skills.md`） |
+| personal 模式下 shell 工具被拒 | **设计如此**（personal 禁 host shell） | `../04-agent-and-prompting/04-deepagents-backend.md` §5 |
+| 页面里的 mermaid 图被降级成纯文本围栏 | 校验失败后的降级协议（原 mermaid 围栏改为 text 并加错误注释） | `../05-generation-lifecycle/03-finalize-pipeline.md` 的 finalize 第一步 |
+
+### 7.2 错误类别 → 排查路径
 
 遥测事件的 `error_class`/`error_detail`/`error_owner`/`error_stage`/`http_status` 五字段直接映射到排查动作。owner 是第一分流：`environment` = 用户侧动手，`provider` = 重试/等提供商，`openwiki` = 报 issue，`unowned` = 带着最内层错误名报 issue，`control` = 自己取消的、不用管。
 

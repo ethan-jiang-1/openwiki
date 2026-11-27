@@ -6,10 +6,10 @@ branch: "ethan"
 created: "2026-07-17"
 updated: "2026-11-26"
 audience: "OpenWiki 新用户，需要快速安装、配置和运行"
-purpose: "列出 01-quickstart 目录的文档（已完成与计划中）"
+purpose: "列出 01-quickstart 目录的文档（全部已完成）"
 owns: "01-quickstart 目录导航"
 update_when:
-  - "新增或移除计划文档时"
+  - "新增或移除文档时"
   - "安装入口、首跑路径或 provider 清单变化时"
 out_of_scope:
   - "具体文档的内容"
@@ -28,7 +28,7 @@ out_of_scope:
 | 1 | `01-installation.md` | 已完成 | 两条安装路线（npm 全局 / 源码构建）+ 装完的两种跑法（`openwiki integrations install <host>` 宿主集成 / 原生 CLI）、Node ≥22.22.0、可选 peer 依赖（mermaid + jsdom）、9 个宿主目标 |
 | 2 | `02-first-run.md` | 已完成 | 宿主内首跑（无向导）与原生 CLI 首跑（凭据向导）；向导步骤、`~/.openwiki/` 状态目录、首次 `--init` 语义（重建/续跑/并行页） |
 | 3 | `03-model-setup.md` | 已完成 | 15 个 provider 的认证方式与凭据环境变量、默认 provider/模型、自定义模型 ID、openai-compatible 本地端点与 Entra ID、非交互环境变量、推理档位 |
-| 4 | `04-troubleshooting.md` | 计划中 | 常见错误对照遥测错误分类（`config_error`/`provider_error`/…，见 `14-configuration-and-telemetry/04-error-classification-taxonomy.md`） |
+| 4 | `04-troubleshooting.md` | 已并入 | 原计划的「常见错误排查」并入 `14-configuration-and-telemetry/04-error-classification-taxonomy.md` §7（症状 → 类别 → 落点），不单独成篇：排障入口是症状，定位手段是错误分类学 |
 
 ## 关键源文件
 
@@ -50,4 +50,5 @@ out_of_scope:
 - `onboarding.json` 的 schema 与完成判定 → `10-ingestion-and-personal-mode/02-onboarding.md`
 - provider 注册表与模型客户端 → `06-model-providers/`
 - 宿主集成的安装事务与 MCP 协议 → `13-integrations/`
+- 常见错误的症状对照表 → `14-configuration-and-telemetry/04-error-classification-taxonomy.md` §7.1
 - 两条生产路径的选型 → `16-production-paths/`

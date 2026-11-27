@@ -43,4 +43,6 @@ OpenWiki 的模块地图与设计决策。当前基线是 upstream 发布 `v0.9.
 
 ## 变更提示（v0.9.0）
 
-本区四篇的行号与清单锚定 `v0.9.0`（`b7027e3`）。逐项影响面见 `_meta/git-tracking/upstream-sync/2026-11-26-rebaseline.md`；三个未引用的 SVG（`figures/system-overview.svg`、`agent-pipeline.svg`、`code-mode-flow.svg`）仍画于更早的扁平结构时代，未随正文更新。
+本区各篇的行号与清单锚定 `v0.9.0`（`b7027e3`）。逐项影响面见 `_meta/git-tracking/upstream-sync/2026-11-26-rebaseline.md`。
+
+图：`01`（运行时全景）、`02`（code mode 7 步）、`04` 区 `01`（双路径分流）用 mermaid 内联维护；`03` 的 personal 模式流程图仍是 `figures/personal-mode-flow.svg`。原先的 `system-overview.svg`/`agent-pipeline.svg`/`code-mode-flow.svg` 画的是扁平结构时代（10 步流水线、SQLite 检查点、12 providers），已删除并由上述 mermaid 取代。

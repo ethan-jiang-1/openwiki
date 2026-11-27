@@ -32,6 +32,19 @@ OpenWiki 的 agent 编排入口是 `runOpenWikiAgent()`（`src/agent/index.ts:16
 
 ## 1. 双路径分流（Dual-Path Dispatch）
 
+```mermaid
+flowchart TD
+    S["runOpenWikiAgent"] --> L["loadOpenWikiEnv + syncBundledSkills<br/>两条路径共用"]
+    L --> Q{"outputMode = repository<br/>且 command 是 init 或 update?"}
+    Q -->|是| R["快速路径：runNativeRepositoryGeneration"]
+    Q -->|否| M["主路径：runOpenWikiAgentCore<br/>一个常驻 DeepAgent 图"]
+    R --> P["planner DeepAgent<br/>提交有序 page job 队列"]
+    P --> W["page worker 池（1–8 并发）<br/>每页一个一次性 DeepAgent"]
+    W --> F["finish：mermaid 校验 · manifest · claims · 收尾"]
+    M --> C["chat / local-wiki / personal<br/>流式事件 + SqliteSaver 语义"]
+```
+
+
 **源码位置**：`src/agent/index.ts:191-245`
 
 ```typescript

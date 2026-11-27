@@ -234,6 +234,8 @@ claims 的错误族是一条单继承链（`src/claims/core/errors.ts:4` 的基�
 
 默认契约是「凡带 stale/unresolved 的页，规划器没排也必须补一个页作业」（02 篇 §7.1）。v0.9.0 给 MCP host 一个显式出口：`openwiki_submit_plan` 可传 `deferUnplannedClaimIssues: true`（`src/integrations/core/protocol.ts:112`；透传 `src/integrations/core/session-manager.ts:166`），把本轮无关的 stale Claim 页整页推迟到下一次全量 update。对账因此从「一次全量」变成「可推迟 + 记账」。
 
+这条出口**目前只对 host 驱动开放**：native CLI 的 `submit_plan` 工具 schema 是 `.strict()` 且只含 `pages`/`deletePages`（`src/agent/repository-runner.ts:66-71`），多传该字段会被 zod 拒绝，因此 `openwiki --init/--update` 永远走全量对账。这不是文档漏写，是当前实现的不对称——host 可以「定向」，自带 agent 不行。
+
 推迟发生在**规划**，不是预检：preflight 仍然解析全部边车、算出全部 issue；`createRepositoryPlan` 收到该标志后（1）跳过 `addRequiredClaimIssueJobs`（`src/generation/page-jobs.ts:180-182`），（2）把 issue 页里既未进计划也未被删除的页收进 `deferredClaimPages`（`page-jobs.ts:199-203`，随计划返回 `:204` 并持久化进 `.run.json` 的 plan，`src/generation/run-state.ts:118`）。init 不接受该标志，直接抛 `Init cannot defer Claim issues.`（`page-jobs.ts:184-189`）。
 
 推迟页在整轮运行的四个落点都被排除，从而「一个字节都不动」：

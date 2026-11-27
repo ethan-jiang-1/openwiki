@@ -44,6 +44,17 @@ Code Mode 的输出是一个完整的文档网站——包含快速入门（quic
 
 ## 7 步流水线
 
+```mermaid
+flowchart LR
+    A["① Git 仓库<br/>cwd 即仓库根"] --> B["② 源指纹 + 变更清单<br/>不进提示词，机器判定"]
+    B --> C["③ 内容快照 before<br/>openwiki/ 的 SHA-256"]
+    C --> D["④ page-job 生命周期<br/>begin → planning → generating"]
+    D --> E["⑤ 收尾<br/>mermaid → index → links → claims → provenance"]
+    E --> F["⑥ 输出<br/>openwiki/ 文档树"]
+    F --> G["⑦ CI 定时更新<br/>只存增量；内容没变不写元数据"]
+```
+
+
 ### 1. Git 仓库输入
 
 Code Mode 的运行目录（cwd）就是你的 Git 仓库根目录。运行上下文在 `src/agent/utils.ts:67-90` 的 `createRunContext` 组装，包含三类信息：

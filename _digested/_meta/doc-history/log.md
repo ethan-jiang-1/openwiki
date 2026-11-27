@@ -17,6 +17,15 @@ out_of_scope:
 
 # _digested 结构演进日志
 
+## 2026-11-26 — 旧图退场（SVG → mermaid）＋ 排障并入错误分类学
+
+**事件**：审计后发现 `02-architecture/figures/` 下 `system-overview.svg`、`agent-pipeline.svg`、`code-mode-flow.svg` 三张图**不是被误删引用，而是内容已过期**——它们画的是 d4e94ab 时代的系统（10 步文档流水线、`LocalShellBackend`、SQLite 检查点、12 个 provider、npm v0.2.0、Node ≥ 22），与 v0.9.0 的 page-job 生命周期、15 providers、claims/OKF 完全对不上。补回引用等于把错的图塞回正确的正文。
+
+**处置**：
+1. **删图 + 内联 mermaid**：三张 SVG 删除，对应位置改画 mermaid——`02/01-system-overview.md`（运行时全景）、`02/02-code-mode.md`（7 步流水线）、`04/01-agent-workflow.md`（双路径分流）。选择 mermaid 而非重画 SVG：全仓已有 16 篇文档用 mermaid，文本化、可 review、随正文一起改。`03-personal-mode.md` 的流程图（`figures/personal-mode-flow.svg`）在审计中已修正且被引用，保留。
+2. **排障并入**：01 区原计划的 `04-troubleshooting.md` 不单独成篇，并入 `14-configuration-and-telemetry/04-error-classification-taxonomy.md` §7——新增 7.1「症状 → 类别 → 落点」表（启动缺凭据、401/429、no-op、页 skip、CI 未提交、visualize 空白、安装冲突、host 看不到工具、personal shell 被拒、mermaid 降级），原「类别 → 路径」表降为 7.2。01/README 的该行改为「已并入」。
+3. **实现不对称记明**：`deferUnplannedClaimIssues` 只在 host MCP 协议暴露（`protocol.ts:112`），native CLI 的 `submit_plan` schema 是 `.strict()` 且只有 `pages`/`deletePages`（`repository-runner.ts:66-71`），所以自带 agent 永远走全量对账。已写入 `07/01` §5.6，标明这是实现现状而非文档缺口。
+
 ## 2026-11-26 — 全量对齐 v0.9.0（16 区逐篇审计）
 
 **事件**：`main` 快进到 `v0.9.0`（`b7027e3`）后，对 16 个主题区做逐篇源码核对——不是只改 changelog 提到的点，而是每一条源码断言（文件路径、符号、行号、数字、机制）都回到当前源码验证。结果：既有 68 篇中 **65 篇**被修改，新增 **7 篇**，`_digested` 内容文档达到 75 篇。

@@ -52,7 +52,7 @@ out_of_scope:
 | `src/agent/prompts/code.ts` | full | 04-agent-and-prompting/02-prompting-strategy.md | 4 |
 | `src/agent/prompts/personal.ts` | full | 04-agent-and-prompting/02-prompting-strategy.md | 5 |
 | `src/agent/repository-prompts.ts` | full | 04-agent-and-prompting/02-prompting-strategy.md | 7 |
-| `src/agent/repository-runner.ts` | full | 05-generation-lifecycle/01-page-job-state-machine.md | 25 |
+| `src/agent/repository-runner.ts` | full | 05-generation-lifecycle/01-page-job-state-machine.md | 26 |
 | `src/agent/skills.ts` | full | 04-agent-and-prompting/02-prompting-strategy.md | 4 |
 | `src/agent/translation-middleware.ts` | full | 05-generation-lifecycle/03-finalize-pipeline.md | 2 |
 | `src/agent/types.ts` | full | 04-agent-and-prompting/01-agent-workflow.md | 12 |

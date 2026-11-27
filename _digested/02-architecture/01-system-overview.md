@@ -27,6 +27,39 @@ OpenWiki 是一个 CLI 工具：**它让一个被有意约束的 AI Agent，把�
 
 ## 2. Domain 目录地图
 
+运行时全景（框图对应 `src/` 的领域分包；箭头是调用/数据流向，不是 import 依赖）：
+
+```mermaid
+flowchart TB
+    CLI["CLI 入口<br/>src/cli：命令解析 · Ink TUI · runners"]
+    subgraph 生成核心
+        GEN["page-job 生命周期<br/>src/generation：begin/plan/generate/finish"]
+        AG["文档 Agent<br/>src/agent：planner + 每页一个 worker"]
+        OKF["可信度层<br/>src/claims · src/okf"]
+    end
+    subgraph 输入面
+        CFG["配置与凭据<br/>src/config · src/platform · src/setup"]
+        AUTH["认证<br/>src/auth · src/agent/entra-auth"]
+        CONN["连接器<br/>src/connectors：9 个连接器（含 MCP）"]
+    end
+    subgraph 产物与消费
+        WIKI["openwiki/ 文档树<br/>markdown + .claims + .page-manifest.json"]
+        VIS["可视化<br/>src/visualize · src/mermaid"]
+        RET["检索与互读<br/>src/retrieval · src/linking"]
+    end
+    CLI --> GEN
+    CFG --> AG
+    AUTH --> AG
+    CONN --> AG
+    GEN --> AG
+    AG --> OKF
+    OKF --> WIKI
+    WIKI --> VIS
+    WIKI --> RET
+    RET -->|"openwiki_search / openwiki_read"| CLI
+```
+
+
 `src/` 按领域分包（各目录的文档见对应主题区）：
 
 ```
